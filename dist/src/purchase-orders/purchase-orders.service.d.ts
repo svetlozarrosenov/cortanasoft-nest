@@ -1,0 +1,728 @@
+import { PrismaService } from '../prisma/prisma.service';
+import { CreatePurchaseOrderDto, UpdatePurchaseOrderDto, QueryPurchaseOrdersDto } from './dto';
+import { Prisma } from '@prisma/client';
+export declare class PurchaseOrdersService {
+    private prisma;
+    constructor(prisma: PrismaService);
+    private generateOrderNumber;
+    create(companyId: string, userId: string, dto: CreatePurchaseOrderDto): Promise<{
+        supplier: {
+            id: string;
+            name: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            postalCode: string | null;
+            countryId: string | null;
+            vatNumber: string | null;
+            eik: string | null;
+            address: string | null;
+            city: string | null;
+            settlementId: string | null;
+            phone: string | null;
+            email: string | null;
+            website: string | null;
+            bankName: string | null;
+            iban: string | null;
+            bic: string | null;
+            companyId: string;
+            notes: string | null;
+            contactName: string | null;
+            paymentTerms: number | null;
+        };
+        _count: {
+            goodsReceipts: number;
+            items: number;
+        };
+        items: ({
+            product: {
+                id: string;
+                name: string;
+                isActive: boolean;
+                createdAt: Date;
+                updatedAt: Date;
+                type: import(".prisma/client").$Enums.ProductType;
+                description: string | null;
+                companyId: string;
+                vatRate: Prisma.Decimal;
+                createdById: string | null;
+                sku: string;
+                barcode: string | null;
+                unit: import(".prisma/client").$Enums.Unit;
+                purchasePrice: Prisma.Decimal | null;
+                salePrice: Prisma.Decimal;
+                minStock: Prisma.Decimal | null;
+                trackInventory: boolean;
+                purchaseCurrencyId: string | null;
+                purchaseExchangeRate: Prisma.Decimal | null;
+                saleCurrencyId: string | null;
+                saleExchangeRate: Prisma.Decimal | null;
+                categoryId: string | null;
+            };
+        } & {
+            id: string;
+            quantity: Prisma.Decimal;
+            unitPrice: Prisma.Decimal;
+            vatRate: Prisma.Decimal;
+            productId: string;
+            subtotal: Prisma.Decimal;
+            receivedQty: Prisma.Decimal;
+            purchaseOrderId: string;
+        })[];
+        createdBy: {
+            id: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+    } & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        companyId: string;
+        status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+        createdById: string | null;
+        total: Prisma.Decimal;
+        subtotal: Prisma.Decimal;
+        vatAmount: Prisma.Decimal;
+        notes: string | null;
+        supplierId: string;
+        orderNumber: string;
+        orderDate: Date;
+        expectedDate: Date | null;
+    }>;
+    findAll(companyId: string, query: QueryPurchaseOrdersDto): Promise<{
+        data: ({
+            supplier: {
+                id: string;
+                name: string;
+                isActive: boolean;
+                createdAt: Date;
+                updatedAt: Date;
+                postalCode: string | null;
+                countryId: string | null;
+                vatNumber: string | null;
+                eik: string | null;
+                address: string | null;
+                city: string | null;
+                settlementId: string | null;
+                phone: string | null;
+                email: string | null;
+                website: string | null;
+                bankName: string | null;
+                iban: string | null;
+                bic: string | null;
+                companyId: string;
+                notes: string | null;
+                contactName: string | null;
+                paymentTerms: number | null;
+            };
+            _count: {
+                goodsReceipts: number;
+                items: number;
+            };
+            createdBy: {
+                id: string;
+                firstName: string;
+                lastName: string;
+            } | null;
+        } & {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            companyId: string;
+            status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+            createdById: string | null;
+            total: Prisma.Decimal;
+            subtotal: Prisma.Decimal;
+            vatAmount: Prisma.Decimal;
+            notes: string | null;
+            supplierId: string;
+            orderNumber: string;
+            orderDate: Date;
+            expectedDate: Date | null;
+        })[];
+        meta: {
+            total: number;
+            page: number;
+            limit: number;
+            totalPages: number;
+        };
+    }>;
+    findOne(companyId: string, id: string): Promise<{
+        goodsReceipts: ({
+            items: {
+                id: string;
+                currencyId: string | null;
+                quantity: Prisma.Decimal;
+                unitPrice: Prisma.Decimal;
+                vatRate: Prisma.Decimal;
+                productId: string;
+                exchangeRate: Prisma.Decimal;
+                goodsReceiptId: string;
+                purchaseOrderItemId: string | null;
+            }[];
+        } & {
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            currencyId: string | null;
+            companyId: string;
+            status: import(".prisma/client").$Enums.GoodsReceiptStatus;
+            createdById: string | null;
+            invoiceNumber: string | null;
+            invoiceDate: Date | null;
+            exchangeRate: Prisma.Decimal;
+            notes: string | null;
+            locationId: string;
+            supplierId: string | null;
+            purchaseOrderId: string | null;
+            receiptNumber: string;
+            receiptDate: Date;
+            attachmentUrl: string | null;
+        })[];
+        supplier: {
+            id: string;
+            name: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            postalCode: string | null;
+            countryId: string | null;
+            vatNumber: string | null;
+            eik: string | null;
+            address: string | null;
+            city: string | null;
+            settlementId: string | null;
+            phone: string | null;
+            email: string | null;
+            website: string | null;
+            bankName: string | null;
+            iban: string | null;
+            bic: string | null;
+            companyId: string;
+            notes: string | null;
+            contactName: string | null;
+            paymentTerms: number | null;
+        };
+        _count: {
+            goodsReceipts: number;
+            items: number;
+        };
+        items: ({
+            product: {
+                id: string;
+                name: string;
+                isActive: boolean;
+                createdAt: Date;
+                updatedAt: Date;
+                type: import(".prisma/client").$Enums.ProductType;
+                description: string | null;
+                companyId: string;
+                vatRate: Prisma.Decimal;
+                createdById: string | null;
+                sku: string;
+                barcode: string | null;
+                unit: import(".prisma/client").$Enums.Unit;
+                purchasePrice: Prisma.Decimal | null;
+                salePrice: Prisma.Decimal;
+                minStock: Prisma.Decimal | null;
+                trackInventory: boolean;
+                purchaseCurrencyId: string | null;
+                purchaseExchangeRate: Prisma.Decimal | null;
+                saleCurrencyId: string | null;
+                saleExchangeRate: Prisma.Decimal | null;
+                categoryId: string | null;
+            };
+        } & {
+            id: string;
+            quantity: Prisma.Decimal;
+            unitPrice: Prisma.Decimal;
+            vatRate: Prisma.Decimal;
+            productId: string;
+            subtotal: Prisma.Decimal;
+            receivedQty: Prisma.Decimal;
+            purchaseOrderId: string;
+        })[];
+        createdBy: {
+            id: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+    } & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        companyId: string;
+        status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+        createdById: string | null;
+        total: Prisma.Decimal;
+        subtotal: Prisma.Decimal;
+        vatAmount: Prisma.Decimal;
+        notes: string | null;
+        supplierId: string;
+        orderNumber: string;
+        orderDate: Date;
+        expectedDate: Date | null;
+    }>;
+    update(companyId: string, id: string, dto: UpdatePurchaseOrderDto): Promise<{
+        supplier: {
+            id: string;
+            name: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            postalCode: string | null;
+            countryId: string | null;
+            vatNumber: string | null;
+            eik: string | null;
+            address: string | null;
+            city: string | null;
+            settlementId: string | null;
+            phone: string | null;
+            email: string | null;
+            website: string | null;
+            bankName: string | null;
+            iban: string | null;
+            bic: string | null;
+            companyId: string;
+            notes: string | null;
+            contactName: string | null;
+            paymentTerms: number | null;
+        };
+        _count: {
+            goodsReceipts: number;
+            items: number;
+        };
+        items: ({
+            product: {
+                id: string;
+                name: string;
+                isActive: boolean;
+                createdAt: Date;
+                updatedAt: Date;
+                type: import(".prisma/client").$Enums.ProductType;
+                description: string | null;
+                companyId: string;
+                vatRate: Prisma.Decimal;
+                createdById: string | null;
+                sku: string;
+                barcode: string | null;
+                unit: import(".prisma/client").$Enums.Unit;
+                purchasePrice: Prisma.Decimal | null;
+                salePrice: Prisma.Decimal;
+                minStock: Prisma.Decimal | null;
+                trackInventory: boolean;
+                purchaseCurrencyId: string | null;
+                purchaseExchangeRate: Prisma.Decimal | null;
+                saleCurrencyId: string | null;
+                saleExchangeRate: Prisma.Decimal | null;
+                categoryId: string | null;
+            };
+        } & {
+            id: string;
+            quantity: Prisma.Decimal;
+            unitPrice: Prisma.Decimal;
+            vatRate: Prisma.Decimal;
+            productId: string;
+            subtotal: Prisma.Decimal;
+            receivedQty: Prisma.Decimal;
+            purchaseOrderId: string;
+        })[];
+        createdBy: {
+            id: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+    } & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        companyId: string;
+        status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+        createdById: string | null;
+        total: Prisma.Decimal;
+        subtotal: Prisma.Decimal;
+        vatAmount: Prisma.Decimal;
+        notes: string | null;
+        supplierId: string;
+        orderNumber: string;
+        orderDate: Date;
+        expectedDate: Date | null;
+    }>;
+    send(companyId: string, id: string): Promise<{
+        supplier: {
+            id: string;
+            name: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            postalCode: string | null;
+            countryId: string | null;
+            vatNumber: string | null;
+            eik: string | null;
+            address: string | null;
+            city: string | null;
+            settlementId: string | null;
+            phone: string | null;
+            email: string | null;
+            website: string | null;
+            bankName: string | null;
+            iban: string | null;
+            bic: string | null;
+            companyId: string;
+            notes: string | null;
+            contactName: string | null;
+            paymentTerms: number | null;
+        };
+        _count: {
+            goodsReceipts: number;
+            items: number;
+        };
+        items: ({
+            product: {
+                id: string;
+                name: string;
+                isActive: boolean;
+                createdAt: Date;
+                updatedAt: Date;
+                type: import(".prisma/client").$Enums.ProductType;
+                description: string | null;
+                companyId: string;
+                vatRate: Prisma.Decimal;
+                createdById: string | null;
+                sku: string;
+                barcode: string | null;
+                unit: import(".prisma/client").$Enums.Unit;
+                purchasePrice: Prisma.Decimal | null;
+                salePrice: Prisma.Decimal;
+                minStock: Prisma.Decimal | null;
+                trackInventory: boolean;
+                purchaseCurrencyId: string | null;
+                purchaseExchangeRate: Prisma.Decimal | null;
+                saleCurrencyId: string | null;
+                saleExchangeRate: Prisma.Decimal | null;
+                categoryId: string | null;
+            };
+        } & {
+            id: string;
+            quantity: Prisma.Decimal;
+            unitPrice: Prisma.Decimal;
+            vatRate: Prisma.Decimal;
+            productId: string;
+            subtotal: Prisma.Decimal;
+            receivedQty: Prisma.Decimal;
+            purchaseOrderId: string;
+        })[];
+        createdBy: {
+            id: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+    } & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        companyId: string;
+        status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+        createdById: string | null;
+        total: Prisma.Decimal;
+        subtotal: Prisma.Decimal;
+        vatAmount: Prisma.Decimal;
+        notes: string | null;
+        supplierId: string;
+        orderNumber: string;
+        orderDate: Date;
+        expectedDate: Date | null;
+    }>;
+    confirm(companyId: string, id: string): Promise<{
+        supplier: {
+            id: string;
+            name: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            postalCode: string | null;
+            countryId: string | null;
+            vatNumber: string | null;
+            eik: string | null;
+            address: string | null;
+            city: string | null;
+            settlementId: string | null;
+            phone: string | null;
+            email: string | null;
+            website: string | null;
+            bankName: string | null;
+            iban: string | null;
+            bic: string | null;
+            companyId: string;
+            notes: string | null;
+            contactName: string | null;
+            paymentTerms: number | null;
+        };
+        _count: {
+            goodsReceipts: number;
+            items: number;
+        };
+        items: ({
+            product: {
+                id: string;
+                name: string;
+                isActive: boolean;
+                createdAt: Date;
+                updatedAt: Date;
+                type: import(".prisma/client").$Enums.ProductType;
+                description: string | null;
+                companyId: string;
+                vatRate: Prisma.Decimal;
+                createdById: string | null;
+                sku: string;
+                barcode: string | null;
+                unit: import(".prisma/client").$Enums.Unit;
+                purchasePrice: Prisma.Decimal | null;
+                salePrice: Prisma.Decimal;
+                minStock: Prisma.Decimal | null;
+                trackInventory: boolean;
+                purchaseCurrencyId: string | null;
+                purchaseExchangeRate: Prisma.Decimal | null;
+                saleCurrencyId: string | null;
+                saleExchangeRate: Prisma.Decimal | null;
+                categoryId: string | null;
+            };
+        } & {
+            id: string;
+            quantity: Prisma.Decimal;
+            unitPrice: Prisma.Decimal;
+            vatRate: Prisma.Decimal;
+            productId: string;
+            subtotal: Prisma.Decimal;
+            receivedQty: Prisma.Decimal;
+            purchaseOrderId: string;
+        })[];
+        createdBy: {
+            id: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+    } & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        companyId: string;
+        status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+        createdById: string | null;
+        total: Prisma.Decimal;
+        subtotal: Prisma.Decimal;
+        vatAmount: Prisma.Decimal;
+        notes: string | null;
+        supplierId: string;
+        orderNumber: string;
+        orderDate: Date;
+        expectedDate: Date | null;
+    }>;
+    updateReceivedQuantities(companyId: string, id: string): Promise<{
+        supplier: {
+            id: string;
+            name: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            postalCode: string | null;
+            countryId: string | null;
+            vatNumber: string | null;
+            eik: string | null;
+            address: string | null;
+            city: string | null;
+            settlementId: string | null;
+            phone: string | null;
+            email: string | null;
+            website: string | null;
+            bankName: string | null;
+            iban: string | null;
+            bic: string | null;
+            companyId: string;
+            notes: string | null;
+            contactName: string | null;
+            paymentTerms: number | null;
+        };
+        _count: {
+            goodsReceipts: number;
+            items: number;
+        };
+        items: ({
+            product: {
+                id: string;
+                name: string;
+                isActive: boolean;
+                createdAt: Date;
+                updatedAt: Date;
+                type: import(".prisma/client").$Enums.ProductType;
+                description: string | null;
+                companyId: string;
+                vatRate: Prisma.Decimal;
+                createdById: string | null;
+                sku: string;
+                barcode: string | null;
+                unit: import(".prisma/client").$Enums.Unit;
+                purchasePrice: Prisma.Decimal | null;
+                salePrice: Prisma.Decimal;
+                minStock: Prisma.Decimal | null;
+                trackInventory: boolean;
+                purchaseCurrencyId: string | null;
+                purchaseExchangeRate: Prisma.Decimal | null;
+                saleCurrencyId: string | null;
+                saleExchangeRate: Prisma.Decimal | null;
+                categoryId: string | null;
+            };
+        } & {
+            id: string;
+            quantity: Prisma.Decimal;
+            unitPrice: Prisma.Decimal;
+            vatRate: Prisma.Decimal;
+            productId: string;
+            subtotal: Prisma.Decimal;
+            receivedQty: Prisma.Decimal;
+            purchaseOrderId: string;
+        })[];
+        createdBy: {
+            id: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+    } & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        companyId: string;
+        status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+        createdById: string | null;
+        total: Prisma.Decimal;
+        subtotal: Prisma.Decimal;
+        vatAmount: Prisma.Decimal;
+        notes: string | null;
+        supplierId: string;
+        orderNumber: string;
+        orderDate: Date;
+        expectedDate: Date | null;
+    }>;
+    cancel(companyId: string, id: string): Promise<{
+        supplier: {
+            id: string;
+            name: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            postalCode: string | null;
+            countryId: string | null;
+            vatNumber: string | null;
+            eik: string | null;
+            address: string | null;
+            city: string | null;
+            settlementId: string | null;
+            phone: string | null;
+            email: string | null;
+            website: string | null;
+            bankName: string | null;
+            iban: string | null;
+            bic: string | null;
+            companyId: string;
+            notes: string | null;
+            contactName: string | null;
+            paymentTerms: number | null;
+        };
+        _count: {
+            goodsReceipts: number;
+            items: number;
+        };
+        items: ({
+            product: {
+                id: string;
+                name: string;
+                isActive: boolean;
+                createdAt: Date;
+                updatedAt: Date;
+                type: import(".prisma/client").$Enums.ProductType;
+                description: string | null;
+                companyId: string;
+                vatRate: Prisma.Decimal;
+                createdById: string | null;
+                sku: string;
+                barcode: string | null;
+                unit: import(".prisma/client").$Enums.Unit;
+                purchasePrice: Prisma.Decimal | null;
+                salePrice: Prisma.Decimal;
+                minStock: Prisma.Decimal | null;
+                trackInventory: boolean;
+                purchaseCurrencyId: string | null;
+                purchaseExchangeRate: Prisma.Decimal | null;
+                saleCurrencyId: string | null;
+                saleExchangeRate: Prisma.Decimal | null;
+                categoryId: string | null;
+            };
+        } & {
+            id: string;
+            quantity: Prisma.Decimal;
+            unitPrice: Prisma.Decimal;
+            vatRate: Prisma.Decimal;
+            productId: string;
+            subtotal: Prisma.Decimal;
+            receivedQty: Prisma.Decimal;
+            purchaseOrderId: string;
+        })[];
+        createdBy: {
+            id: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+    } & {
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        companyId: string;
+        status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+        createdById: string | null;
+        total: Prisma.Decimal;
+        subtotal: Prisma.Decimal;
+        vatAmount: Prisma.Decimal;
+        notes: string | null;
+        supplierId: string;
+        orderNumber: string;
+        orderDate: Date;
+        expectedDate: Date | null;
+    }>;
+    remove(companyId: string, id: string): Promise<{
+        message: string;
+    }>;
+    getPendingItems(companyId: string, id: string): Promise<{
+        id: string;
+        productId: string;
+        product: {
+            id: string;
+            name: string;
+            isActive: boolean;
+            createdAt: Date;
+            updatedAt: Date;
+            type: import(".prisma/client").$Enums.ProductType;
+            description: string | null;
+            companyId: string;
+            vatRate: Prisma.Decimal;
+            createdById: string | null;
+            sku: string;
+            barcode: string | null;
+            unit: import(".prisma/client").$Enums.Unit;
+            purchasePrice: Prisma.Decimal | null;
+            salePrice: Prisma.Decimal;
+            minStock: Prisma.Decimal | null;
+            trackInventory: boolean;
+            purchaseCurrencyId: string | null;
+            purchaseExchangeRate: Prisma.Decimal | null;
+            saleCurrencyId: string | null;
+            saleExchangeRate: Prisma.Decimal | null;
+            categoryId: string | null;
+        };
+        orderedQty: number;
+        receivedQty: number;
+        remainingQty: number;
+        unitPrice: number;
+        vatRate: number;
+    }[]>;
+}

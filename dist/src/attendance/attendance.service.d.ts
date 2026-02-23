@@ -1,0 +1,218 @@
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateAttendanceDto, UpdateAttendanceDto, QueryAttendanceDto } from './dto';
+export declare class AttendanceService {
+    private prisma;
+    constructor(prisma: PrismaService);
+    create(companyId: string, currentUserId: string, dto: CreateAttendanceDto): Promise<{
+        user: {
+            id: string;
+            email: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        type: import(".prisma/client").$Enums.AttendanceType;
+        companyId: string;
+        userId: string;
+        status: import(".prisma/client").$Enums.AttendanceStatus;
+        notes: string | null;
+        date: Date;
+        checkIn: Date | null;
+        checkOut: Date | null;
+        breakMinutes: number;
+        overtimeMinutes: number;
+        workedMinutes: number | null;
+        approvedById: string | null;
+        approvedAt: Date | null;
+    }>;
+    findAll(companyId: string, query: QueryAttendanceDto): Promise<{
+        data: {
+            user: {
+                id: string;
+                isActive: boolean;
+                email: string;
+                firstName: string;
+                lastName: string;
+            } | null;
+            id: string;
+            createdAt: Date;
+            updatedAt: Date;
+            type: import(".prisma/client").$Enums.AttendanceType;
+            companyId: string;
+            userId: string;
+            status: import(".prisma/client").$Enums.AttendanceStatus;
+            notes: string | null;
+            date: Date;
+            checkIn: Date | null;
+            checkOut: Date | null;
+            breakMinutes: number;
+            overtimeMinutes: number;
+            workedMinutes: number | null;
+            approvedById: string | null;
+            approvedAt: Date | null;
+        }[];
+        meta: {
+            total: number;
+            page: number;
+            limit: number;
+            totalPages: number;
+        };
+    }>;
+    findOne(companyId: string, id: string): Promise<{
+        user: {
+            id: string;
+            isActive: boolean;
+            email: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+        approvedBy: {
+            id: string;
+            email: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        type: import(".prisma/client").$Enums.AttendanceType;
+        companyId: string;
+        userId: string;
+        status: import(".prisma/client").$Enums.AttendanceStatus;
+        notes: string | null;
+        date: Date;
+        checkIn: Date | null;
+        checkOut: Date | null;
+        breakMinutes: number;
+        overtimeMinutes: number;
+        workedMinutes: number | null;
+        approvedById: string | null;
+        approvedAt: Date | null;
+    }>;
+    update(companyId: string, id: string, dto: UpdateAttendanceDto): Promise<{
+        user: {
+            id: string;
+            email: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        type: import(".prisma/client").$Enums.AttendanceType;
+        companyId: string;
+        userId: string;
+        status: import(".prisma/client").$Enums.AttendanceStatus;
+        notes: string | null;
+        date: Date;
+        checkIn: Date | null;
+        checkOut: Date | null;
+        breakMinutes: number;
+        overtimeMinutes: number;
+        workedMinutes: number | null;
+        approvedById: string | null;
+        approvedAt: Date | null;
+    }>;
+    approve(companyId: string, id: string, approverId: string): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        type: import(".prisma/client").$Enums.AttendanceType;
+        companyId: string;
+        userId: string;
+        status: import(".prisma/client").$Enums.AttendanceStatus;
+        notes: string | null;
+        date: Date;
+        checkIn: Date | null;
+        checkOut: Date | null;
+        breakMinutes: number;
+        overtimeMinutes: number;
+        workedMinutes: number | null;
+        approvedById: string | null;
+        approvedAt: Date | null;
+    }>;
+    reject(companyId: string, id: string, approverId: string): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        type: import(".prisma/client").$Enums.AttendanceType;
+        companyId: string;
+        userId: string;
+        status: import(".prisma/client").$Enums.AttendanceStatus;
+        notes: string | null;
+        date: Date;
+        checkIn: Date | null;
+        checkOut: Date | null;
+        breakMinutes: number;
+        overtimeMinutes: number;
+        workedMinutes: number | null;
+        approvedById: string | null;
+        approvedAt: Date | null;
+    }>;
+    remove(companyId: string, id: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
+    getSummary(companyId: string, userId: string, dateFrom: string, dateTo: string): Promise<{
+        totalDays: number;
+        regularDays: number;
+        remoteDays: number;
+        halfDays: number;
+        sickLeaveDays: number;
+        vacationDays: number;
+        unpaidLeaveDays: number;
+        businessTripDays: number;
+        holidayDays: number;
+        overtimeDays: number;
+        totalWorkedMinutes: number;
+        totalOvertimeMinutes: number;
+    }>;
+    checkIn(companyId: string, userId: string): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        type: import(".prisma/client").$Enums.AttendanceType;
+        companyId: string;
+        userId: string;
+        status: import(".prisma/client").$Enums.AttendanceStatus;
+        notes: string | null;
+        date: Date;
+        checkIn: Date | null;
+        checkOut: Date | null;
+        breakMinutes: number;
+        overtimeMinutes: number;
+        workedMinutes: number | null;
+        approvedById: string | null;
+        approvedAt: Date | null;
+    }>;
+    checkOut(companyId: string, userId: string): Promise<{
+        id: string;
+        createdAt: Date;
+        updatedAt: Date;
+        type: import(".prisma/client").$Enums.AttendanceType;
+        companyId: string;
+        userId: string;
+        status: import(".prisma/client").$Enums.AttendanceStatus;
+        notes: string | null;
+        date: Date;
+        checkIn: Date | null;
+        checkOut: Date | null;
+        breakMinutes: number;
+        overtimeMinutes: number;
+        workedMinutes: number | null;
+        approvedById: string | null;
+        approvedAt: Date | null;
+    }>;
+    getTodayStatus(companyId: string, userId: string): Promise<{
+        date: Date;
+        hasRecord: boolean;
+        isCheckedIn: boolean;
+        isCheckedOut: boolean;
+        checkIn: Date | null;
+        checkOut: Date | null;
+        workedMinutes: number | null;
+        type: import(".prisma/client").$Enums.AttendanceType | null;
+    }>;
+}

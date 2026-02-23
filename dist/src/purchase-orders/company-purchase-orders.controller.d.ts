@@ -1,0 +1,647 @@
+import { StreamableFile } from '@nestjs/common';
+import type { Response } from 'express';
+import { PurchaseOrdersService } from './purchase-orders.service';
+import { CreatePurchaseOrderDto, UpdatePurchaseOrderDto, QueryPurchaseOrdersDto } from './dto';
+import { ExportService } from '../common/export/export.service';
+import type { ExportFormat } from '../common/export/export.service';
+export declare class CompanyPurchaseOrdersController {
+    private readonly purchaseOrdersService;
+    private readonly exportService;
+    constructor(purchaseOrdersService: PurchaseOrdersService, exportService: ExportService);
+    create(companyId: string, user: any, dto: CreatePurchaseOrderDto): Promise<{
+        supplier: {
+            name: string;
+            email: string | null;
+            phone: string | null;
+            createdAt: Date;
+            address: string | null;
+            eik: string | null;
+            updatedAt: Date;
+            id: string;
+            isActive: boolean;
+            postalCode: string | null;
+            countryId: string | null;
+            vatNumber: string | null;
+            city: string | null;
+            settlementId: string | null;
+            website: string | null;
+            bankName: string | null;
+            iban: string | null;
+            bic: string | null;
+            companyId: string;
+            notes: string | null;
+            contactName: string | null;
+            paymentTerms: number | null;
+        };
+        _count: {
+            goodsReceipts: number;
+            items: number;
+        };
+        items: ({
+            product: {
+                name: string;
+                type: import(".prisma/client").$Enums.ProductType;
+                createdAt: Date;
+                sku: string;
+                description: string | null;
+                updatedAt: Date;
+                id: string;
+                isActive: boolean;
+                companyId: string;
+                createdById: string | null;
+                barcode: string | null;
+                unit: import(".prisma/client").$Enums.Unit;
+                purchasePrice: import("@prisma/client/runtime/library").Decimal | null;
+                salePrice: import("@prisma/client/runtime/library").Decimal;
+                vatRate: import("@prisma/client/runtime/library").Decimal;
+                minStock: import("@prisma/client/runtime/library").Decimal | null;
+                trackInventory: boolean;
+                purchaseCurrencyId: string | null;
+                purchaseExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+                saleCurrencyId: string | null;
+                saleExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+                categoryId: string | null;
+            };
+        } & {
+            quantity: import("@prisma/client/runtime/library").Decimal;
+            id: string;
+            vatRate: import("@prisma/client/runtime/library").Decimal;
+            subtotal: import("@prisma/client/runtime/library").Decimal;
+            unitPrice: import("@prisma/client/runtime/library").Decimal;
+            productId: string;
+            receivedQty: import("@prisma/client/runtime/library").Decimal;
+            purchaseOrderId: string;
+        })[];
+        createdBy: {
+            id: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+    } & {
+        status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+        createdAt: Date;
+        orderNumber: string;
+        total: import("@prisma/client/runtime/library").Decimal;
+        updatedAt: Date;
+        id: string;
+        companyId: string;
+        createdById: string | null;
+        subtotal: import("@prisma/client/runtime/library").Decimal;
+        vatAmount: import("@prisma/client/runtime/library").Decimal;
+        notes: string | null;
+        orderDate: Date;
+        expectedDate: Date | null;
+        supplierId: string;
+    }>;
+    findAll(companyId: string, query: QueryPurchaseOrdersDto): Promise<{
+        data: ({
+            supplier: {
+                name: string;
+                email: string | null;
+                phone: string | null;
+                createdAt: Date;
+                address: string | null;
+                eik: string | null;
+                updatedAt: Date;
+                id: string;
+                isActive: boolean;
+                postalCode: string | null;
+                countryId: string | null;
+                vatNumber: string | null;
+                city: string | null;
+                settlementId: string | null;
+                website: string | null;
+                bankName: string | null;
+                iban: string | null;
+                bic: string | null;
+                companyId: string;
+                notes: string | null;
+                contactName: string | null;
+                paymentTerms: number | null;
+            };
+            _count: {
+                goodsReceipts: number;
+                items: number;
+            };
+            createdBy: {
+                id: string;
+                firstName: string;
+                lastName: string;
+            } | null;
+        } & {
+            status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+            createdAt: Date;
+            orderNumber: string;
+            total: import("@prisma/client/runtime/library").Decimal;
+            updatedAt: Date;
+            id: string;
+            companyId: string;
+            createdById: string | null;
+            subtotal: import("@prisma/client/runtime/library").Decimal;
+            vatAmount: import("@prisma/client/runtime/library").Decimal;
+            notes: string | null;
+            orderDate: Date;
+            expectedDate: Date | null;
+            supplierId: string;
+        })[];
+        meta: {
+            total: number;
+            page: number;
+            limit: number;
+            totalPages: number;
+        };
+    }>;
+    export(companyId: string, query: QueryPurchaseOrdersDto, format: ExportFormat | undefined, res: Response): Promise<StreamableFile>;
+    findOne(companyId: string, id: string): Promise<{
+        goodsReceipts: ({
+            items: {
+                quantity: import("@prisma/client/runtime/library").Decimal;
+                id: string;
+                currencyId: string | null;
+                vatRate: import("@prisma/client/runtime/library").Decimal;
+                exchangeRate: import("@prisma/client/runtime/library").Decimal;
+                unitPrice: import("@prisma/client/runtime/library").Decimal;
+                productId: string;
+                purchaseOrderItemId: string | null;
+                goodsReceiptId: string;
+            }[];
+        } & {
+            status: import(".prisma/client").$Enums.GoodsReceiptStatus;
+            createdAt: Date;
+            receiptNumber: string;
+            invoiceNumber: string | null;
+            updatedAt: Date;
+            id: string;
+            currencyId: string | null;
+            companyId: string;
+            createdById: string | null;
+            invoiceDate: Date | null;
+            exchangeRate: import("@prisma/client/runtime/library").Decimal;
+            notes: string | null;
+            locationId: string;
+            supplierId: string | null;
+            purchaseOrderId: string | null;
+            receiptDate: Date;
+            attachmentUrl: string | null;
+        })[];
+        supplier: {
+            name: string;
+            email: string | null;
+            phone: string | null;
+            createdAt: Date;
+            address: string | null;
+            eik: string | null;
+            updatedAt: Date;
+            id: string;
+            isActive: boolean;
+            postalCode: string | null;
+            countryId: string | null;
+            vatNumber: string | null;
+            city: string | null;
+            settlementId: string | null;
+            website: string | null;
+            bankName: string | null;
+            iban: string | null;
+            bic: string | null;
+            companyId: string;
+            notes: string | null;
+            contactName: string | null;
+            paymentTerms: number | null;
+        };
+        _count: {
+            goodsReceipts: number;
+            items: number;
+        };
+        items: ({
+            product: {
+                name: string;
+                type: import(".prisma/client").$Enums.ProductType;
+                createdAt: Date;
+                sku: string;
+                description: string | null;
+                updatedAt: Date;
+                id: string;
+                isActive: boolean;
+                companyId: string;
+                createdById: string | null;
+                barcode: string | null;
+                unit: import(".prisma/client").$Enums.Unit;
+                purchasePrice: import("@prisma/client/runtime/library").Decimal | null;
+                salePrice: import("@prisma/client/runtime/library").Decimal;
+                vatRate: import("@prisma/client/runtime/library").Decimal;
+                minStock: import("@prisma/client/runtime/library").Decimal | null;
+                trackInventory: boolean;
+                purchaseCurrencyId: string | null;
+                purchaseExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+                saleCurrencyId: string | null;
+                saleExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+                categoryId: string | null;
+            };
+        } & {
+            quantity: import("@prisma/client/runtime/library").Decimal;
+            id: string;
+            vatRate: import("@prisma/client/runtime/library").Decimal;
+            subtotal: import("@prisma/client/runtime/library").Decimal;
+            unitPrice: import("@prisma/client/runtime/library").Decimal;
+            productId: string;
+            receivedQty: import("@prisma/client/runtime/library").Decimal;
+            purchaseOrderId: string;
+        })[];
+        createdBy: {
+            id: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+    } & {
+        status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+        createdAt: Date;
+        orderNumber: string;
+        total: import("@prisma/client/runtime/library").Decimal;
+        updatedAt: Date;
+        id: string;
+        companyId: string;
+        createdById: string | null;
+        subtotal: import("@prisma/client/runtime/library").Decimal;
+        vatAmount: import("@prisma/client/runtime/library").Decimal;
+        notes: string | null;
+        orderDate: Date;
+        expectedDate: Date | null;
+        supplierId: string;
+    }>;
+    getPendingItems(companyId: string, id: string): Promise<{
+        id: string;
+        productId: string;
+        product: {
+            name: string;
+            type: import(".prisma/client").$Enums.ProductType;
+            createdAt: Date;
+            sku: string;
+            description: string | null;
+            updatedAt: Date;
+            id: string;
+            isActive: boolean;
+            companyId: string;
+            createdById: string | null;
+            barcode: string | null;
+            unit: import(".prisma/client").$Enums.Unit;
+            purchasePrice: import("@prisma/client/runtime/library").Decimal | null;
+            salePrice: import("@prisma/client/runtime/library").Decimal;
+            vatRate: import("@prisma/client/runtime/library").Decimal;
+            minStock: import("@prisma/client/runtime/library").Decimal | null;
+            trackInventory: boolean;
+            purchaseCurrencyId: string | null;
+            purchaseExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+            saleCurrencyId: string | null;
+            saleExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+            categoryId: string | null;
+        };
+        orderedQty: number;
+        receivedQty: number;
+        remainingQty: number;
+        unitPrice: number;
+        vatRate: number;
+    }[]>;
+    update(companyId: string, id: string, dto: UpdatePurchaseOrderDto): Promise<{
+        supplier: {
+            name: string;
+            email: string | null;
+            phone: string | null;
+            createdAt: Date;
+            address: string | null;
+            eik: string | null;
+            updatedAt: Date;
+            id: string;
+            isActive: boolean;
+            postalCode: string | null;
+            countryId: string | null;
+            vatNumber: string | null;
+            city: string | null;
+            settlementId: string | null;
+            website: string | null;
+            bankName: string | null;
+            iban: string | null;
+            bic: string | null;
+            companyId: string;
+            notes: string | null;
+            contactName: string | null;
+            paymentTerms: number | null;
+        };
+        _count: {
+            goodsReceipts: number;
+            items: number;
+        };
+        items: ({
+            product: {
+                name: string;
+                type: import(".prisma/client").$Enums.ProductType;
+                createdAt: Date;
+                sku: string;
+                description: string | null;
+                updatedAt: Date;
+                id: string;
+                isActive: boolean;
+                companyId: string;
+                createdById: string | null;
+                barcode: string | null;
+                unit: import(".prisma/client").$Enums.Unit;
+                purchasePrice: import("@prisma/client/runtime/library").Decimal | null;
+                salePrice: import("@prisma/client/runtime/library").Decimal;
+                vatRate: import("@prisma/client/runtime/library").Decimal;
+                minStock: import("@prisma/client/runtime/library").Decimal | null;
+                trackInventory: boolean;
+                purchaseCurrencyId: string | null;
+                purchaseExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+                saleCurrencyId: string | null;
+                saleExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+                categoryId: string | null;
+            };
+        } & {
+            quantity: import("@prisma/client/runtime/library").Decimal;
+            id: string;
+            vatRate: import("@prisma/client/runtime/library").Decimal;
+            subtotal: import("@prisma/client/runtime/library").Decimal;
+            unitPrice: import("@prisma/client/runtime/library").Decimal;
+            productId: string;
+            receivedQty: import("@prisma/client/runtime/library").Decimal;
+            purchaseOrderId: string;
+        })[];
+        createdBy: {
+            id: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+    } & {
+        status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+        createdAt: Date;
+        orderNumber: string;
+        total: import("@prisma/client/runtime/library").Decimal;
+        updatedAt: Date;
+        id: string;
+        companyId: string;
+        createdById: string | null;
+        subtotal: import("@prisma/client/runtime/library").Decimal;
+        vatAmount: import("@prisma/client/runtime/library").Decimal;
+        notes: string | null;
+        orderDate: Date;
+        expectedDate: Date | null;
+        supplierId: string;
+    }>;
+    send(companyId: string, id: string): Promise<{
+        supplier: {
+            name: string;
+            email: string | null;
+            phone: string | null;
+            createdAt: Date;
+            address: string | null;
+            eik: string | null;
+            updatedAt: Date;
+            id: string;
+            isActive: boolean;
+            postalCode: string | null;
+            countryId: string | null;
+            vatNumber: string | null;
+            city: string | null;
+            settlementId: string | null;
+            website: string | null;
+            bankName: string | null;
+            iban: string | null;
+            bic: string | null;
+            companyId: string;
+            notes: string | null;
+            contactName: string | null;
+            paymentTerms: number | null;
+        };
+        _count: {
+            goodsReceipts: number;
+            items: number;
+        };
+        items: ({
+            product: {
+                name: string;
+                type: import(".prisma/client").$Enums.ProductType;
+                createdAt: Date;
+                sku: string;
+                description: string | null;
+                updatedAt: Date;
+                id: string;
+                isActive: boolean;
+                companyId: string;
+                createdById: string | null;
+                barcode: string | null;
+                unit: import(".prisma/client").$Enums.Unit;
+                purchasePrice: import("@prisma/client/runtime/library").Decimal | null;
+                salePrice: import("@prisma/client/runtime/library").Decimal;
+                vatRate: import("@prisma/client/runtime/library").Decimal;
+                minStock: import("@prisma/client/runtime/library").Decimal | null;
+                trackInventory: boolean;
+                purchaseCurrencyId: string | null;
+                purchaseExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+                saleCurrencyId: string | null;
+                saleExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+                categoryId: string | null;
+            };
+        } & {
+            quantity: import("@prisma/client/runtime/library").Decimal;
+            id: string;
+            vatRate: import("@prisma/client/runtime/library").Decimal;
+            subtotal: import("@prisma/client/runtime/library").Decimal;
+            unitPrice: import("@prisma/client/runtime/library").Decimal;
+            productId: string;
+            receivedQty: import("@prisma/client/runtime/library").Decimal;
+            purchaseOrderId: string;
+        })[];
+        createdBy: {
+            id: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+    } & {
+        status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+        createdAt: Date;
+        orderNumber: string;
+        total: import("@prisma/client/runtime/library").Decimal;
+        updatedAt: Date;
+        id: string;
+        companyId: string;
+        createdById: string | null;
+        subtotal: import("@prisma/client/runtime/library").Decimal;
+        vatAmount: import("@prisma/client/runtime/library").Decimal;
+        notes: string | null;
+        orderDate: Date;
+        expectedDate: Date | null;
+        supplierId: string;
+    }>;
+    confirm(companyId: string, id: string): Promise<{
+        supplier: {
+            name: string;
+            email: string | null;
+            phone: string | null;
+            createdAt: Date;
+            address: string | null;
+            eik: string | null;
+            updatedAt: Date;
+            id: string;
+            isActive: boolean;
+            postalCode: string | null;
+            countryId: string | null;
+            vatNumber: string | null;
+            city: string | null;
+            settlementId: string | null;
+            website: string | null;
+            bankName: string | null;
+            iban: string | null;
+            bic: string | null;
+            companyId: string;
+            notes: string | null;
+            contactName: string | null;
+            paymentTerms: number | null;
+        };
+        _count: {
+            goodsReceipts: number;
+            items: number;
+        };
+        items: ({
+            product: {
+                name: string;
+                type: import(".prisma/client").$Enums.ProductType;
+                createdAt: Date;
+                sku: string;
+                description: string | null;
+                updatedAt: Date;
+                id: string;
+                isActive: boolean;
+                companyId: string;
+                createdById: string | null;
+                barcode: string | null;
+                unit: import(".prisma/client").$Enums.Unit;
+                purchasePrice: import("@prisma/client/runtime/library").Decimal | null;
+                salePrice: import("@prisma/client/runtime/library").Decimal;
+                vatRate: import("@prisma/client/runtime/library").Decimal;
+                minStock: import("@prisma/client/runtime/library").Decimal | null;
+                trackInventory: boolean;
+                purchaseCurrencyId: string | null;
+                purchaseExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+                saleCurrencyId: string | null;
+                saleExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+                categoryId: string | null;
+            };
+        } & {
+            quantity: import("@prisma/client/runtime/library").Decimal;
+            id: string;
+            vatRate: import("@prisma/client/runtime/library").Decimal;
+            subtotal: import("@prisma/client/runtime/library").Decimal;
+            unitPrice: import("@prisma/client/runtime/library").Decimal;
+            productId: string;
+            receivedQty: import("@prisma/client/runtime/library").Decimal;
+            purchaseOrderId: string;
+        })[];
+        createdBy: {
+            id: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+    } & {
+        status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+        createdAt: Date;
+        orderNumber: string;
+        total: import("@prisma/client/runtime/library").Decimal;
+        updatedAt: Date;
+        id: string;
+        companyId: string;
+        createdById: string | null;
+        subtotal: import("@prisma/client/runtime/library").Decimal;
+        vatAmount: import("@prisma/client/runtime/library").Decimal;
+        notes: string | null;
+        orderDate: Date;
+        expectedDate: Date | null;
+        supplierId: string;
+    }>;
+    cancel(companyId: string, id: string): Promise<{
+        supplier: {
+            name: string;
+            email: string | null;
+            phone: string | null;
+            createdAt: Date;
+            address: string | null;
+            eik: string | null;
+            updatedAt: Date;
+            id: string;
+            isActive: boolean;
+            postalCode: string | null;
+            countryId: string | null;
+            vatNumber: string | null;
+            city: string | null;
+            settlementId: string | null;
+            website: string | null;
+            bankName: string | null;
+            iban: string | null;
+            bic: string | null;
+            companyId: string;
+            notes: string | null;
+            contactName: string | null;
+            paymentTerms: number | null;
+        };
+        _count: {
+            goodsReceipts: number;
+            items: number;
+        };
+        items: ({
+            product: {
+                name: string;
+                type: import(".prisma/client").$Enums.ProductType;
+                createdAt: Date;
+                sku: string;
+                description: string | null;
+                updatedAt: Date;
+                id: string;
+                isActive: boolean;
+                companyId: string;
+                createdById: string | null;
+                barcode: string | null;
+                unit: import(".prisma/client").$Enums.Unit;
+                purchasePrice: import("@prisma/client/runtime/library").Decimal | null;
+                salePrice: import("@prisma/client/runtime/library").Decimal;
+                vatRate: import("@prisma/client/runtime/library").Decimal;
+                minStock: import("@prisma/client/runtime/library").Decimal | null;
+                trackInventory: boolean;
+                purchaseCurrencyId: string | null;
+                purchaseExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+                saleCurrencyId: string | null;
+                saleExchangeRate: import("@prisma/client/runtime/library").Decimal | null;
+                categoryId: string | null;
+            };
+        } & {
+            quantity: import("@prisma/client/runtime/library").Decimal;
+            id: string;
+            vatRate: import("@prisma/client/runtime/library").Decimal;
+            subtotal: import("@prisma/client/runtime/library").Decimal;
+            unitPrice: import("@prisma/client/runtime/library").Decimal;
+            productId: string;
+            receivedQty: import("@prisma/client/runtime/library").Decimal;
+            purchaseOrderId: string;
+        })[];
+        createdBy: {
+            id: string;
+            firstName: string;
+            lastName: string;
+        } | null;
+    } & {
+        status: import(".prisma/client").$Enums.PurchaseOrderStatus;
+        createdAt: Date;
+        orderNumber: string;
+        total: import("@prisma/client/runtime/library").Decimal;
+        updatedAt: Date;
+        id: string;
+        companyId: string;
+        createdById: string | null;
+        subtotal: import("@prisma/client/runtime/library").Decimal;
+        vatAmount: import("@prisma/client/runtime/library").Decimal;
+        notes: string | null;
+        orderDate: Date;
+        expectedDate: Date | null;
+        supplierId: string;
+    }>;
+    remove(companyId: string, id: string): Promise<{
+        message: string;
+    }>;
+}

@@ -1,0 +1,56 @@
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateLeadDto, UpdateLeadDto, QueryLeadsDto } from './dto';
+import { Prisma } from '@prisma/client';
+export declare class LeadsService {
+    private prisma;
+    constructor(prisma: PrismaService);
+    create(companyId: string, dto: CreateLeadDto, userId?: string): Promise<any>;
+    findAll(companyId: string, query: QueryLeadsDto): Promise<{
+        items: any;
+        total: any;
+        page: number;
+        limit: number;
+        totalPages: number;
+    }>;
+    findOne(companyId: string, id: string): Promise<any>;
+    update(companyId: string, id: string, dto: UpdateLeadDto): Promise<any>;
+    remove(companyId: string, id: string): Promise<any>;
+    convertToCustomer(companyId: string, id: string): Promise<{
+        id: string;
+        isActive: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+        type: import(".prisma/client").$Enums.CustomerType;
+        postalCode: string | null;
+        countryId: string | null;
+        vatNumber: string | null;
+        eik: string | null;
+        address: string | null;
+        city: string | null;
+        molName: string | null;
+        phone: string | null;
+        email: string | null;
+        website: string | null;
+        bankName: string | null;
+        iban: string | null;
+        bic: string | null;
+        description: string | null;
+        companyId: string;
+        firstName: string | null;
+        lastName: string | null;
+        discount: Prisma.Decimal | null;
+        notes: string | null;
+        stage: import(".prisma/client").$Enums.CustomerStage;
+        source: import(".prisma/client").$Enums.CustomerSource | null;
+        companyName: string | null;
+        mobile: string | null;
+        industry: import(".prisma/client").$Enums.Industry | null;
+        size: import(".prisma/client").$Enums.CompanySize | null;
+        tags: string[];
+        creditLimit: Prisma.Decimal | null;
+        assignedToId: string | null;
+    }>;
+    convertToCrmCompany(companyId: string, id: string): Promise<any>;
+    getStatuses(): unknown[];
+    getSources(): unknown[];
+}

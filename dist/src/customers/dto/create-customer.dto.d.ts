@@ -1,0 +1,32 @@
+import { CustomerType, CustomerStage, CustomerSource, Industry, CompanySize } from '@prisma/client';
+export declare class CreateCustomerDto {
+    type?: CustomerType;
+    companyName?: string;
+    eik?: string;
+    vatNumber?: string;
+    molName?: string;
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    phone?: string;
+    mobile?: string;
+    address?: string;
+    city?: string;
+    postalCode?: string;
+    countryId?: string;
+    bankName?: string;
+    iban?: string;
+    bic?: string;
+    notes?: string;
+    creditLimit?: number;
+    discount?: number;
+    isActive?: boolean;
+    stage?: CustomerStage;
+    source?: CustomerSource;
+    industry?: Industry;
+    size?: CompanySize;
+    website?: string;
+    description?: string;
+    tags?: string[];
+    assignedToId?: string;
+}
