@@ -14,7 +14,13 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { DealsService } from './deals.service';
-import { CreateDealDto, UpdateDealDto, QueryDealsDto } from './dto';
+import {
+  CreateDealDto,
+  UpdateDealDto,
+  QueryDealsDto,
+  CreateDealTaskDto,
+  UpdateDealTaskDto,
+} from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import {
@@ -65,6 +71,12 @@ export class CompanyDealsController {
   @RequireView('crm', 'deals')
   getStatistics(@Param('companyId') companyId: string) {
     return this.dealsService.getStatistics(companyId);
+  }
+
+  @Get('kanban')
+  @RequireView('crm', 'deals')
+  findAllForKanban(@Param('companyId') companyId: string) {
+    return this.dealsService.findAllForKanban(companyId);
   }
 
   @Get('export')
@@ -129,5 +141,58 @@ export class CompanyDealsController {
   @RequireDelete('crm', 'deals')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.dealsService.remove(companyId, id);
+  }
+
+  // ==================== DEAL TASKS ====================
+
+  @Post(':dealId/tasks')
+  @RequireEdit('crm', 'deals')
+  createTask(
+    @Param('companyId') companyId: string,
+    @Param('dealId') dealId: string,
+    @Body() dto: CreateDealTaskDto,
+    @Request() req: any,
+  ) {
+    return this.dealsService.createTask(companyId, dealId, dto, req.user?.id);
+  }
+
+  @Get(':dealId/tasks')
+  @RequireView('crm', 'deals')
+  findDealTasks(
+    @Param('companyId') companyId: string,
+    @Param('dealId') dealId: string,
+  ) {
+    return this.dealsService.findDealTasks(companyId, dealId);
+  }
+
+  @Patch(':dealId/tasks/:taskId')
+  @RequireEdit('crm', 'deals')
+  updateTask(
+    @Param('companyId') companyId: string,
+    @Param('dealId') dealId: string,
+    @Param('taskId') taskId: string,
+    @Body() dto: UpdateDealTaskDto,
+  ) {
+    return this.dealsService.updateTask(companyId, dealId, taskId, dto);
+  }
+
+  @Patch(':dealId/tasks/:taskId/toggle')
+  @RequireEdit('crm', 'deals')
+  toggleTask(
+    @Param('companyId') companyId: string,
+    @Param('dealId') dealId: string,
+    @Param('taskId') taskId: string,
+  ) {
+    return this.dealsService.toggleTask(companyId, dealId, taskId);
+  }
+
+  @Delete(':dealId/tasks/:taskId')
+  @RequireDelete('crm', 'deals')
+  removeTask(
+    @Param('companyId') companyId: string,
+    @Param('dealId') dealId: string,
+    @Param('taskId') taskId: string,
+  ) {
+    return this.dealsService.removeTask(companyId, dealId, taskId);
   }
 }

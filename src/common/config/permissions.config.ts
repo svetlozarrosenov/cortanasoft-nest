@@ -521,7 +521,7 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
   {
     key: 'tickets',
     labelKey: 'modules.tickets.title',
-    icon: 'Ticket',
+    icon: 'KanbanSquare',
     pages: [
       {
         key: 'allTickets',

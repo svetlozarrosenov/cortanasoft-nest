@@ -171,6 +171,7 @@ model Company {
   invoices           Invoice[]
   contacts           Contact[]
   deals              Deal[]
+  dealTasks          DealTask[]
   departments        Department[]
   attendances        Attendance[]
   payrolls           Payroll[]
@@ -322,6 +323,8 @@ model User {
   assignedCustomers     Customer[]      @relation("CustomerAssignee")
   assignedDeals         Deal[]          @relation("DealAssignee")
   createdDeals          Deal[]          @relation("DealCreator")
+  assignedDealTasks     DealTask[]      @relation("DealTaskAssignee")
+  createdDealTasks      DealTask[]      @relation("DealTaskCreator")
 
   // HR Performance
   performanceReviews   PerformanceReview[] @relation("UserPerformanceReviews")
@@ -1132,6 +1135,8 @@ model Contact {
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  deals Deal[]
+
   @@index([companyId])
   @@index([customerId])
   @@index([companyId, lastName])
@@ -1203,6 +1208,10 @@ model Deal {
   customerId String?
   customer   Customer? @relation(fields: [customerId], references: [id])
 
+  // Свързано контактно лице
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id])
+
   // Отговорник
   assignedToId String?
   assignedTo   User?   @relation("DealAssignee", fields: [assignedToId], references: [id])
@@ -1226,11 +1235,46 @@ model Deal {
   createdById String?
   createdBy   User?   @relation("DealCreator", fields: [createdById], references: [id])
 
+  // Задачи по сделката
+  tasks DealTask[]
+
   @@index([companyId])
   @@index([companyId, status])
   @@index([companyId, customerId])
   @@index([companyId, assignedToId])
   @@map("deals")
+}
+
+// ==================== ЗАДАЧИ ПО СДЕЛКИ (DEAL TASKS) ====================
+
+model DealTask {
+  id String @id @default(cuid())
+
+  title       String    // Заглавие на задачата
+  description String?   // Описание
+  dueDate     DateTime? // Краен срок
+  isDone      Boolean   @default(false) // Изпълнена ли е
+
+  completedAt DateTime? // Кога е завършена
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Релации
+  dealId String
+  deal   Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  assignedToId String?
+  assignedTo   User? @relation("DealTaskAssignee", fields: [assignedToId], references: [id])
+
+  createdById String?
+  createdBy   User? @relation("DealTaskCreator", fields: [createdById], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([dealId])
+  @@index([companyId, dealId])
+  @@map("deal_tasks")
 }
 
 // ==================== КЛИЕНТСКИ ПОРЪЧКИ (ПРОДАЖБИ) ====================

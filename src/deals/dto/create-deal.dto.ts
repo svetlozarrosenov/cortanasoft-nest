@@ -45,6 +45,10 @@ export class CreateDealDto {
 
   @IsOptional()
   @IsString()
+  contactId?: string;
+
+  @IsOptional()
+  @IsString()
   assignedToId?: string;
 
   @IsOptional()

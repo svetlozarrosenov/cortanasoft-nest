@@ -1,7 +1,52 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateDealDto, UpdateDealDto, QueryDealsDto } from './dto';
+import {
+  CreateDealDto,
+  UpdateDealDto,
+  QueryDealsDto,
+  CreateDealTaskDto,
+  UpdateDealTaskDto,
+} from './dto';
 import { Prisma, DealStatus } from '@prisma/client';
+
+const DEAL_INCLUDE = {
+  customer: {
+    select: {
+      id: true,
+      type: true,
+      companyName: true,
+      firstName: true,
+      lastName: true,
+    },
+  },
+  contact: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+    },
+  },
+  currency: true,
+  assignedTo: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+    },
+  },
+};
+
+const TASK_INCLUDE = {
+  assignedTo: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+    },
+  },
+};
 
 @Injectable()
 export class DealsService {
@@ -28,26 +73,7 @@ export class DealsService {
         companyId,
         createdById: userId,
       },
-      include: {
-        customer: {
-          select: {
-            id: true,
-            type: true,
-            companyName: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        currency: true,
-        assignedTo: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-      },
+      include: DEAL_INCLUDE,
     });
   }
 
@@ -82,24 +108,8 @@ export class DealsService {
       this.prisma.deal.findMany({
         where,
         include: {
-          customer: {
-            select: {
-              id: true,
-              type: true,
-              companyName: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-          currency: true,
-          assignedTo: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-            },
-          },
+          ...DEAL_INCLUDE,
+          _count: { select: { tasks: true } },
         },
         orderBy: { [sortBy]: sortOrder },
         skip: (page - 1) * limit,
@@ -133,6 +143,16 @@ export class DealsService {
             phone: true,
           },
         },
+        contact: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true,
+            jobTitle: true,
+          },
+        },
         currency: true,
         assignedTo: {
           select: {
@@ -150,6 +170,11 @@ export class DealsService {
             email: true,
           },
         },
+        tasks: {
+          include: TASK_INCLUDE,
+          orderBy: [{ isDone: 'asc' }, { dueDate: 'asc' }, { createdAt: 'desc' }],
+        },
+        _count: { select: { tasks: true } },
       },
     });
 
@@ -175,24 +200,8 @@ export class DealsService {
           : undefined,
       },
       include: {
-        customer: {
-          select: {
-            id: true,
-            type: true,
-            companyName: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        currency: true,
-        assignedTo: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
+        ...DEAL_INCLUDE,
+        _count: { select: { tasks: true } },
       },
     });
   }
@@ -231,24 +240,8 @@ export class DealsService {
       where: { id },
       data,
       include: {
-        customer: {
-          select: {
-            id: true,
-            type: true,
-            companyName: true,
-            firstName: true,
-            lastName: true,
-          },
-        },
-        currency: true,
-        assignedTo: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
+        ...DEAL_INCLUDE,
+        _count: { select: { tasks: true } },
       },
     });
   }
@@ -304,5 +297,105 @@ export class DealsService {
           ? Math.round((wonDeals / (wonDeals + lostDeals)) * 100) || 0
           : 0,
     };
+  }
+
+  // ==================== KANBAN ====================
+
+  async findAllForKanban(companyId: string) {
+    return this.prisma.deal.findMany({
+      where: { companyId, isActive: true },
+      include: {
+        ...DEAL_INCLUDE,
+        _count: { select: { tasks: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 1000,
+    });
+  }
+
+  // ==================== DEAL TASKS ====================
+
+  async createTask(
+    companyId: string,
+    dealId: string,
+    dto: CreateDealTaskDto,
+    userId?: string,
+  ) {
+    await this.findOne(companyId, dealId);
+
+    return this.prisma.dealTask.create({
+      data: {
+        title: dto.title,
+        description: dto.description,
+        dueDate: dto.dueDate ? new Date(dto.dueDate) : undefined,
+        assignedToId: dto.assignedToId,
+        dealId,
+        companyId,
+        createdById: userId,
+      },
+      include: TASK_INCLUDE,
+    });
+  }
+
+  async findDealTasks(companyId: string, dealId: string) {
+    await this.findOne(companyId, dealId);
+
+    return this.prisma.dealTask.findMany({
+      where: { dealId, companyId },
+      include: TASK_INCLUDE,
+      orderBy: [{ isDone: 'asc' }, { dueDate: 'asc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  async updateTask(
+    companyId: string,
+    dealId: string,
+    taskId: string,
+    dto: UpdateDealTaskDto,
+  ) {
+    const task = await this.prisma.dealTask.findFirst({
+      where: { id: taskId, dealId, companyId },
+    });
+    if (!task) throw new NotFoundException('Task not found');
+
+    return this.prisma.dealTask.update({
+      where: { id: taskId },
+      data: {
+        ...(dto.title !== undefined && { title: dto.title }),
+        ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.dueDate !== undefined && { dueDate: new Date(dto.dueDate) }),
+        ...(dto.assignedToId !== undefined && {
+          assignedToId: dto.assignedToId,
+        }),
+        ...(dto.isDone !== undefined && {
+          isDone: dto.isDone,
+          completedAt: dto.isDone ? new Date() : null,
+        }),
+      },
+      include: TASK_INCLUDE,
+    });
+  }
+
+  async toggleTask(companyId: string, dealId: string, taskId: string) {
+    const task = await this.prisma.dealTask.findFirst({
+      where: { id: taskId, dealId, companyId },
+    });
+    if (!task) throw new NotFoundException('Task not found');
+
+    const isDone = !task.isDone;
+    return this.prisma.dealTask.update({
+      where: { id: taskId },
+      data: { isDone, completedAt: isDone ? new Date() : null },
+      include: TASK_INCLUDE,
+    });
+  }
+
+  async removeTask(companyId: string, dealId: string, taskId: string) {
+    const task = await this.prisma.dealTask.findFirst({
+      where: { id: taskId, dealId, companyId },
+    });
+    if (!task) throw new NotFoundException('Task not found');
+
+    return this.prisma.dealTask.delete({ where: { id: taskId } });
   }
 }
