@@ -341,6 +341,25 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
+        key: 'stockDocuments',
+        labelKey: 'modules.erp.stockDocuments',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'stockDocumentsList',
+            labelKey: 'modules.erp.stockDocumentsList',
+            columns: [
+              { key: 'documentNumber', labelKey: 'modules.erp.documentNumber' },
+              { key: 'type', labelKey: 'common.type' },
+              { key: 'recipient', labelKey: 'modules.erp.recipient' },
+              { key: 'date', labelKey: 'common.date' },
+              { key: 'total', labelKey: 'modules.erp.total' },
+              { key: 'status', labelKey: 'common.status' },
+            ],
+          },
+        ],
+      },
+      {
         key: 'analytics',
         labelKey: 'modules.erp.profitAnalytics',
         actions: ['view'],
@@ -575,18 +594,6 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         key: 'usersRoles',
         labelKey: 'modules.settings.usersRoles',
         actions: ['view', 'create', 'edit', 'delete'],
-      },
-    ],
-  },
-  {
-    key: 'communication',
-    labelKey: 'modules.communication.title',
-    icon: 'MessageCircle',
-    pages: [
-      {
-        key: 'chat',
-        labelKey: 'modules.communication.chat',
-        actions: ['view', 'create'],
       },
     ],
   },

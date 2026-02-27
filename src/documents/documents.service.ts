@@ -11,6 +11,7 @@ const ENTITY_TYPE_MAP = {
   invoice: 'invoiceId',
   expense: 'expenseId',
   purchaseOrder: 'purchaseOrderId',
+  stockDocument: 'stockDocumentId',
 } as const;
 
 type EntityType = keyof typeof ENTITY_TYPE_MAP;
@@ -20,6 +21,7 @@ const ENTITY_MODEL_MAP: Record<EntityType, string> = {
   invoice: 'invoice',
   expense: 'expense',
   purchaseOrder: 'purchaseOrder',
+  stockDocument: 'stockDocument',
 };
 
 @Injectable()

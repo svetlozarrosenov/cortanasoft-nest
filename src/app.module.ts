@@ -35,6 +35,7 @@ import { ErpAnalyticsModule } from './erp-analytics/erp-analytics.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { DocumentsModule } from './documents/documents.module';
+import { StockDocumentsModule } from './stock-documents/stock-documents.module';
 import { ExportModule } from './common/export/export.module';
 
 @Module({
@@ -77,6 +78,7 @@ import { ExportModule } from './common/export/export.module';
     ExpensesModule,
     UploadsModule,
     DocumentsModule,
+    StockDocumentsModule,
     ExportModule,
   ],
   controllers: [],
