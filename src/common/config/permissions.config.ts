@@ -576,6 +576,18 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
     ],
   },
   {
+    key: 'communication',
+    labelKey: 'modules.communication.title',
+    icon: 'MessageCircle',
+    pages: [
+      {
+        key: 'chat',
+        labelKey: 'modules.communication.chat',
+        actions: ['view'],
+      },
+    ],
+  },
+  {
     key: 'settings',
     labelKey: 'modules.settings.title',
     icon: 'Settings',
