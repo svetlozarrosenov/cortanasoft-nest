@@ -37,9 +37,6 @@ export class CreateGoodsReceiptItemDto {
   @Min(0.000001)
   exchangeRate?: number;
 
-  @IsString()
-  @IsOptional()
-  purchaseOrderItemId?: string;
 }
 
 export class CreateGoodsReceiptDto {
@@ -58,10 +55,6 @@ export class CreateGoodsReceiptDto {
   @IsString()
   @IsOptional()
   supplierId?: string;
-
-  @IsString()
-  @IsOptional()
-  purchaseOrderId?: string;
 
   @IsString()
   @IsOptional()

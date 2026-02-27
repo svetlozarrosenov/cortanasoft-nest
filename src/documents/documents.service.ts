@@ -10,7 +10,6 @@ const ENTITY_TYPE_MAP = {
   goodsReceipt: 'goodsReceiptId',
   invoice: 'invoiceId',
   expense: 'expenseId',
-  purchaseOrder: 'purchaseOrderId',
   stockDocument: 'stockDocumentId',
 } as const;
 
@@ -20,7 +19,6 @@ const ENTITY_MODEL_MAP: Record<EntityType, string> = {
   goodsReceipt: 'goodsReceipt',
   invoice: 'invoice',
   expense: 'expense',
-  purchaseOrder: 'purchaseOrder',
   stockDocument: 'stockDocument',
 };
 

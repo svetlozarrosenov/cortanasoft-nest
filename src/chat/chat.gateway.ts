@@ -11,6 +11,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ChatService } from './chat.service';
+import { PushNotificationsService } from '../push-notifications/push-notifications.service';
 import { Logger } from '@nestjs/common';
 
 interface AuthenticatedSocket extends Socket {
@@ -64,6 +65,7 @@ export class ChatGateway
   constructor(
     private chatService: ChatService,
     private jwtService: JwtService,
+    private pushNotificationsService: PushNotificationsService,
   ) {}
 
   afterInit() {
@@ -82,6 +84,32 @@ export class ChatGateway
     return Array.from(companyConnections.entries())
       .filter(([, count]) => count > 0)
       .map(([userId]) => userId);
+  }
+
+  // Send push notification to offline participants
+  async notifyOfflineParticipants(
+    companyId: string,
+    senderId: string,
+    senderName: string,
+    content: string,
+    participantIds: string[],
+  ) {
+    const offlineUserIds = participantIds.filter(
+      (id) => id !== senderId && !this.isUserOnline(companyId, id),
+    );
+
+    if (offlineUserIds.length === 0) return;
+
+    try {
+      await this.pushNotificationsService.sendToUsers(offlineUserIds, {
+        title: senderName,
+        body: content.length > 100 ? content.substring(0, 100) + '...' : content,
+        url: `/dashboard/${companyId}`,
+        tag: `chat-${companyId}`,
+      });
+    } catch (error) {
+      this.logger.error('Failed to send chat push notification', error);
+    }
   }
 
   async handleConnection(client: AuthenticatedSocket) {
@@ -289,6 +317,16 @@ export class ChatGateway
         });
         this.logger.log(`Message sent to channel: ${userChannel}`);
       }
+
+      // Send push notification to offline participants
+      const senderName = `${message.sender.firstName} ${message.sender.lastName}`;
+      this.notifyOfflineParticipants(
+        client.companyId,
+        client.userId,
+        senderName,
+        trimmedContent,
+        participantIds,
+      );
 
       return { success: true, message };
     } catch (error) {

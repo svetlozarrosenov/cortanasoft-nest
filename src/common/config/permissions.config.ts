@@ -305,24 +305,6 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
-        key: 'purchaseOrders',
-        labelKey: 'modules.erp.purchaseOrders',
-        actions: ['view', 'create', 'edit', 'delete'],
-        tables: [
-          {
-            key: 'purchaseOrdersList',
-            labelKey: 'modules.erp.purchaseOrdersList',
-            columns: [
-              { key: 'orderNumber', labelKey: 'modules.erp.orderNumber' },
-              { key: 'supplier', labelKey: 'modules.erp.supplier' },
-              { key: 'date', labelKey: 'common.date' },
-              { key: 'total', labelKey: 'modules.erp.total' },
-              { key: 'status', labelKey: 'common.status' },
-            ],
-          },
-        ],
-      },
-      {
         key: 'expenses',
         labelKey: 'modules.erp.expenses',
         actions: ['view', 'create', 'edit', 'delete'],
@@ -510,11 +492,6 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         key: 'performance',
         labelKey: 'modules.bi.performance',
         actions: ['view'],
-      },
-      {
-        key: 'customReports',
-        labelKey: 'modules.bi.customReports',
-        actions: ['view', 'create', 'edit', 'delete'],
       },
     ],
   },

@@ -100,6 +100,16 @@ export class ChatController {
       });
     }
 
+    // Send push notification to offline participants
+    const senderName = `${message.sender.firstName} ${message.sender.lastName}`;
+    this.chatGateway.notifyOfflineParticipants(
+      companyId,
+      req.user.id,
+      senderName,
+      dto.content,
+      participantIds,
+    );
+
     return message;
   }
 

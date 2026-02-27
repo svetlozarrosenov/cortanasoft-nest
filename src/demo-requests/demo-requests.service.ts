@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PushNotificationsService } from '../push-notifications/push-notifications.service';
 import {
   CreateDemoRequestDto,
   UpdateDemoRequestDto,
@@ -9,13 +10,18 @@ import { Prisma, DemoRequestStatus } from '@prisma/client';
 
 @Injectable()
 export class DemoRequestsService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(DemoRequestsService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private pushNotificationsService: PushNotificationsService,
+  ) {}
 
   /**
    * Create a new demo request (public endpoint, no auth required)
    */
   async create(dto: CreateDemoRequestDto) {
-    return this.prisma.demoRequest.create({
+    const demoRequest = await this.prisma.demoRequest.create({
       data: {
         name: dto.name,
         email: dto.email,
@@ -26,6 +32,28 @@ export class DemoRequestsService {
         status: DemoRequestStatus.NEW,
       },
     });
+
+    // Send push notification to all super admin users (users in OWNER companies)
+    try {
+      const ownerCompanyUsers = await this.prisma.userCompany.findMany({
+        where: { company: { role: 'OWNER' } },
+        select: { userId: true },
+      });
+
+      const adminUserIds = [...new Set(ownerCompanyUsers.map((uc) => uc.userId))];
+
+      if (adminUserIds.length > 0) {
+        await this.pushNotificationsService.sendToUsers(adminUserIds, {
+          title: 'Нова заявка за демо',
+          body: `${dto.companyName} - ${dto.name}`,
+          url: '/dashboard/admin/demo-requests',
+        });
+      }
+    } catch (error) {
+      this.logger.error('Failed to send push notification for demo request', error);
+    }
+
+    return demoRequest;
   }
 
   /**

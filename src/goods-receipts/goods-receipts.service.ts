@@ -2,8 +2,6 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  Inject,
-  forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -12,15 +10,12 @@ import {
   QueryGoodsReceiptsDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
-import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
 import { ErrorMessages } from '../common/constants/error-messages';
 
 @Injectable()
 export class GoodsReceiptsService {
   constructor(
     private prisma: PrismaService,
-    @Inject(forwardRef(() => PurchaseOrdersService))
-    private purchaseOrdersService: PurchaseOrdersService,
   ) {}
 
   private async generateReceiptNumber(companyId: string): Promise<string> {
@@ -105,7 +100,6 @@ export class GoodsReceiptsService {
       companyId,
       locationId: dto.locationId,
       supplierId: dto.supplierId || undefined,
-      purchaseOrderId: dto.purchaseOrderId || undefined,
       createdById: userId,
       items: {
         create: dto.items.map((item) => ({
@@ -115,7 +109,6 @@ export class GoodsReceiptsService {
           vatRate: item.vatRate ?? (company.vatNumber ? 20 : 0),
           currencyId: item.currencyId || currencyId,
           exchangeRate: item.exchangeRate ?? 1,
-          purchaseOrderItemId: item.purchaseOrderItemId || undefined,
         })),
       },
     };
@@ -327,7 +320,6 @@ export class GoodsReceiptsService {
           items: {
             include: {
               product: true,
-              purchaseOrderItem: true,
             },
           },
           _count: { select: { items: true } },
@@ -374,39 +366,10 @@ export class GoodsReceiptsService {
           );
         }
 
-        // Update purchase order item receivedQty if linked
-        if (item.purchaseOrderItemId) {
-          const currentItem = await tx.purchaseOrderItem.findUnique({
-            where: { id: item.purchaseOrderItemId },
-          });
-          if (currentItem) {
-            await tx.purchaseOrderItem.update({
-              where: { id: item.purchaseOrderItemId },
-              data: {
-                receivedQty:
-                  Number(currentItem.receivedQty) + Number(item.quantity),
-              },
-            });
-            console.log(
-              `[GoodsReceipts] Updated PO item ${item.purchaseOrderItemId} receivedQty`,
-            );
-          }
-        }
       }
 
       return updatedReceipt;
     });
-
-    // Update purchase order status if linked
-    if (receipt.purchaseOrderId) {
-      await this.purchaseOrdersService.updateReceivedQuantities(
-        companyId,
-        receipt.purchaseOrderId,
-      );
-      console.log(
-        `[GoodsReceipts] Updated purchase order ${receipt.purchaseOrderId} status`,
-      );
-    }
 
     return updated;
   }

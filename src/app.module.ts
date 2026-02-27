@@ -7,7 +7,6 @@ import { AdminModule } from './admin/admin.module';
 import { ProductsModule } from './products/products.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { LocationsModule } from './locations/locations.module';
-import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { OrdersModule } from './orders/orders.module';
@@ -50,7 +49,6 @@ import { ExportModule } from './common/export/export.module';
     ProductsModule,
     SuppliersModule,
     LocationsModule,
-    PurchaseOrdersModule,
     GoodsReceiptsModule,
     InventoryModule,
     OrdersModule,

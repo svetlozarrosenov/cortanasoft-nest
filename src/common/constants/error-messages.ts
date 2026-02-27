@@ -118,22 +118,6 @@ export const ErrorMessages = {
     canOnlyDeleteDraft: 'Може да изтриете само чернови разписки',
   },
 
-  // ==================== Заявки за покупка ====================
-  purchaseOrders: {
-    notFound: 'Заявката за покупка не е намерена',
-    mustHaveItems: 'Заявката трябва да има поне един артикул',
-    supplierNotFound: 'Доставчикът не е намерен',
-    productsNotFound: 'Един или повече продукти не са намерени',
-    canOnlyUpdateDraft: 'Може да редактирате само чернови заявки',
-    canOnlySendDraft: 'Може да изпращате само чернови заявки',
-    cannotSendWithoutItems: 'Не може да изпратите заявка без артикули',
-    canOnlyConfirmSent: 'Може да потвърдите само изпратени заявки',
-    alreadyCancelled: 'Заявката вече е отменена',
-    cannotCancelFullyReceived: 'Не може да отмените напълно получени заявки',
-    cannotCancelWithCompletedReceipts: 'Не може да отмените заявка с завършени стокови разписки',
-    canOnlyDeleteDraft: 'Може да изтриете само чернови заявки',
-    mustBeSentOrConfirmed: 'Заявката трябва да е изпратена, потвърдена или частично получена',
-  },
 
   // ==================== Потребители ====================
   users: {
