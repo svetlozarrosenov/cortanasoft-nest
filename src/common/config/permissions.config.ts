@@ -573,6 +573,11 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         labelKey: 'modules.tickets.discussions',
         actions: ['view', 'create', 'edit', 'delete'],
       },
+      {
+        key: 'sprints',
+        labelKey: 'modules.tickets.sprints',
+        actions: ['view', 'create', 'edit', 'delete'],
+      },
     ],
   },
   {

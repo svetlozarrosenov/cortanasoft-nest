@@ -10,6 +10,7 @@ import {
   QueryTicketDto,
   CreateCommentDto,
   CreateReminderDto,
+  CreateTimeLogDto,
 } from './dto';
 
 @Injectable()
@@ -58,6 +59,7 @@ export class TicketsService {
         assigneeId: dto.assigneeId,
         parentId: dto.parentId,
         tags: dto.tags,
+        sprintId: dto.sprintId,
         companyId,
         createdById: userId,
       },
@@ -105,6 +107,8 @@ export class TicketsService {
     if (type) where.type = type;
     if (assigneeId) where.assigneeId = assigneeId;
     if (createdById) where.createdById = createdById;
+
+    if (query.sprintId) where.sprintId = query.sprintId;
 
     if (search) {
       where.OR = [
@@ -183,6 +187,9 @@ export class TicketsService {
           where: { isSent: false },
           orderBy: { remindAt: 'asc' },
         },
+        sprint: {
+          select: { id: true, name: true, status: true },
+        },
       },
     });
 
@@ -203,6 +210,11 @@ export class TicketsService {
     }
 
     const updateData: any = { ...dto };
+
+    // Handle sprintId
+    if (dto.sprintId !== undefined) {
+      updateData.sprintId = dto.sprintId || null;
+    }
 
     // Handle date conversion
     if (dto.dueDate) {
@@ -692,5 +704,82 @@ export class TicketsService {
       overdue,
       urgent,
     };
+  }
+
+  // ==================== Time Logs ====================
+
+  async addTimeLog(
+    companyId: string,
+    ticketId: string,
+    userId: string,
+    dto: CreateTimeLogDto,
+  ) {
+    const ticket = await this.prisma.ticket.findFirst({
+      where: { id: ticketId, companyId },
+    });
+
+    if (!ticket) {
+      throw new NotFoundException('Ticket not found');
+    }
+
+    const timeLog = await this.prisma.timeLog.create({
+      data: {
+        date: new Date(dto.date),
+        hours: dto.hours,
+        description: dto.description,
+        ticketId,
+        userId,
+        companyId,
+      },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+
+    // Recalculate ticket actualHours
+    await this.recalculateActualHours(ticketId);
+
+    return timeLog;
+  }
+
+  async getTimeLogs(companyId: string, ticketId: string) {
+    return this.prisma.timeLog.findMany({
+      where: { ticketId, companyId },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true } },
+      },
+      orderBy: { date: 'desc' },
+    });
+  }
+
+  async deleteTimeLog(
+    companyId: string,
+    ticketId: string,
+    timeLogId: string,
+  ) {
+    const timeLog = await this.prisma.timeLog.findFirst({
+      where: { id: timeLogId, ticketId, companyId },
+    });
+
+    if (!timeLog) {
+      throw new NotFoundException('Time log not found');
+    }
+
+    await this.prisma.timeLog.delete({ where: { id: timeLogId } });
+    await this.recalculateActualHours(ticketId);
+
+    return { success: true };
+  }
+
+  private async recalculateActualHours(ticketId: string) {
+    const result = await this.prisma.timeLog.aggregate({
+      where: { ticketId },
+      _sum: { hours: true },
+    });
+
+    await this.prisma.ticket.update({
+      where: { id: ticketId },
+      data: { actualHours: result._sum.hours || 0 },
+    });
   }
 }

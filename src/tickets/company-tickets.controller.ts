@@ -17,6 +17,7 @@ import {
   QueryTicketDto,
   CreateCommentDto,
   CreateReminderDto,
+  CreateTimeLogDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -197,5 +198,37 @@ export class CompanyTicketsController {
     @Param('reminderId') reminderId: string,
   ) {
     return this.ticketsService.deleteReminder(companyId, ticketId, reminderId);
+  }
+
+  // ==================== Time Logs ====================
+
+  @Post(':id/time-logs')
+  @RequireEdit('tickets', 'allTickets')
+  addTimeLog(
+    @Param('companyId') companyId: string,
+    @Param('id') ticketId: string,
+    @Request() req: any,
+    @Body() dto: CreateTimeLogDto,
+  ) {
+    return this.ticketsService.addTimeLog(companyId, ticketId, req.user.id, dto);
+  }
+
+  @Get(':id/time-logs')
+  @RequireView('tickets', 'allTickets')
+  getTimeLogs(
+    @Param('companyId') companyId: string,
+    @Param('id') ticketId: string,
+  ) {
+    return this.ticketsService.getTimeLogs(companyId, ticketId);
+  }
+
+  @Delete(':id/time-logs/:timeLogId')
+  @RequireDelete('tickets', 'allTickets')
+  deleteTimeLog(
+    @Param('companyId') companyId: string,
+    @Param('id') ticketId: string,
+    @Param('timeLogId') timeLogId: string,
+  ) {
+    return this.ticketsService.deleteTimeLog(companyId, ticketId, timeLogId);
   }
 }

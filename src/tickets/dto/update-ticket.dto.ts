@@ -51,4 +51,8 @@ export class UpdateTicketDto {
   @IsOptional()
   @IsString()
   tags?: string;
+
+  @IsOptional()
+  @IsString()
+  sprintId?: string;
 }

@@ -177,6 +177,8 @@ model Company {
   payrolls           Payroll[]
   performanceReviews PerformanceReview[]
   tickets            Ticket[]
+  sprints            Sprint[]
+  timeLogs           TimeLog[]
   chatRooms          ChatRoom[]
   leaves             Leave[]
   leaveBalances      LeaveBalance[]
@@ -335,6 +337,10 @@ model User {
   createdTickets  Ticket[]         @relation("TicketCreator")
   ticketComments  TicketComment[]
   ticketReminders TicketReminder[]
+
+  // Sprints & Time Logs
+  createdSprints Sprint[]  @relation("SprintCreator")
+  timeLogs       TimeLog[] @relation("TimeLogUser")
 
   // Chat
   chatRoomsCreated   ChatRoom[]            @relation("ChatRoomCreator")
@@ -1698,6 +1704,78 @@ model PerformanceReviewItem {
   @@map("performance_review_items")
 }
 
+// ==================== СПРИНТОВЕ И ЛОГВАНЕ НА ВРЕМЕ ====================
+
+// Статус на спринт
+enum SprintStatus {
+  PLANNING  // Планиране
+  ACTIVE    // Активен
+  COMPLETED // Завършен
+  CANCELLED // Анулиран
+}
+
+// Спринт (итерация)
+model Sprint {
+  id          String       @id @default(cuid())
+  name        String // Име на спринта
+  description String?      @db.Text // Описание / Цел на спринта
+  status      SprintStatus @default(PLANNING)
+
+  // Дати
+  startDate DateTime? // Начална дата
+  endDate   DateTime? // Крайна дата (auto-calculated или ръчна)
+
+  // Конфигурация за автоматично изчисление
+  workersCount Int?     // Ръчно зададен брой работници (null = авто от assignees)
+  hoursPerDay  Decimal? @db.Decimal(4, 2) // Работни часове на ден (по подразбиране 8)
+
+  // Връзка с компания
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Създаден от
+  createdById String
+  createdBy   User @relation("SprintCreator", fields: [createdById], references: [id])
+
+  // Тикети в спринта
+  tickets Ticket[]
+
+  // Аудит
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, status])
+  @@index([companyId, startDate])
+  @@map("sprints")
+}
+
+// Запис на отработено време
+model TimeLog {
+  id          String   @id @default(cuid())
+  date        DateTime // Дата на работа
+  hours       Decimal  @db.Decimal(5, 2) // Отработени часове
+  description String?  @db.Text // Какво е свършено
+
+  // Връзки
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  userId String // Кой е логнал часовете
+  user   User   @relation("TimeLogUser", fields: [userId], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Аудит
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ticketId])
+  @@index([userId, date])
+  @@index([companyId, date])
+  @@map("time_logs")
+}
+
 // ==================== ТИКЕТИ (ЗАДАЧИ) ====================
 
 // Приоритет на тикет
@@ -1765,6 +1843,13 @@ model Ticket {
   // Тагове (JSON масив)
   tags String? // Comma-separated тагове
 
+  // Спринт (по избор)
+  sprintId String?
+  sprint   Sprint? @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+
+  // Записи за време
+  timeLogs TimeLog[]
+
   // Коментари и напомняния
   comments  TicketComment[]
   reminders TicketReminder[]
@@ -1779,6 +1864,7 @@ model Ticket {
   @@index([companyId, assigneeId])
   @@index([companyId, createdById])
   @@index([companyId, dueDate])
+  @@index([companyId, sprintId])
   @@map("tickets")
 }
 

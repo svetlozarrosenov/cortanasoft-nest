@@ -48,4 +48,8 @@ export class QueryTicketDto {
   @IsOptional()
   @IsString()
   sortOrder?: 'asc' | 'desc';
+
+  @IsOptional()
+  @IsString()
+  sprintId?: string;
 }

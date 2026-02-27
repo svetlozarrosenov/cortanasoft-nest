@@ -3,3 +3,7 @@ export * from './update-ticket.dto';
 export * from './query-ticket.dto';
 export * from './create-comment.dto';
 export * from './create-reminder.dto';
+export * from './create-sprint.dto';
+export * from './update-sprint.dto';
+export * from './manage-sprint-tickets.dto';
+export * from './create-time-log.dto';
