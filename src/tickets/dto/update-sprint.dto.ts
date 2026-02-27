@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsDateString, IsEnum, IsNumber, Min } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsEnum, IsNumber, IsArray, Min } from 'class-validator';
 
 export enum SprintStatus {
   PLANNING = 'PLANNING',
@@ -31,10 +31,10 @@ export class UpdateSprintDto {
   @IsOptional()
   @IsNumber()
   @Min(1)
-  workersCount?: number;
+  hoursPerDay?: number;
 
   @IsOptional()
-  @IsNumber()
-  @Min(1)
-  hoursPerDay?: number;
+  @IsArray()
+  @IsString({ each: true })
+  memberIds?: string[];
 }

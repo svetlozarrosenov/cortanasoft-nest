@@ -14,6 +14,7 @@ import {
   CreateSprintDto,
   UpdateSprintDto,
   ManageSprintTicketsDto,
+  ManageSprintMembersDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -101,6 +102,27 @@ export class CompanySprintsController {
     @Body() dto: ManageSprintTicketsDto,
   ) {
     return this.sprintsService.removeTickets(companyId, id, dto);
+  }
+
+  // Member management
+  @Post(':id/members')
+  @RequireEdit('tickets', 'sprints')
+  addMembers(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: ManageSprintMembersDto,
+  ) {
+    return this.sprintsService.addMembers(companyId, id, dto);
+  }
+
+  @Delete(':id/members')
+  @RequireEdit('tickets', 'sprints')
+  removeMembers(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: ManageSprintMembersDto,
+  ) {
+    return this.sprintsService.removeMembers(companyId, id, dto);
   }
 
   @Post(':id/calculate-end-date')

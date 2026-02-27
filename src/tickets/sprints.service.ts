@@ -6,19 +6,32 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateSprintDto } from './dto/create-sprint.dto';
 import { UpdateSprintDto } from './dto/update-sprint.dto';
 import { ManageSprintTicketsDto } from './dto/manage-sprint-tickets.dto';
+import { ManageSprintMembersDto } from './dto/manage-sprint-members.dto';
+
+const MEMBER_INCLUDE = {
+  user: {
+    select: { id: true, firstName: true, lastName: true, email: true },
+  },
+};
 
 const SPRINT_INCLUDE = {
   createdBy: {
     select: { id: true, firstName: true, lastName: true, email: true },
   },
+  members: {
+    include: MEMBER_INCLUDE,
+  },
   _count: {
-    select: { tickets: true },
+    select: { tickets: true, members: true },
   },
 };
 
 const SPRINT_DETAIL_INCLUDE = {
   createdBy: {
     select: { id: true, firstName: true, lastName: true, email: true },
+  },
+  members: {
+    include: MEMBER_INCLUDE,
   },
   tickets: {
     include: {
@@ -32,7 +45,7 @@ const SPRINT_DETAIL_INCLUDE = {
     ],
   },
   _count: {
-    select: { tickets: true },
+    select: { tickets: true, members: true },
   },
 };
 
@@ -48,10 +61,19 @@ export class SprintsService {
         name: dto.name,
         description: dto.description,
         startDate: dto.startDate ? new Date(dto.startDate) : null,
-        workersCount: dto.workersCount,
         hoursPerDay: dto.hoursPerDay,
         companyId,
         createdById: userId,
+        ...(dto.memberIds && dto.memberIds.length > 0
+          ? {
+              members: {
+                create: dto.memberIds.map((memberId) => ({
+                  userId: memberId,
+                  companyId,
+                })),
+              },
+            }
+          : {}),
       },
       include: SPRINT_INCLUDE,
     });
@@ -141,17 +163,31 @@ export class SprintsService {
     if (dto.status !== undefined) updateData.status = dto.status;
     if (dto.startDate !== undefined) updateData.startDate = dto.startDate ? new Date(dto.startDate) : null;
     if (dto.endDate !== undefined) updateData.endDate = dto.endDate ? new Date(dto.endDate) : null;
-    if (dto.workersCount !== undefined) updateData.workersCount = dto.workersCount;
     if (dto.hoursPerDay !== undefined) updateData.hoursPerDay = dto.hoursPerDay;
 
-    const sprint = await this.prisma.sprint.update({
+    await this.prisma.sprint.update({
       where: { id },
       data: updateData,
-      include: SPRINT_INCLUDE,
     });
 
+    // Update members if provided
+    if (dto.memberIds !== undefined) {
+      // Replace all members: delete existing, create new
+      await this.prisma.sprintMember.deleteMany({ where: { sprintId: id } });
+      if (dto.memberIds.length > 0) {
+        await this.prisma.sprintMember.createMany({
+          data: dto.memberIds.map((userId) => ({
+            sprintId: id,
+            userId,
+            companyId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
     // Recalculate end date if relevant fields changed
-    if (dto.startDate !== undefined || dto.workersCount !== undefined || dto.hoursPerDay !== undefined) {
+    if (dto.startDate !== undefined || dto.memberIds !== undefined || dto.hoursPerDay !== undefined) {
       await this.calculateEndDate(id);
     }
 
@@ -223,6 +259,54 @@ export class SprintsService {
     return this.findOne(companyId, sprintId);
   }
 
+  // ==================== Member Management ====================
+
+  async addMembers(companyId: string, sprintId: string, dto: ManageSprintMembersDto) {
+    const sprint = await this.prisma.sprint.findFirst({
+      where: { id: sprintId, companyId },
+    });
+
+    if (!sprint) {
+      throw new NotFoundException('Sprint not found');
+    }
+
+    await this.prisma.sprintMember.createMany({
+      data: dto.memberIds.map((userId) => ({
+        sprintId,
+        userId,
+        companyId,
+      })),
+      skipDuplicates: true,
+    });
+
+    // Recalculate end date
+    await this.calculateEndDate(sprintId);
+
+    return this.findOne(companyId, sprintId);
+  }
+
+  async removeMembers(companyId: string, sprintId: string, dto: ManageSprintMembersDto) {
+    const sprint = await this.prisma.sprint.findFirst({
+      where: { id: sprintId, companyId },
+    });
+
+    if (!sprint) {
+      throw new NotFoundException('Sprint not found');
+    }
+
+    await this.prisma.sprintMember.deleteMany({
+      where: {
+        sprintId,
+        userId: { in: dto.memberIds },
+      },
+    });
+
+    // Recalculate end date
+    await this.calculateEndDate(sprintId);
+
+    return this.findOne(companyId, sprintId);
+  }
+
   // ==================== End Date Calculation ====================
 
   async calculateEndDate(sprintId: string) {
@@ -233,6 +317,7 @@ export class SprintsService {
           where: { status: { not: 'CANCELLED' } },
           select: { estimatedHours: true, assigneeId: true },
         },
+        members: true,
       },
     });
 
@@ -253,11 +338,14 @@ export class SprintsService {
       return { endDate: sprint.startDate, totalEstimatedHours: 0, workersCount: 1 };
     }
 
+    // Use members count, fall back to unique ticket assignees
     const uniqueAssignees = new Set(
       sprint.tickets.map((t) => t.assigneeId).filter(Boolean),
     );
 
-    const workersCount = sprint.workersCount || Math.max(uniqueAssignees.size, 1);
+    const workersCount = sprint.members.length > 0
+      ? sprint.members.length
+      : Math.max(uniqueAssignees.size, 1);
     const hoursPerDay = sprint.hoursPerDay ? Number(sprint.hoursPerDay) : 8;
     const workingDays = Math.ceil(totalEstimatedHours / (workersCount * hoursPerDay));
 
@@ -300,6 +388,7 @@ export class SprintsService {
             actualHours: true,
           },
         },
+        _count: { select: { members: true } },
       },
     });
 
@@ -368,6 +457,7 @@ export class SprintsService {
       percentComplete,
       hoursProgress,
       byStatus,
+      membersCount: sprint._count.members,
       endDate: sprint.endDate,
       daysRemaining,
       isOverdue,

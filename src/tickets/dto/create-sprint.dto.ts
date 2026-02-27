@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsDateString, IsNumber, Min } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsNumber, IsArray, Min } from 'class-validator';
 
 export class CreateSprintDto {
   @IsString()
@@ -15,10 +15,10 @@ export class CreateSprintDto {
   @IsOptional()
   @IsNumber()
   @Min(1)
-  workersCount?: number;
+  hoursPerDay?: number;
 
   @IsOptional()
-  @IsNumber()
-  @Min(1)
-  hoursPerDay?: number;
+  @IsArray()
+  @IsString({ each: true })
+  memberIds?: string[];
 }

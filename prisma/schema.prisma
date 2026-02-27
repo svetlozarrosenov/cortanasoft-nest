@@ -178,6 +178,7 @@ model Company {
   performanceReviews PerformanceReview[]
   tickets            Ticket[]
   sprints            Sprint[]
+  sprintMembers      SprintMember[]
   timeLogs           TimeLog[]
   chatRooms          ChatRoom[]
   leaves             Leave[]
@@ -339,8 +340,9 @@ model User {
   ticketReminders TicketReminder[]
 
   // Sprints & Time Logs
-  createdSprints Sprint[]  @relation("SprintCreator")
-  timeLogs       TimeLog[] @relation("TimeLogUser")
+  createdSprints    Sprint[]       @relation("SprintCreator")
+  sprintMemberships SprintMember[] @relation("SprintMemberUser")
+  timeLogs          TimeLog[]      @relation("TimeLogUser")
 
   // Chat
   chatRoomsCreated   ChatRoom[]            @relation("ChatRoomCreator")
@@ -1726,8 +1728,7 @@ model Sprint {
   endDate   DateTime? // Крайна дата (auto-calculated или ръчна)
 
   // Конфигурация за автоматично изчисление
-  workersCount Int?     // Ръчно зададен брой работници (null = авто от assignees)
-  hoursPerDay  Decimal? @db.Decimal(4, 2) // Работни часове на ден (по подразбиране 8)
+  hoursPerDay Decimal? @db.Decimal(4, 2) // Работни часове на ден (по подразбиране 8)
 
   // Връзка с компания
   companyId String
@@ -1736,6 +1737,9 @@ model Sprint {
   // Създаден от
   createdById String
   createdBy   User @relation("SprintCreator", fields: [createdById], references: [id])
+
+  // Членове на екипа
+  members SprintMember[]
 
   // Тикети в спринта
   tickets Ticket[]
@@ -1747,6 +1751,25 @@ model Sprint {
   @@index([companyId, status])
   @@index([companyId, startDate])
   @@map("sprints")
+}
+
+model SprintMember {
+  id       String   @id @default(cuid())
+  joinedAt DateTime @default(now())
+
+  sprintId  String
+  sprint    Sprint @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+
+  userId    String
+  user      User @relation("SprintMemberUser", fields: [userId], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([sprintId, userId])
+  @@index([sprintId])
+  @@index([userId])
+  @@map("sprint_members")
 }
 
 // Запис на отработено време

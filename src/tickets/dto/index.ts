@@ -6,4 +6,5 @@ export * from './create-reminder.dto';
 export * from './create-sprint.dto';
 export * from './update-sprint.dto';
 export * from './manage-sprint-tickets.dto';
+export * from './manage-sprint-members.dto';
 export * from './create-time-log.dto';
