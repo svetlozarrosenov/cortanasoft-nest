@@ -250,7 +250,7 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
       },
       {
         key: 'orders',
-        labelKey: 'modules.erp.orders',
+        labelKey: 'modules.erp.sales',
         actions: ['view', 'create', 'edit', 'delete'],
         tables: [
           {
@@ -373,7 +373,7 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
       },
       {
         key: 'orders',
-        labelKey: 'modules.production.orders',
+        labelKey: 'modules.production.workOrders',
         actions: ['view', 'create', 'edit', 'delete'],
         tables: [
           {
