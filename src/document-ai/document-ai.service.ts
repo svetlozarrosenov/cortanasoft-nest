@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import Anthropic from '@anthropic-ai/sdk';
 
 export interface InvoiceLineItem {
   description: string;
@@ -27,31 +28,25 @@ export interface ParsedInvoiceData {
 export class DocumentAIService {
   private readonly logger = new Logger(DocumentAIService.name);
   private isConfigured = false;
-  private projectId: string | undefined;
-  private location: string | undefined;
-  private processorId: string | undefined;
+  private anthropic: Anthropic;
 
   constructor(private configService: ConfigService) {
-    this.initializeDocumentAI();
+    this.initialize();
   }
 
-  private initializeDocumentAI() {
-    this.projectId = this.configService.get<string>('GOOGLE_CLOUD_PROJECT_ID');
-    this.location =
-      this.configService.get<string>('GOOGLE_CLOUD_LOCATION') || 'eu';
-    this.processorId = this.configService.get<string>(
-      'GOOGLE_DOCUMENT_AI_PROCESSOR_ID',
-    );
+  private initialize() {
+    const apiKey = this.configService.get<string>('ANTHROPIC_API_KEY');
 
-    if (!this.projectId || !this.processorId) {
+    if (!apiKey) {
       this.logger.warn(
-        'Google Document AI not configured. Set GOOGLE_CLOUD_PROJECT_ID and GOOGLE_DOCUMENT_AI_PROCESSOR_ID in .env',
+        'Anthropic API not configured. Set ANTHROPIC_API_KEY in .env',
       );
       return;
     }
 
+    this.anthropic = new Anthropic({ apiKey });
     this.isConfigured = true;
-    this.logger.log('Google Document AI configured successfully');
+    this.logger.log('Anthropic Claude API configured successfully');
   }
 
   isEnabled(): boolean {
@@ -59,16 +54,15 @@ export class DocumentAIService {
   }
 
   /**
-   * Parse an invoice image using Google Document AI
+   * Parse an invoice image from URL using Claude Vision
    */
   async parseInvoice(imageUrl: string): Promise<ParsedInvoiceData> {
     if (!this.isConfigured) {
-      this.logger.warn('Document AI not configured, returning empty result');
+      this.logger.warn('Claude API not configured, returning empty result');
       return { lineItems: [], confidence: 0 };
     }
 
     try {
-      // Fetch the image from Firebase Storage URL
       const imageResponse = await fetch(imageUrl);
       if (!imageResponse.ok) {
         throw new Error(`Failed to fetch image: ${imageResponse.statusText}`);
@@ -79,10 +73,7 @@ export class DocumentAIService {
       const mimeType =
         imageResponse.headers.get('content-type') || 'image/jpeg';
 
-      // Call Google Document AI API
-      const result = await this.callDocumentAI(base64Image, mimeType);
-
-      return result;
+      return await this.callClaude(base64Image, mimeType);
     } catch (error) {
       this.logger.error('Failed to parse invoice:', error);
       throw error;
@@ -90,200 +81,146 @@ export class DocumentAIService {
   }
 
   /**
-   * Parse invoice from base64 image data
+   * Parse invoice from base64 image data using Claude Vision
    */
   async parseInvoiceFromBase64(
     base64Data: string,
     mimeType: string,
   ): Promise<ParsedInvoiceData> {
     if (!this.isConfigured) {
-      this.logger.warn('Document AI not configured, returning empty result');
+      this.logger.warn('Claude API not configured, returning empty result');
       return { lineItems: [], confidence: 0 };
     }
 
     try {
-      // Remove data URL prefix if present
       const base64Image = base64Data.replace(/^data:image\/\w+;base64,/, '');
-
-      const result = await this.callDocumentAI(base64Image, mimeType);
-      return result;
+      return await this.callClaude(base64Image, mimeType);
     } catch (error) {
       this.logger.error('Failed to parse invoice from base64:', error);
       throw error;
     }
   }
 
-  private async callDocumentAI(
+  private async callClaude(
     base64Image: string,
     mimeType: string,
   ): Promise<ParsedInvoiceData> {
-    const apiKey = this.configService.get<string>('GOOGLE_CLOUD_API_KEY');
+    const response = await this.anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: mimeType as
+                  | 'image/jpeg'
+                  | 'image/png'
+                  | 'image/gif'
+                  | 'image/webp',
+                data: base64Image,
+              },
+            },
+            {
+              type: 'text',
+              text: `Analyze this invoice image and extract the data as JSON. Return ONLY valid JSON, no markdown, no code fences, no explanation.
 
-    if (!apiKey) {
-      throw new Error('GOOGLE_CLOUD_API_KEY is not configured');
+Required JSON structure:
+{
+  "invoiceNumber": "string or null",
+  "invoiceDate": "YYYY-MM-DD or null",
+  "supplierName": "string or null",
+  "supplierVatNumber": "string or null",
+  "supplierAddress": "string or null",
+  "totalAmount": number or null,
+  "vatAmount": number or null,
+  "subtotal": number or null,
+  "lineItems": [
+    {
+      "description": "string",
+      "quantity": number,
+      "unitPrice": number,
+      "totalPrice": number,
+      "productCode": "string or null"
     }
+  ],
+  "confidence": number between 0 and 1
+}
 
-    const endpoint = `https://${this.location}-documentai.googleapis.com/v1/projects/${this.projectId}/locations/${this.location}/processors/${this.processorId}:process?key=${apiKey}`;
-
-    const requestBody = {
-      rawDocument: {
-        content: base64Image,
-        mimeType: mimeType,
-      },
-    };
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody),
+Rules:
+- Extract ALL line items from the invoice
+- Dates must be in YYYY-MM-DD format
+- Numbers must be plain numbers (no currency symbols)
+- If a value is not found, use null
+- confidence: your estimate of extraction accuracy (0-1)
+- For line items: calculate missing totalPrice = quantity * unitPrice if possible
+- The invoice may be in Bulgarian or any other language - extract data regardless of language`,
+            },
+          ],
+        },
+      ],
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      this.logger.error(`Document AI API error: ${errorText}`);
-      throw new Error(`Document AI API error: ${response.status}`);
-    }
+    const text =
+      response.content[0].type === 'text' ? response.content[0].text : '';
 
-    const result = await response.json();
-    return this.extractInvoiceData(result);
+    const parsed = this.parseJsonResponse(text);
+
+    return {
+      invoiceNumber: parsed.invoiceNumber || undefined,
+      invoiceDate: parsed.invoiceDate
+        ? this.parseDate(parsed.invoiceDate)
+        : undefined,
+      supplierName: parsed.supplierName || undefined,
+      supplierVatNumber: parsed.supplierVatNumber || undefined,
+      supplierAddress: parsed.supplierAddress || undefined,
+      totalAmount: parsed.totalAmount ?? undefined,
+      vatAmount: parsed.vatAmount ?? undefined,
+      subtotal: parsed.subtotal ?? undefined,
+      lineItems: (parsed.lineItems || []).map((item: any) => ({
+        description: item.description || '',
+        quantity: item.quantity || 1,
+        unitPrice: item.unitPrice || 0,
+        totalPrice: item.totalPrice || 0,
+        productCode: item.productCode || undefined,
+      })),
+      confidence: parsed.confidence || 0.8,
+    };
   }
 
-  private extractInvoiceData(apiResponse: any): ParsedInvoiceData {
-    const document = apiResponse.document;
+  private parseJsonResponse(text: string): any {
+    // Try direct parse first
+    try {
+      return JSON.parse(text);
+    } catch {
+      // Try to extract JSON block from response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          return JSON.parse(jsonMatch[0]);
+        } catch {
+          this.logger.error('Failed to parse extracted JSON from response');
+        }
+      }
 
-    if (!document) {
+      this.logger.error(
+        'Failed to parse Claude response as JSON:',
+        text.substring(0, 200),
+      );
       return { lineItems: [], confidence: 0 };
     }
-
-    const entities = document.entities || [];
-    const parsed: ParsedInvoiceData = {
-      lineItems: [],
-      confidence: 0,
-      rawText: document.text,
-    };
-
-    let totalConfidence = 0;
-    let confidenceCount = 0;
-
-    for (const entity of entities) {
-      const type = entity.type?.toLowerCase() || '';
-      const value = entity.mentionText || entity.normalizedValue?.text || '';
-      const confidence = entity.confidence || 0;
-
-      totalConfidence += confidence;
-      confidenceCount++;
-
-      switch (type) {
-        case 'invoice_id':
-        case 'invoice_number':
-          parsed.invoiceNumber = value;
-          break;
-        case 'invoice_date':
-          parsed.invoiceDate = this.parseDate(value, entity.normalizedValue);
-          break;
-        case 'supplier_name':
-        case 'vendor_name':
-          parsed.supplierName = value;
-          break;
-        case 'supplier_tax_id':
-        case 'vendor_tax_id':
-        case 'supplier_vat':
-          parsed.supplierVatNumber = value;
-          break;
-        case 'supplier_address':
-        case 'vendor_address':
-          parsed.supplierAddress = value;
-          break;
-        case 'total_amount':
-        case 'total':
-          parsed.totalAmount = this.parseNumber(value, entity.normalizedValue);
-          break;
-        case 'total_tax_amount':
-        case 'vat_amount':
-        case 'tax':
-          parsed.vatAmount = this.parseNumber(value, entity.normalizedValue);
-          break;
-        case 'net_amount':
-        case 'subtotal':
-          parsed.subtotal = this.parseNumber(value, entity.normalizedValue);
-          break;
-        case 'line_item':
-          const lineItem = this.parseLineItem(entity);
-          if (lineItem) {
-            parsed.lineItems.push(lineItem);
-          }
-          break;
-      }
-    }
-
-    // Calculate average confidence
-    parsed.confidence =
-      confidenceCount > 0 ? totalConfidence / confidenceCount : 0;
-
-    return parsed;
   }
 
-  private parseLineItem(entity: any): InvoiceLineItem | null {
-    const properties = entity.properties || [];
-    const item: InvoiceLineItem = {
-      description: '',
-      quantity: 1,
-      unitPrice: 0,
-      totalPrice: 0,
-    };
-
-    for (const prop of properties) {
-      const type = prop.type?.toLowerCase() || '';
-      const value = prop.mentionText || prop.normalizedValue?.text || '';
-
-      switch (type) {
-        case 'line_item/description':
-        case 'description':
-          item.description = value;
-          break;
-        case 'line_item/quantity':
-        case 'quantity':
-          item.quantity = this.parseNumber(value, prop.normalizedValue) || 1;
-          break;
-        case 'line_item/unit_price':
-        case 'unit_price':
-          item.unitPrice = this.parseNumber(value, prop.normalizedValue) || 0;
-          break;
-        case 'line_item/amount':
-        case 'amount':
-        case 'total':
-          item.totalPrice = this.parseNumber(value, prop.normalizedValue) || 0;
-          break;
-        case 'line_item/product_code':
-        case 'product_code':
-        case 'sku':
-          item.productCode = value;
-          break;
-      }
+  private parseDate(value: string): string {
+    // Already in YYYY-MM-DD format
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return value;
     }
 
-    // Calculate missing values
-    if (item.totalPrice === 0 && item.unitPrice > 0) {
-      item.totalPrice = item.unitPrice * item.quantity;
-    }
-    if (item.unitPrice === 0 && item.totalPrice > 0 && item.quantity > 0) {
-      item.unitPrice = item.totalPrice / item.quantity;
-    }
-
-    return item.description ? item : null;
-  }
-
-  private parseDate(value: string, normalizedValue?: any): string {
-    if (normalizedValue?.dateValue) {
-      const { year, month, day } = normalizedValue.dateValue;
-      if (year && month && day) {
-        return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      }
-    }
-
-    // Try to parse the date string
+    // Try to parse ISO string
     const date = new Date(value);
     if (!isNaN(date.getTime())) {
       return date.toISOString().split('T')[0];
@@ -297,19 +234,5 @@ export class DocumentAIService {
     }
 
     return value;
-  }
-
-  private parseNumber(value: string, normalizedValue?: any): number {
-    if (normalizedValue?.moneyValue?.units) {
-      return (
-        Number(normalizedValue.moneyValue.units) +
-        (normalizedValue.moneyValue.nanos || 0) / 1e9
-      );
-    }
-
-    // Clean the string and parse
-    const cleaned = value.replace(/[^\d,.-]/g, '').replace(',', '.');
-
-    return parseFloat(cleaned) || 0;
   }
 }

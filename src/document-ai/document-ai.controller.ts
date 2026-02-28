@@ -9,6 +9,11 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CompanyAccessGuard } from '../common/guards/company-access.guard';
+import {
+  PermissionsGuard,
+  RequireView,
+} from '../common/guards/permissions.guard';
 import { DocumentAIService, ParsedInvoiceData } from './document-ai.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
@@ -36,7 +41,7 @@ interface ScanResult extends ParsedInvoiceData {
 }
 
 @Controller('companies/:companyId/cortana')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)
 export class DocumentAIController {
   constructor(
     private documentAIService: DocumentAIService,
@@ -47,6 +52,7 @@ export class DocumentAIController {
    * Check if Cortana (Document AI) is enabled
    */
   @Get('status')
+  @RequireView('ai', 'invoiceScanning')
   getStatus() {
     return {
       enabled: this.documentAIService.isEnabled(),
@@ -60,6 +66,7 @@ export class DocumentAIController {
    */
   @Post('scan-invoice')
   @HttpCode(HttpStatus.OK)
+  @RequireView('ai', 'invoiceScanning')
   async scanInvoice(
     @Param('companyId') companyId: string,
     @Body() dto: ScanInvoiceDto,

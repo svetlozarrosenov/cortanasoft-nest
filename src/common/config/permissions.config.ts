@@ -636,6 +636,18 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
     ],
   },
   {
+    key: 'ai',
+    labelKey: 'modules.ai.title',
+    icon: 'Sparkles',
+    pages: [
+      {
+        key: 'invoiceScanning',
+        labelKey: 'modules.ai.invoiceScanning',
+        actions: ['view'],
+      },
+    ],
+  },
+  {
     key: 'admin',
     labelKey: 'modules.admin.title',
     icon: 'Shield',
