@@ -264,11 +264,81 @@ export class OrdersService {
     return order;
   }
 
+  // Valid status transitions state machine
+  private readonly validTransitions: Record<OrderStatus, OrderStatus[]> = {
+    DRAFT: ['PENDING', 'CANCELLED'],
+    PENDING: ['CONFIRMED', 'CANCELLED'],
+    CONFIRMED: ['PROCESSING', 'CANCELLED'],
+    PROCESSING: ['SHIPPED', 'CANCELLED'],
+    SHIPPED: ['DELIVERED', 'CANCELLED'],
+    DELIVERED: [],
+    CANCELLED: [],
+  };
+
   async update(companyId: string, id: string, dto: UpdateOrderDto) {
     const order = await this.findOne(companyId, id);
 
-    // Only allow updating pending orders (not confirmed or later)
-    if (order.status !== 'PENDING' && dto.status === undefined) {
+    // If status change is requested, handle it through the state machine
+    if (dto.status && dto.status !== order.status) {
+      const allowedTargets = this.validTransitions[order.status] || [];
+      if (!allowedTargets.includes(dto.status)) {
+        throw new BadRequestException(ErrorMessages.orders.invalidStatusTransition);
+      }
+
+      // Route to confirm/cancel for transitions with inventory side effects
+      if (dto.status === 'CONFIRMED' && order.status === 'PENDING') {
+        return this.confirm(companyId, id);
+      }
+      if (dto.status === 'CANCELLED') {
+        return this.cancel(companyId, id);
+      }
+
+      // Simple status transitions (CONFIRMED→PROCESSING, PROCESSING→SHIPPED, SHIPPED→DELIVERED)
+      return this.prisma.order.update({
+        where: { id },
+        data: { status: dto.status },
+        include: {
+          location: true,
+          customer: true,
+          currency: true,
+          createdBy: {
+            select: { id: true, firstName: true, lastName: true },
+          },
+          items: {
+            include: {
+              product: true,
+              inventoryBatch: true,
+            },
+          },
+          _count: { select: { items: true } },
+        },
+      });
+    }
+
+    // Field updates only allowed for PENDING orders
+    if (order.status !== 'PENDING') {
+      // Allow payment status updates for non-pending orders
+      if (dto.paymentStatus && Object.keys(dto).length === 1) {
+        return this.prisma.order.update({
+          where: { id },
+          data: { paymentStatus: dto.paymentStatus },
+          include: {
+            location: true,
+            customer: true,
+            currency: true,
+            createdBy: {
+              select: { id: true, firstName: true, lastName: true },
+            },
+            items: {
+              include: {
+                product: true,
+                inventoryBatch: true,
+              },
+            },
+            _count: { select: { items: true } },
+          },
+        });
+      }
       throw new BadRequestException(ErrorMessages.orders.canOnlyUpdatePending);
     }
 
@@ -286,7 +356,6 @@ export class OrdersService {
       where: { id },
       data: {
         ...(dto.orderDate && { orderDate: new Date(dto.orderDate) }),
-        ...(dto.status && { status: dto.status }),
         ...(dto.customerName && { customerName: dto.customerName }),
         ...(dto.customerEmail !== undefined && {
           customerEmail: dto.customerEmail,
@@ -439,30 +508,6 @@ export class OrdersService {
           _count: { select: { items: true } },
         },
       });
-    });
-  }
-
-  async updateStatus(companyId: string, id: string, status: OrderStatus) {
-    await this.findOne(companyId, id);
-
-    return this.prisma.order.update({
-      where: { id },
-      data: { status },
-      include: {
-        location: true,
-        customer: true,
-        currency: true,
-        createdBy: {
-          select: { id: true, firstName: true, lastName: true },
-        },
-        items: {
-          include: {
-            product: true,
-            inventoryBatch: true,
-          },
-        },
-        _count: { select: { items: true } },
-      },
     });
   }
 

@@ -59,6 +59,7 @@ export const ErrorMessages = {
     alreadyCancelled: 'Поръчката вече е отменена',
     cannotCancelDelivered: 'Не може да отмените доставени поръчки',
     canOnlyDeletePending: 'Може да изтриете само чакащи поръчки',
+    invalidStatusTransition: 'Невалиден преход на статус',
   },
 
   // ==================== Доставчици ====================
@@ -180,6 +181,15 @@ export const ErrorMessages = {
     notFound: 'Тикетът не е намерен',
     commentNotFound: 'Коментарът не е намерен',
     cannotDeleteClosed: 'Не може да изтриете затворен тикет',
+    invalidStatusTransition: 'Невалиден преход на статус на задача',
+    invalidTimeFormat: 'Невалиден формат за време. Примери: "1d 2h", "3h 30m", "45m"',
+    timeLogNotFound: 'Записът за време не е намерен',
+  },
+
+  // ==================== Спринтове ====================
+  sprints: {
+    notFound: 'Спринтът не е намерен',
+    invalidStatusTransition: 'Невалиден преход на статус на спринт',
   },
 
   // ==================== CRM ====================

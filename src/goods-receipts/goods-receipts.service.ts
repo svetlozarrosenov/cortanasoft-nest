@@ -249,6 +249,82 @@ export class GoodsReceiptsService {
       }
     }
 
+    // If items are provided, validate products and replace all items in a transaction
+    if (dto.items && dto.items.length > 0) {
+      const newItems = dto.items;
+      const company = await this.prisma.company.findUnique({
+        where: { id: companyId },
+      });
+
+      const productIds = newItems.map((item) => item.productId);
+      const products = await this.prisma.product.findMany({
+        where: { id: { in: productIds }, companyId },
+      });
+      if (products.length !== productIds.length) {
+        throw new BadRequestException(ErrorMessages.goodsReceipts.productsNotFound);
+      }
+
+      const currencyId = dto.currencyId || receipt.currencyId;
+
+      return this.prisma.$transaction(async (tx) => {
+        // Delete existing items
+        await tx.goodsReceiptItem.deleteMany({
+          where: { goodsReceiptId: id },
+        });
+
+        // Update receipt with new items
+        return tx.goodsReceipt.update({
+          where: { id },
+          data: {
+            ...(dto.receiptDate && { receiptDate: new Date(dto.receiptDate) }),
+            ...(dto.locationId && { locationId: dto.locationId }),
+            ...(dto.supplierId !== undefined && {
+              supplierId: dto.supplierId || null,
+            }),
+            ...(dto.invoiceNumber !== undefined && {
+              invoiceNumber: dto.invoiceNumber,
+            }),
+            ...(dto.invoiceDate !== undefined && {
+              invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : null,
+            }),
+            ...(dto.notes !== undefined && { notes: dto.notes }),
+            ...(dto.attachmentUrl !== undefined && {
+              attachmentUrl: dto.attachmentUrl || null,
+            }),
+            ...(dto.currencyId && { currencyId: dto.currencyId }),
+            ...(dto.exchangeRate !== undefined && {
+              exchangeRate: dto.exchangeRate,
+            }),
+            items: {
+              create: newItems.map((item) => ({
+                productId: item.productId,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                vatRate: item.vatRate ?? (company?.vatNumber ? 20 : 0),
+                currencyId: item.currencyId || currencyId,
+                exchangeRate: item.exchangeRate ?? 1,
+              })),
+            },
+          },
+          include: {
+            location: true,
+            supplier: true,
+            currency: true,
+            createdBy: {
+              select: { id: true, firstName: true, lastName: true },
+            },
+            items: {
+              include: {
+                product: true,
+                currency: true,
+              },
+            },
+            _count: { select: { items: true } },
+          },
+        });
+      });
+    }
+
     return this.prisma.goodsReceipt.update({
       where: { id },
       data: {

@@ -12,10 +12,22 @@ import {
   CreateReminderDto,
   CreateTimeLogDto,
 } from './dto';
+import { TicketStatus } from '@prisma/client';
+import { ErrorMessages } from '../common/constants/error-messages';
+import { parseTimeString } from '../common/utils/parse-time';
 
 @Injectable()
 export class TicketsService {
   constructor(private prisma: PrismaService) {}
+
+  // Valid status transitions state machine
+  private readonly validTransitions: Record<TicketStatus, TicketStatus[]> = {
+    TODO: ['IN_PROGRESS', 'CANCELLED'],
+    IN_PROGRESS: ['IN_REVIEW', 'DONE', 'CANCELLED'],
+    IN_REVIEW: ['IN_PROGRESS', 'DONE', 'CANCELLED'],
+    DONE: [],
+    CANCELLED: [],
+  };
 
   // ==================== Ticket Number Generation ====================
 
@@ -206,7 +218,7 @@ export class TicketsService {
     });
 
     if (!ticket) {
-      throw new NotFoundException('Ticket not found');
+      throw new NotFoundException(ErrorMessages.tickets.notFound);
     }
 
     const updateData: any = { ...dto };
@@ -221,12 +233,17 @@ export class TicketsService {
       updateData.dueDate = new Date(dto.dueDate);
     }
 
-    // Handle status transitions
-    if (dto.status) {
+    // Handle status transitions with state machine validation
+    if (dto.status && dto.status !== ticket.status) {
+      const allowedTargets = this.validTransitions[ticket.status] || [];
+      if (!allowedTargets.includes(dto.status)) {
+        throw new BadRequestException(ErrorMessages.tickets.invalidStatusTransition);
+      }
+
       if (dto.status === 'IN_PROGRESS' && !ticket.startedAt) {
         updateData.startedAt = new Date();
       }
-      if (dto.status === 'DONE' && !ticket.completedAt) {
+      if (dto.status === 'DONE') {
         updateData.completedAt = new Date();
       }
       if (dto.status !== 'DONE') {
@@ -719,13 +736,27 @@ export class TicketsService {
     });
 
     if (!ticket) {
-      throw new NotFoundException('Ticket not found');
+      throw new NotFoundException(ErrorMessages.tickets.notFound);
+    }
+
+    // Parse timeSpent string or use hours directly
+    let hours = dto.hours;
+    if (dto.timeSpent) {
+      try {
+        hours = parseTimeString(dto.timeSpent);
+      } catch {
+        throw new BadRequestException(ErrorMessages.tickets.invalidTimeFormat);
+      }
+    }
+
+    if (!hours || hours <= 0) {
+      throw new BadRequestException(ErrorMessages.tickets.invalidTimeFormat);
     }
 
     const timeLog = await this.prisma.timeLog.create({
       data: {
         date: new Date(dto.date),
-        hours: dto.hours,
+        hours,
         description: dto.description,
         ticketId,
         userId,

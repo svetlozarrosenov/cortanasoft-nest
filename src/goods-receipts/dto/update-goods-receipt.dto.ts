@@ -4,9 +4,13 @@ import {
   IsDateString,
   IsEnum,
   IsNumber,
+  IsArray,
+  ValidateNested,
   Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { GoodsReceiptStatus } from '@prisma/client';
+import { CreateGoodsReceiptItemDto } from './create-goods-receipt.dto';
 
 export class UpdateGoodsReceiptDto {
   @IsDateString()
@@ -49,4 +53,10 @@ export class UpdateGoodsReceiptDto {
   @IsEnum(GoodsReceiptStatus)
   @IsOptional()
   status?: GoodsReceiptStatus;
+
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => CreateGoodsReceiptItemDto)
+  items?: CreateGoodsReceiptItemDto[];
 }

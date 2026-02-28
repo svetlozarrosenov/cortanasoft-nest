@@ -1,12 +1,15 @@
 import {
   Injectable,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSprintDto } from './dto/create-sprint.dto';
 import { UpdateSprintDto } from './dto/update-sprint.dto';
 import { ManageSprintTicketsDto } from './dto/manage-sprint-tickets.dto';
 import { ManageSprintMembersDto } from './dto/manage-sprint-members.dto';
+import { SprintStatus } from '@prisma/client';
+import { ErrorMessages } from '../common/constants/error-messages';
 
 const MEMBER_INCLUDE = {
   user: {
@@ -52,6 +55,14 @@ const SPRINT_DETAIL_INCLUDE = {
 @Injectable()
 export class SprintsService {
   constructor(private prisma: PrismaService) {}
+
+  // Valid status transitions state machine
+  private readonly validTransitions: Record<SprintStatus, SprintStatus[]> = {
+    PLANNING: ['ACTIVE', 'CANCELLED'],
+    ACTIVE: ['COMPLETED', 'CANCELLED'],
+    COMPLETED: [],
+    CANCELLED: [],
+  };
 
   // ==================== CRUD ====================
 
@@ -155,6 +166,14 @@ export class SprintsService {
 
     if (!existing) {
       throw new NotFoundException('Sprint not found');
+    }
+
+    // Validate status transition
+    if (dto.status !== undefined && dto.status !== existing.status) {
+      const allowedTargets = this.validTransitions[existing.status] || [];
+      if (!allowedTargets.includes(dto.status)) {
+        throw new BadRequestException(ErrorMessages.sprints.invalidStatusTransition);
+      }
     }
 
     const updateData: any = {};
