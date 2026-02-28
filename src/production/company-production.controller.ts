@@ -32,7 +32,7 @@ export class CompanyProductionController {
   constructor(private readonly productionService: ProductionService) {}
 
   @Post()
-  @RequireCreate('erp', 'production')
+  @RequireCreate('production', 'orders')
   create(
     @Param('companyId') companyId: string,
     @CurrentUser() user: any,
@@ -42,7 +42,7 @@ export class CompanyProductionController {
   }
 
   @Get()
-  @RequireView('erp', 'production')
+  @RequireView('production', 'orders')
   findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryProductionOrdersDto,
@@ -51,13 +51,13 @@ export class CompanyProductionController {
   }
 
   @Get(':id')
-  @RequireView('erp', 'production')
+  @RequireView('production', 'orders')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.productionService.findOne(companyId, id);
   }
 
   @Patch(':id')
-  @RequireEdit('erp', 'production')
+  @RequireEdit('production', 'orders')
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -67,13 +67,13 @@ export class CompanyProductionController {
   }
 
   @Post(':id/start')
-  @RequireEdit('erp', 'production')
+  @RequireEdit('production', 'orders')
   start(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.productionService.start(companyId, id);
   }
 
   @Post(':id/complete')
-  @RequireEdit('erp', 'production')
+  @RequireEdit('production', 'orders')
   complete(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -83,13 +83,13 @@ export class CompanyProductionController {
   }
 
   @Post(':id/cancel')
-  @RequireEdit('erp', 'production')
+  @RequireEdit('production', 'orders')
   cancel(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.productionService.cancel(companyId, id);
   }
 
   @Delete(':id')
-  @RequireDelete('erp', 'production')
+  @RequireDelete('production', 'orders')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.productionService.remove(companyId, id);
   }

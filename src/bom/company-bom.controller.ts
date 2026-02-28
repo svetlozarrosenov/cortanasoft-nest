@@ -28,7 +28,7 @@ export class CompanyBOMController {
   constructor(private readonly bomService: BOMService) {}
 
   @Post()
-  @RequireCreate('erp', 'bom')
+  @RequireCreate('production', 'bom')
   create(
     @Param('companyId') companyId: string,
     @CurrentUser() user: any,
@@ -38,7 +38,7 @@ export class CompanyBOMController {
   }
 
   @Get()
-  @RequireView('erp', 'bom')
+  @RequireView('production', 'bom')
   findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryBOMDto,
@@ -47,13 +47,13 @@ export class CompanyBOMController {
   }
 
   @Get(':id')
-  @RequireView('erp', 'bom')
+  @RequireView('production', 'bom')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.bomService.findOne(companyId, id);
   }
 
   @Patch(':id')
-  @RequireEdit('erp', 'bom')
+  @RequireEdit('production', 'bom')
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -63,7 +63,7 @@ export class CompanyBOMController {
   }
 
   @Delete(':id')
-  @RequireDelete('erp', 'bom')
+  @RequireDelete('production', 'bom')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.bomService.remove(companyId, id);
   }
