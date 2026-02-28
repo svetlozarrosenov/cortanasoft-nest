@@ -176,6 +176,10 @@ export class AuthService {
     };
   }
 
+  createWsToken(userId: string): string {
+    return this.jwtService.sign({ sub: userId }, { expiresIn: '60s' });
+  }
+
   async changePassword(userId: string, currentPassword: string, newPassword: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {

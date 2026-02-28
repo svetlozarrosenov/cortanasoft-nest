@@ -121,10 +121,10 @@ export class ChatGateway
     this.logger.log(`Cookies present: ${!!client.handshake.headers.cookie}`);
 
     try {
-      // Extract token from query, auth header, or cookies
+      // Extract token from auth, query, header, or cookies (in priority order)
       let token =
-        (client.handshake.query.token as string) ||
         client.handshake.auth?.token ||
+        (client.handshake.query.token as string) ||
         client.handshake.headers.authorization?.replace('Bearer ', '');
 
       this.logger.log(
@@ -367,6 +367,6 @@ export class ChatGateway
   handleGetOnlineUsers(@ConnectedSocket() client: AuthenticatedSocket) {
     if (!client.companyId) return;
 
-    return { users: this.getOnlineUserIds(client.companyId) };
+    client.emit('onlineUsers', this.getOnlineUserIds(client.companyId));
   }
 }
