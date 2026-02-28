@@ -71,7 +71,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const { password, ...userWithoutPassword } = user;
 
     return {
-      ...userWithoutPassword,
+      id: userWithoutPassword.id,
+      email: userWithoutPassword.email,
+      firstName: userWithoutPassword.firstName,
+      lastName: userWithoutPassword.lastName,
+      isActive: userWithoutPassword.isActive,
+      termsAcceptedAt: userWithoutPassword.termsAcceptedAt,
       currentCompany: currentUserCompany.company,
       currentRole: currentUserCompany.role,
       isSuperAdmin: currentUserCompany.company.role === 'OWNER',

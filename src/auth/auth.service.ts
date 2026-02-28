@@ -66,6 +66,15 @@ export class AuthService {
   async login(loginDto: LoginDto) {
     const user = await this.validateUser(loginDto.email, loginDto.password);
 
+    // Record terms acceptance if user accepted terms during login
+    if (loginDto.acceptTerms && !user.termsAcceptedAt) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { termsAcceptedAt: new Date() },
+      });
+      user.termsAcceptedAt = new Date();
+    }
+
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
@@ -89,6 +98,7 @@ export class AuthService {
         lastName: user.lastName,
         isActive: user.isActive,
         isSuperAdmin: currentCompany.role === 'OWNER',
+        termsAcceptedAt: user.termsAcceptedAt,
         currentCompany,
         currentRole,
         companies: user.userCompanies.map((uc) => ({
