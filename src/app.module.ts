@@ -36,6 +36,8 @@ import { UploadsModule } from './uploads/uploads.module';
 import { DocumentsModule } from './documents/documents.module';
 import { StockDocumentsModule } from './stock-documents/stock-documents.module';
 import { ExportModule } from './common/export/export.module';
+import { BOMModule } from './bom/bom.module';
+import { ProductionModule } from './production/production.module';
 
 @Module({
   imports: [
@@ -78,6 +80,8 @@ import { ExportModule } from './common/export/export.module';
     DocumentsModule,
     StockDocumentsModule,
     ExportModule,
+    BOMModule,
+    ProductionModule,
   ],
   controllers: [],
   providers: [],

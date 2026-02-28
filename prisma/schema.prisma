@@ -186,6 +186,8 @@ model Company {
   expenses           Expense[]
   documents          Document[]
   stockDocuments     StockDocument[]
+  billOfMaterials    BillOfMaterial[]
+  productionOrders   ProductionOrder[]
 
   @@map("companies")
 }
@@ -361,6 +363,10 @@ model User {
 
   // Documents
   uploadedDocuments Document[] @relation("DocumentUploader")
+
+  // Производство
+  createdBOMs             BillOfMaterial[]  @relation("BOMCreatedBy")
+  createdProductionOrders ProductionOrder[] @relation("ProductionOrderCreatedBy")
 
   // Terms acceptance
   termsAcceptedAt DateTime?
@@ -753,6 +759,12 @@ model Product {
   companyPlanItems   CompanyPlanItem[] // Елементи от планове
   stockDocumentItems StockDocumentItem[]
 
+  // Производство
+  bomAsProduct        BillOfMaterial[]          @relation("BOMProduct")
+  bomItems            BOMItem[]                 @relation("BOMItemProduct")
+  productionOrders    ProductionOrder[]         @relation("ProductionOrderProduct")
+  productionMaterials ProductionOrderMaterial[] @relation("ProductionMaterialProduct")
+
   @@unique([companyId, sku])
   @@index([companyId, name])
   @@index([companyId, barcode])
@@ -832,6 +844,7 @@ model Location {
   inventoryBatches InventoryBatch[]
   inventorySerials InventorySerial[]
   orders           Order[]
+  productionOrders ProductionOrder[]
 
   @@unique([companyId, code])
   @@map("locations")
@@ -2219,6 +2232,14 @@ enum StockDocumentType {
   ASCERTAINMENT_PROTOCOL // Констативен протокол
 }
 
+enum ProductionOrderStatus {
+  DRAFT
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
 enum StockDocumentStatus {
   DRAFT     // Чернова
   ISSUED    // Издаден
@@ -2295,4 +2316,104 @@ model StockDocumentItem {
 
   @@index([stockDocumentId])
   @@map("stock_document_items")
+}
+
+// ==================== ПРОИЗВОДСТВО ====================
+
+// Рецепта (Bill of Materials)
+model BillOfMaterial {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  outputQuantity  Decimal  @default(1) @db.Decimal(10, 3)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  productId String
+  product   Product @relation("BOMProduct", fields: [productId], references: [id], onDelete: Restrict)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdById String?
+  createdBy   User? @relation("BOMCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  items            BOMItem[]
+  productionOrders ProductionOrder[]
+
+  @@unique([companyId, name])
+  @@index([companyId, productId])
+  @@map("bill_of_materials")
+}
+
+// Съставка от рецепта
+model BOMItem {
+  id       String  @id @default(cuid())
+  quantity Decimal @db.Decimal(10, 3)
+  unit     Unit    @default(PIECE)
+  notes    String?
+
+  productId String
+  product   Product @relation("BOMItemProduct", fields: [productId], references: [id], onDelete: Restrict)
+
+  bomId String
+  bom   BillOfMaterial @relation(fields: [bomId], references: [id], onDelete: Cascade)
+
+  @@index([bomId])
+  @@map("bom_items")
+}
+
+// Производствена поръчка
+model ProductionOrder {
+  id               String                @id @default(cuid())
+  orderNumber      String
+  quantity         Decimal               @db.Decimal(10, 3)
+  status           ProductionOrderStatus @default(DRAFT)
+  plannedStartDate DateTime?
+  plannedEndDate   DateTime?
+  actualStartDate  DateTime?
+  actualEndDate    DateTime?
+  notes            String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  productId String
+  product   Product @relation("ProductionOrderProduct", fields: [productId], references: [id], onDelete: Restrict)
+
+  bomId String
+  bom   BillOfMaterial @relation(fields: [bomId], references: [id], onDelete: Restrict)
+
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdById String?
+  createdBy   User? @relation("ProductionOrderCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  materials ProductionOrderMaterial[]
+
+  @@unique([companyId, orderNumber])
+  @@index([companyId, status])
+  @@index([companyId, productId])
+  @@map("production_orders")
+}
+
+// Материал за производствена поръчка
+model ProductionOrderMaterial {
+  id              String   @id @default(cuid())
+  plannedQuantity Decimal  @db.Decimal(10, 3)
+  actualQuantity  Decimal? @db.Decimal(10, 3)
+  unit            Unit     @default(PIECE)
+
+  productId String
+  product   Product @relation("ProductionMaterialProduct", fields: [productId], references: [id], onDelete: Restrict)
+
+  productionOrderId String
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+
+  @@index([productionOrderId])
+  @@map("production_order_materials")
 }

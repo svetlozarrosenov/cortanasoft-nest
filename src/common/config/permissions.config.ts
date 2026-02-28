@@ -346,6 +346,43 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         labelKey: 'modules.erp.profitAnalytics',
         actions: ['view'],
       },
+      {
+        key: 'bom',
+        labelKey: 'modules.erp.bom',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'bomList',
+            labelKey: 'modules.erp.bomList',
+            columns: [
+              { key: 'name', labelKey: 'common.name' },
+              { key: 'product', labelKey: 'modules.erp.product' },
+              { key: 'outputQuantity', labelKey: 'modules.erp.outputQuantity' },
+              { key: 'itemsCount', labelKey: 'modules.erp.itemsCount' },
+              { key: 'status', labelKey: 'common.status' },
+            ],
+          },
+        ],
+      },
+      {
+        key: 'production',
+        labelKey: 'modules.erp.production',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'productionOrdersList',
+            labelKey: 'modules.erp.productionOrdersList',
+            columns: [
+              { key: 'orderNumber', labelKey: 'modules.erp.orderNumber' },
+              { key: 'product', labelKey: 'modules.erp.product' },
+              { key: 'bom', labelKey: 'modules.erp.bom' },
+              { key: 'quantity', labelKey: 'modules.erp.quantity' },
+              { key: 'status', labelKey: 'common.status' },
+              { key: 'plannedStartDate', labelKey: 'modules.erp.plannedStartDate' },
+            ],
+          },
+        ],
+      },
     ],
   },
   {

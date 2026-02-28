@@ -203,6 +203,33 @@ export const ErrorMessages = {
   demoRequests: {
     notFound: 'Демо заявката не е намерена',
   },
+
+  // ==================== Рецепти (BOM) ====================
+  bom: {
+    notFound: 'Рецептата не е намерена',
+    nameExists: (name: string) => `Рецепта с име "${name}" вече съществува`,
+    productNotFound: 'Продуктът не е намерен',
+    materialNotFound: 'Един или повече материали не са намерени',
+    circularReference: 'Материалът не може да бъде същият като готовия продукт',
+    cannotDeleteWithProductionOrders: 'Не може да изтриете рецепта, която се използва в производствени поръчки',
+    mustHaveItems: 'Рецептата трябва да има поне една съставка',
+  },
+
+  // ==================== Производство ====================
+  production: {
+    notFound: 'Производствената поръчка не е намерена',
+    bomNotFound: 'Рецептата не е намерена',
+    productNotFound: 'Продуктът не е намерен',
+    locationNotFound: 'Локацията не е намерена',
+    canOnlyUpdateDraftOrPlanned: 'Може да редактирате само чернови или планирани поръчки',
+    canOnlyStartDraftOrPlanned: 'Може да стартирате само чернови или планирани поръчки',
+    canOnlyCompleteInProgress: 'Може да завършите само поръчки в производство',
+    alreadyCancelled: 'Поръчката вече е отменена',
+    cannotCancelCompleted: 'Не може да отмените завършена производствена поръчка',
+    canOnlyDeleteDraft: 'Може да изтриете само чернови поръчки',
+    insufficientMaterials: (productName: string, available: number, required: number) =>
+      `Недостатъчна наличност за "${productName}" - налични: ${available}, необходими: ${required}`,
+  },
 };
 
 /**
