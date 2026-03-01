@@ -25,6 +25,7 @@ COPY --from=builder /app/package.json ./
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/tsconfig.json ./
+COPY --from=builder /app/entrypoint.sh ./
 
 EXPOSE 3001
-CMD ["node", "dist/src/main"]
+ENTRYPOINT ["./entrypoint.sh"]
