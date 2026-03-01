@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -14,15 +15,21 @@ import { ErrorMessages } from '../common/constants/error-messages';
 
 @Injectable()
 export class GoodsReceiptsService {
+  private readonly logger = new Logger(GoodsReceiptsService.name);
+
   constructor(
     private prisma: PrismaService,
   ) {}
 
-  private async generateReceiptNumber(companyId: string): Promise<string> {
+  private async generateReceiptNumber(
+    companyId: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<string> {
+    const client = tx || this.prisma;
     const year = new Date().getFullYear();
     const prefix = `GR-${year}-`;
 
-    const lastReceipt = await this.prisma.goodsReceipt.findFirst({
+    const lastReceipt = await client.goodsReceipt.findFirst({
       where: {
         companyId,
         receiptNumber: { startsWith: prefix },
@@ -42,8 +49,6 @@ export class GoodsReceiptsService {
   }
 
   async create(companyId: string, userId: string, dto: CreateGoodsReceiptDto) {
-    console.log('[GoodsReceipts] Creating receipt with DTO:', JSON.stringify(dto, null, 2));
-
     // Get company for default currency
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
@@ -70,16 +75,12 @@ export class GoodsReceiptsService {
       }
     }
 
-    // Generate receipt number if not provided
-    const receiptNumber =
-      dto.receiptNumber || (await this.generateReceiptNumber(companyId));
-
-    // Verify all products exist
-    const productIds = dto.items.map((item) => item.productId);
+    // Verify all products exist (deduplicate IDs to avoid false mismatch)
+    const uniqueProductIds = [...new Set(dto.items.map((item) => item.productId))];
     const products = await this.prisma.product.findMany({
-      where: { id: { in: productIds }, companyId },
+      where: { id: { in: uniqueProductIds }, companyId },
     });
-    if (products.length !== productIds.length) {
+    if (products.length !== uniqueProductIds.length) {
       throw new BadRequestException(ErrorMessages.goodsReceipts.productsNotFound);
     }
 
@@ -89,8 +90,6 @@ export class GoodsReceiptsService {
 
     // Prepare data with proper null handling for optional fields
     const createData = {
-      receiptNumber,
-      receiptDate: dto.receiptDate ? new Date(dto.receiptDate) : new Date(),
       notes: dto.notes || undefined,
       invoiceNumber: dto.invoiceNumber || undefined,
       invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : undefined,
@@ -101,6 +100,7 @@ export class GoodsReceiptsService {
       locationId: dto.locationId,
       supplierId: dto.supplierId || undefined,
       createdById: userId,
+      receiptDate: dto.receiptDate ? new Date(dto.receiptDate) : new Date(),
       items: {
         create: dto.items.map((item) => ({
           productId: item.productId,
@@ -113,11 +113,13 @@ export class GoodsReceiptsService {
       },
     };
 
-    console.log('[GoodsReceipts] Prisma create data:', JSON.stringify(createData, null, 2));
+    // Generate receipt number inside transaction to avoid race condition
+    return this.prisma.$transaction(async (tx) => {
+      const receiptNumber =
+        dto.receiptNumber || (await this.generateReceiptNumber(companyId, tx));
 
-    try {
-      return await this.prisma.goodsReceipt.create({
-        data: createData,
+      return tx.goodsReceipt.create({
+        data: { ...createData, receiptNumber },
         include: {
           location: true,
           supplier: true,
@@ -134,10 +136,7 @@ export class GoodsReceiptsService {
           _count: { select: { items: true } },
         },
       });
-    } catch (error) {
-      console.error('[GoodsReceipts] Prisma create error:', error);
-      throw error;
-    }
+    });
   }
 
   async findAll(companyId: string, query: QueryGoodsReceiptsDto) {
@@ -162,7 +161,7 @@ export class GoodsReceiptsService {
       ...(dateFrom || dateTo
         ? {
             receiptDate: {
-              ...(dateFrom && { gte: new Date(dateFrom) }),
+              ...(dateFrom && { gte: new Date(dateFrom + 'T00:00:00.000Z') }),
               ...(dateTo && { lte: new Date(dateTo + 'T23:59:59.999Z') }),
             },
           }
@@ -256,11 +255,11 @@ export class GoodsReceiptsService {
         where: { id: companyId },
       });
 
-      const productIds = newItems.map((item) => item.productId);
+      const uniqueProductIds = [...new Set(newItems.map((item) => item.productId))];
       const products = await this.prisma.product.findMany({
-        where: { id: { in: productIds }, companyId },
+        where: { id: { in: uniqueProductIds }, companyId },
       });
-      if (products.length !== productIds.length) {
+      if (products.length !== uniqueProductIds.length) {
         throw new BadRequestException(ErrorMessages.goodsReceipts.productsNotFound);
       }
 
@@ -371,9 +370,6 @@ export class GoodsReceiptsService {
     id: string,
     itemSerials?: { goodsReceiptItemId: string; serialNumbers: string[] }[],
   ) {
-    console.log(
-      `[Service] confirm() called with companyId=${companyId}, id=${id}`,
-    );
     const receipt = await this.findOne(companyId, id);
 
     if (receipt.status !== 'DRAFT') {
@@ -409,6 +405,7 @@ export class GoodsReceiptsService {
           items: {
             include: {
               product: true,
+              currency: true,
             },
           },
           _count: { select: { items: true } },
@@ -422,6 +419,9 @@ export class GoodsReceiptsService {
         });
 
         if (!product) continue;
+
+        // Skip inventory creation for SERVICE products
+        if (product.type === 'SERVICE') continue;
 
         if (product.type === 'SERIAL') {
           // For SERIAL products: create one InventorySerial per unit
@@ -507,22 +507,44 @@ export class GoodsReceiptsService {
     // If completed, we need to remove inventory entries
     if (receipt.status === 'COMPLETED') {
       return this.prisma.$transaction(async (tx) => {
-        // Delete inventory batches created from this receipt
-        await tx.inventoryBatch.deleteMany({
+        const itemIds = receipt.items.map((item) => item.id);
+
+        // Check that no inventory batches have been partially consumed
+        const consumedBatches = await tx.inventoryBatch.findMany({
           where: {
-            goodsReceiptItemId: {
-              in: receipt.items.map((item) => item.id),
-            },
+            goodsReceiptItemId: { in: itemIds },
           },
         });
+        for (const batch of consumedBatches) {
+          if (Number(batch.quantity) < Number(batch.initialQty)) {
+            throw new BadRequestException(
+              'Не може да се отмени доставка, от която вече е изписана стока. ' +
+              `Партида ${batch.batchNumber}: налични ${batch.quantity} от ${batch.initialQty}`,
+            );
+          }
+        }
 
-        // Delete inventory serials created from this receipt
-        await tx.inventorySerial.deleteMany({
+        // Check that no serials have been sold/reserved
+        const consumedSerials = await tx.inventorySerial.findMany({
           where: {
-            goodsReceiptItemId: {
-              in: receipt.items.map((item) => item.id),
-            },
+            goodsReceiptItemId: { in: itemIds },
+            status: { not: 'IN_STOCK' },
           },
+          select: { serialNumber: true, status: true },
+        });
+        if (consumedSerials.length > 0) {
+          const examples = consumedSerials.slice(0, 3).map((s) => s.serialNumber).join(', ');
+          throw new BadRequestException(
+            `Не може да се отмени доставка със серийни номера, които вече не са в наличност: ${examples}`,
+          );
+        }
+
+        // Safe to delete — all inventory is untouched
+        await tx.inventoryBatch.deleteMany({
+          where: { goodsReceiptItemId: { in: itemIds } },
+        });
+        await tx.inventorySerial.deleteMany({
+          where: { goodsReceiptItemId: { in: itemIds } },
         });
 
         // Update status
@@ -539,6 +561,7 @@ export class GoodsReceiptsService {
             items: {
               include: {
                 product: true,
+                currency: true,
               },
             },
             _count: { select: { items: true } },

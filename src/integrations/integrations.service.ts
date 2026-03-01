@@ -20,7 +20,7 @@ export class IntegrationsService {
     }
 
     // Match products and build order items
-    const orderItems = [];
+    const orderItems: { productId: string; quantity: number; unitPrice: number }[] = [];
     for (const item of items) {
       const productId = await this.matchOrCreateProduct(companyId, item);
       orderItems.push({

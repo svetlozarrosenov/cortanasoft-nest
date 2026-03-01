@@ -29,11 +29,16 @@ export class CreateOrderItemDto {
 
   @IsNumber()
   @IsOptional()
+  @Min(0)
   discount?: number;
 
   @IsString()
   @IsOptional()
   inventoryBatchId?: string;
+
+  @IsString()
+  @IsOptional()
+  inventorySerialId?: string;
 }
 
 export class CreateOrderDto {
@@ -82,10 +87,12 @@ export class CreateOrderDto {
 
   @IsNumber()
   @IsOptional()
+  @Min(0)
   shippingCost?: number;
 
   @IsNumber()
   @IsOptional()
+  @Min(0)
   discount?: number;
 
   @IsString()

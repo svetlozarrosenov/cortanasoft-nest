@@ -1368,6 +1368,10 @@ model OrderItem {
   inventoryBatchId String?
   inventoryBatch   InventoryBatch? @relation(fields: [inventoryBatchId], references: [id], onDelete: SetNull)
 
+  // От кой сериен номер е взето (само за SERIAL продукти)
+  inventorySerialId String?
+  inventorySerial   InventorySerial? @relation(fields: [inventorySerialId], references: [id], onDelete: SetNull)
+
   invoiceItems InvoiceItem[]
 
   @@map("order_items")
@@ -1439,6 +1443,8 @@ model InventorySerial {
 
   goodsReceiptItemId String?
   goodsReceiptItem   GoodsReceiptItem? @relation(fields: [goodsReceiptItemId], references: [id], onDelete: SetNull)
+
+  orderItems OrderItem[]
 
   @@unique([companyId, productId, serialNumber])
   @@index([companyId, productId])

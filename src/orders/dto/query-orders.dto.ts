@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsNumber, IsEnum } from 'class-validator';
+import { IsOptional, IsString, IsInt, IsEnum, Min, Max, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 import { OrderStatus, PaymentStatus } from '@prisma/client';
 
@@ -27,21 +27,26 @@ export class QueryOrdersDto {
   @IsOptional()
   dateTo?: string;
 
-  @IsNumber()
   @IsOptional()
   @Type(() => Number)
+  @IsInt()
+  @Min(1)
   page?: number;
 
-  @IsNumber()
   @IsOptional()
   @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
   limit?: number;
 
-  @IsString()
   @IsOptional()
+  @IsString()
+  @IsIn(['createdAt', 'orderDate', 'orderNumber', 'status', 'total', 'customerName'])
   sortBy?: string;
 
   @IsString()
   @IsOptional()
+  @IsIn(['asc', 'desc'])
   sortOrder?: 'asc' | 'desc';
 }

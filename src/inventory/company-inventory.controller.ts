@@ -20,8 +20,10 @@ import {
 import { InventoryService } from './inventory.service';
 import {
   QueryInventoryDto,
+  QuerySerialsDto,
   QueryStockLevelsDto,
   UpdateInventoryBatchDto,
+  UpdateInventorySerialDto,
 } from './dto';
 import { ExportService } from '../common/export/export.service';
 import type { ExportFormat } from '../common/export/export.service';
@@ -56,16 +58,35 @@ export class CompanyInventoryController {
   @RequireView('erp', 'inventory')
   getSerials(
     @Param('companyId') companyId: string,
-    @Query() query: any,
+    @Query() query: QuerySerialsDto,
   ) {
     return this.inventoryService.findAllSerials(companyId, {
       productId: query.productId,
       locationId: query.locationId,
       status: query.status,
       search: query.search,
-      page: query.page ? Number(query.page) : 1,
-      limit: query.limit ? Number(query.limit) : 20,
+      page: query.page ?? 1,
+      limit: query.limit ?? 20,
     });
+  }
+
+  @Get('serials/:id')
+  @RequireView('erp', 'inventory')
+  findOneSerial(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.inventoryService.findOneSerial(companyId, id);
+  }
+
+  @Patch('serials/:id')
+  @RequireEdit('erp', 'inventory')
+  updateSerial(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateInventorySerialDto,
+  ) {
+    return this.inventoryService.updateSerial(companyId, id, dto);
   }
 
   @Get('by-location/:locationId')
@@ -105,7 +126,7 @@ export class CompanyInventoryController {
     @Query('format') format: ExportFormat = 'xlsx',
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { data } = await this.inventoryService.findAll(companyId, { ...query, page: 1, limit: 100000 } as any);
+    const { data } = await this.inventoryService.findAll(companyId, { ...query, page: 1, limit: 10000 });
     const columns = [
       { header: 'Product', key: 'product.name', width: 25 },
       { header: 'SKU', key: 'product.sku', width: 15 },

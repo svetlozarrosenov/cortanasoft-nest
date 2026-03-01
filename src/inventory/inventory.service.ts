@@ -8,6 +8,7 @@ import {
   QueryInventoryDto,
   QueryStockLevelsDto,
   UpdateInventoryBatchDto,
+  UpdateInventorySerialDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
@@ -49,14 +50,10 @@ export class InventoryService {
       }),
       ...(hasStock === true && { quantity: { gt: 0 } }),
       ...(hasStock === false && { quantity: { lte: 0 } }),
-      ...(expiringSoon && {
+      ...((expiringSoon || expiryDateFrom || expiryDateTo) && {
         expiryDate: {
-          lte: expiringSoonDate,
-          gte: new Date(),
-        },
-      }),
-      ...((expiryDateFrom || expiryDateTo) && {
-        expiryDate: {
+          ...(expiringSoon && !expiryDateFrom && { gte: new Date() }),
+          ...(expiringSoon && !expiryDateTo && { lte: expiringSoonDate }),
           ...(expiryDateFrom && { gte: new Date(expiryDateFrom) }),
           ...(expiryDateTo && { lte: new Date(expiryDateTo) }),
         },
@@ -248,6 +245,7 @@ export class InventoryService {
             sku: true,
             name: true,
             unit: true,
+            type: true,
           },
         },
         location: {
@@ -255,6 +253,7 @@ export class InventoryService {
             id: true,
             code: true,
             name: true,
+            type: true,
           },
         },
         storageZone: {
@@ -263,6 +262,109 @@ export class InventoryService {
             code: true,
             name: true,
           },
+        },
+      },
+    });
+  }
+
+  async findOneSerial(companyId: string, id: string) {
+    const serial = await this.prisma.inventorySerial.findFirst({
+      where: { id, companyId },
+      include: {
+        product: {
+          select: {
+            id: true,
+            sku: true,
+            name: true,
+            unit: true,
+            type: true,
+          },
+        },
+        location: {
+          select: { id: true, code: true, name: true },
+        },
+        storageZone: {
+          select: { id: true, code: true, name: true },
+        },
+      },
+    });
+
+    if (!serial) {
+      throw new NotFoundException(ErrorMessages.inventory.serialNotFound);
+    }
+
+    return serial;
+  }
+
+  async updateSerial(
+    companyId: string,
+    id: string,
+    dto: UpdateInventorySerialDto,
+  ) {
+    const serial = await this.findOneSerial(companyId, id);
+
+    // Verify storage zone if provided
+    if (dto.storageZoneId) {
+      const zone = await this.prisma.storageZone.findFirst({
+        where: { id: dto.storageZoneId, locationId: serial.locationId },
+      });
+      if (!zone) {
+        throw new BadRequestException(
+          ErrorMessages.inventory.storageZoneNotFound,
+        );
+      }
+    }
+
+    // If changing serial number, only allow when IN_STOCK and check uniqueness
+    if (dto.serialNumber && dto.serialNumber !== serial.serialNumber) {
+      if (serial.status !== 'IN_STOCK') {
+        throw new BadRequestException(
+          'Може да променяте серийния номер само когато е наличен на склад',
+        );
+      }
+
+      const existing = await this.prisma.inventorySerial.findFirst({
+        where: {
+          companyId,
+          productId: serial.productId,
+          serialNumber: dto.serialNumber,
+          id: { not: id },
+        },
+      });
+      if (existing) {
+        throw new BadRequestException(
+          ErrorMessages.inventory.serialDuplicate(dto.serialNumber),
+        );
+      }
+    }
+
+    return this.prisma.inventorySerial.update({
+      where: { id },
+      data: {
+        ...(dto.serialNumber !== undefined && {
+          serialNumber: dto.serialNumber,
+        }),
+        ...(dto.notes !== undefined && { notes: dto.notes }),
+        ...(dto.status !== undefined && { status: dto.status }),
+        ...(dto.storageZoneId !== undefined && {
+          storageZoneId: dto.storageZoneId || null,
+        }),
+      },
+      include: {
+        product: {
+          select: {
+            id: true,
+            sku: true,
+            name: true,
+            unit: true,
+            type: true,
+          },
+        },
+        location: {
+          select: { id: true, code: true, name: true },
+        },
+        storageZone: {
+          select: { id: true, code: true, name: true },
         },
       },
     });
@@ -291,6 +393,10 @@ export class InventoryService {
         ],
       }),
     };
+
+    // When hasStock or belowMinStock filters are active, we need to fetch ALL products
+    // and filter in-memory BEFORE applying pagination, to get correct results and counts.
+    const needsInMemoryFilter = hasStock !== undefined || belowMinStock;
 
     // Get products with inventory aggregation
     const products = await this.prisma.product.findMany({
@@ -340,8 +446,11 @@ export class InventoryService {
           },
         },
       },
-      skip: (page - 1) * limit,
-      take: limit,
+      // Only apply DB-level pagination when no in-memory filters are needed
+      ...(!needsInMemoryFilter && {
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
       orderBy: { name: 'asc' },
     });
 
@@ -413,7 +522,7 @@ export class InventoryService {
       };
     });
 
-    // Apply filters
+    // Apply in-memory filters
     let filtered = stockLevels;
     if (hasStock === true) {
       filtered = filtered.filter((s) => s.totalQuantity > 0);
@@ -424,10 +533,17 @@ export class InventoryService {
       filtered = filtered.filter((s) => s.isBelowMinStock);
     }
 
-    const total = await this.prisma.product.count({ where: productWhere });
+    // When in-memory filtering is active, apply pagination after filtering
+    const total = needsInMemoryFilter
+      ? filtered.length
+      : await this.prisma.product.count({ where: productWhere });
+
+    const paginatedData = needsInMemoryFilter
+      ? filtered.slice((page - 1) * limit, page * limit)
+      : filtered;
 
     return {
-      data: filtered,
+      data: paginatedData,
       meta: {
         total,
         page,

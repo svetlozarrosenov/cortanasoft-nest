@@ -93,6 +93,10 @@ export const ErrorMessages = {
     productNotFound: 'Продуктът не е намерен',
     goodsReceiptNotFound: 'Стоковата разписка не е намерена',
     insufficientStock: 'Недостатъчна наличност',
+    serialNotFound: 'Серийният номер не е намерен',
+    serialDuplicate: (sn: string) => `Сериен номер "${sn}" вече съществува за този продукт`,
+    serialNotInStock: 'Серийният номер не е наличен на склад',
+    serialRequired: (name: string) => `Трябва да изберете сериен номер за продукт "${name}"`,
   },
 
   // ==================== Локации ====================

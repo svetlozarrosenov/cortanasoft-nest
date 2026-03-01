@@ -2,14 +2,12 @@ import {
   IsString,
   IsOptional,
   IsDateString,
-  IsEnum,
   IsNumber,
   IsArray,
   ValidateNested,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { GoodsReceiptStatus } from '@prisma/client';
 import { CreateGoodsReceiptItemDto } from './create-goods-receipt.dto';
 
 export class UpdateGoodsReceiptDto {
@@ -49,10 +47,6 @@ export class UpdateGoodsReceiptDto {
   @IsString()
   @IsOptional()
   attachmentUrl?: string;
-
-  @IsEnum(GoodsReceiptStatus)
-  @IsOptional()
-  status?: GoodsReceiptStatus;
 
   @IsArray()
   @IsOptional()

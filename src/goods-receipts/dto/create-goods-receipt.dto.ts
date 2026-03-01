@@ -3,6 +3,7 @@ import {
   IsOptional,
   IsDateString,
   IsArray,
+  ArrayMinSize,
   ValidateNested,
   IsNumber,
   Min,
@@ -82,6 +83,7 @@ export class CreateGoodsReceiptDto {
   attachmentUrl?: string;
 
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => CreateGoodsReceiptItemDto)
   items: CreateGoodsReceiptItemDto[];

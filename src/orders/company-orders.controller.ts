@@ -62,7 +62,7 @@ export class CompanyOrdersController {
     @Query('format') format: ExportFormat = 'xlsx',
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { data } = await this.ordersService.findAll(companyId, { ...query, page: 1, limit: 100000 } as any);
+    const { data } = await this.ordersService.findAll(companyId, { ...query, page: 1, limit: 10000 });
     const columns = [
       { header: 'Order Number', key: 'orderNumber', width: 15 },
       { header: 'Order Date', key: 'orderDate', width: 15 },
