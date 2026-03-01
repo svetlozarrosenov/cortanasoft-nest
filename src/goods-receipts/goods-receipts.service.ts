@@ -366,7 +366,11 @@ export class GoodsReceiptsService {
     });
   }
 
-  async confirm(companyId: string, id: string) {
+  async confirm(
+    companyId: string,
+    id: string,
+    itemSerials?: { goodsReceiptItemId: string; serialNumbers: string[] }[],
+  ) {
     console.log(
       `[Service] confirm() called with companyId=${companyId}, id=${id}`,
     );
@@ -380,7 +384,16 @@ export class GoodsReceiptsService {
       throw new BadRequestException(ErrorMessages.goodsReceipts.cannotConfirmWithoutItems);
     }
 
-    // Use transaction to update receipt status and create inventory batches
+    // Build a map from goodsReceiptItemId -> serial numbers
+    const serialsMap = new Map<string, string[]>();
+    (itemSerials ?? []).forEach(({ goodsReceiptItemId, serialNumbers }) => {
+      serialsMap.set(
+        goodsReceiptItemId,
+        serialNumbers.filter((s) => s.trim() !== ''),
+      );
+    });
+
+    // Use transaction to update receipt status and create inventory
     const updated = await this.prisma.$transaction(async (tx) => {
       // Update receipt status
       const updatedReceipt = await tx.goodsReceipt.update({
@@ -402,26 +415,66 @@ export class GoodsReceiptsService {
         },
       });
 
-      // Create inventory batches for each item (for products with BATCH or NONE tracking)
-      console.log(
-        `[GoodsReceipts] Confirming receipt ${receipt.receiptNumber} with ${receipt.items.length} items`,
-      );
+      // Create inventory records for each item
       for (const item of updatedReceipt.items) {
         const product = await tx.product.findUnique({
           where: { id: item.productId },
         });
 
-        console.log(
-          `[GoodsReceipts] Item ${item.id}: product=${product?.name}, type=${product?.type}`,
-        );
+        if (!product) continue;
 
-        if (product && product.type !== 'SERIAL') {
-          // Generate batch number
+        if (product.type === 'SERIAL') {
+          // For SERIAL products: create one InventorySerial per unit
+          const quantity = Math.round(Number(item.quantity));
+          const provided = serialsMap.get(item.id) ?? [];
+
+          // Build list of serial numbers
+          const serialsToCreate: string[] = [];
+          for (let i = 0; i < quantity; i++) {
+            if (i < provided.length && provided[i].trim() !== '') {
+              serialsToCreate.push(provided[i].trim());
+            } else {
+              const padded = String(i + 1).padStart(3, '0');
+              serialsToCreate.push(
+                `SN-${receipt.receiptNumber}-${padded}`,
+              );
+            }
+          }
+
+          // Check for duplicate serial numbers
+          const existing = await tx.inventorySerial.findMany({
+            where: {
+              companyId,
+              productId: item.productId,
+              serialNumber: { in: serialsToCreate },
+            },
+            select: { serialNumber: true },
+          });
+
+          if (existing.length > 0) {
+            const dupes = existing.map((s) => s.serialNumber).join(', ');
+            throw new BadRequestException(
+              `Дублирани серийни номера: ${dupes}`,
+            );
+          }
+
+          // Create InventorySerial records
+          for (const serialNumber of serialsToCreate) {
+            await tx.inventorySerial.create({
+              data: {
+                serialNumber,
+                status: 'IN_STOCK',
+                unitCost: item.unitPrice,
+                companyId,
+                productId: item.productId,
+                locationId: receipt.locationId,
+                goodsReceiptItemId: item.id,
+              },
+            });
+          }
+        } else {
+          // For PRODUCT, BATCH — create InventoryBatch
           const batchNumber = `${receipt.receiptNumber}-${item.id.slice(-4)}`;
-
-          console.log(
-            `[GoodsReceipts] Creating batch: ${batchNumber}, qty=${item.quantity}, location=${receipt.locationId}`,
-          );
 
           await tx.inventoryBatch.create({
             data: {
@@ -435,13 +488,7 @@ export class GoodsReceiptsService {
               goodsReceiptItemId: item.id,
             },
           });
-          console.log(`[GoodsReceipts] Batch created successfully`);
-        } else {
-          console.log(
-            `[GoodsReceipts] Skipping batch creation - product not found or is SERIAL`,
-          );
         }
-
       }
 
       return updatedReceipt;
@@ -462,6 +509,15 @@ export class GoodsReceiptsService {
       return this.prisma.$transaction(async (tx) => {
         // Delete inventory batches created from this receipt
         await tx.inventoryBatch.deleteMany({
+          where: {
+            goodsReceiptItemId: {
+              in: receipt.items.map((item) => item.id),
+            },
+          },
+        });
+
+        // Delete inventory serials created from this receipt
+        await tx.inventorySerial.deleteMany({
           where: {
             goodsReceiptItemId: {
               in: receipt.items.map((item) => item.id),

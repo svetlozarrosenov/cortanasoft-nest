@@ -14,6 +14,7 @@ import {
   CreateGoodsReceiptDto,
   UpdateGoodsReceiptDto,
   QueryGoodsReceiptsDto,
+  ConfirmGoodsReceiptDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -68,11 +69,12 @@ export class CompanyGoodsReceiptsController {
 
   @Post(':id/confirm')
   @RequireEdit('erp', 'goodsReceipts')
-  confirm(@Param('companyId') companyId: string, @Param('id') id: string) {
-    console.log(
-      `[Controller] Confirm called: companyId=${companyId}, id=${id}`,
-    );
-    return this.goodsReceiptsService.confirm(companyId, id);
+  confirm(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: ConfirmGoodsReceiptDto,
+  ) {
+    return this.goodsReceiptsService.confirm(companyId, id, dto.itemSerials);
   }
 
   @Post(':id/cancel')

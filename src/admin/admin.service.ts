@@ -5,6 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
@@ -12,6 +13,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
+import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { CompanyRole, Prisma } from '@prisma/client';
 import {
   createEmptyPermissions,
@@ -887,5 +889,50 @@ export class AdminService {
         role: true,
       },
     });
+  }
+
+  // ==================== API Keys ====================
+
+  async findApiKeysByCompany(companyId: string) {
+    return this.prisma.apiKey.findMany({
+      where: { companyId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createApiKey(companyId: string, dto: CreateApiKeyDto) {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+    });
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
+    // Generate: cs_live_ + 40 random hex chars
+    const rawKey = 'cs_live_' + crypto.randomBytes(20).toString('hex');
+    const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
+    const prefix = rawKey.substring(0, 14);
+
+    const apiKey = await this.prisma.apiKey.create({
+      data: {
+        name: dto.name,
+        keyHash,
+        prefix,
+        companyId,
+      },
+    });
+
+    return { apiKey, rawKey };
+  }
+
+  async deleteApiKey(companyId: string, apiKeyId: string) {
+    const apiKey = await this.prisma.apiKey.findFirst({
+      where: { id: apiKeyId, companyId },
+    });
+    if (!apiKey) {
+      throw new NotFoundException('API key not found');
+    }
+
+    await this.prisma.apiKey.delete({ where: { id: apiKeyId } });
   }
 }

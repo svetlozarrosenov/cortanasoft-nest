@@ -188,8 +188,27 @@ model Company {
   stockDocuments     StockDocument[]
   billOfMaterials    BillOfMaterial[]
   productionOrders   ProductionOrder[]
+  apiKeys            ApiKey[]
 
   @@map("companies")
+}
+
+// API ключове за външни интеграции (WordPress, Drupal и др.)
+model ApiKey {
+  id     String @id @default(cuid())
+  name   String // Име/описание (напр. "WooCommerce магазин")
+  keyHash String @unique // SHA-256 хеш на ключа
+  prefix  String // Първите 14 символа за показване (напр. "cs_live_Ab12Cd...")
+
+  isActive   Boolean   @default(true)
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("api_keys")
 }
 
 // Абонаментен план / Договор за компания

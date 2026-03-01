@@ -52,6 +52,22 @@ export class CompanyInventoryController {
     return this.inventoryService.getStockLevels(companyId, query);
   }
 
+  @Get('serials')
+  @RequireView('erp', 'inventory')
+  getSerials(
+    @Param('companyId') companyId: string,
+    @Query() query: any,
+  ) {
+    return this.inventoryService.findAllSerials(companyId, {
+      productId: query.productId,
+      locationId: query.locationId,
+      status: query.status,
+      search: query.search,
+      page: query.page ? Number(query.page) : 1,
+      limit: query.limit ? Number(query.limit) : 20,
+    });
+  }
+
   @Get('by-location/:locationId')
   @RequireView('erp', 'inventory')
   getByLocation(

@@ -19,6 +19,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { AssignUserToCompanyDto } from './dto/assign-user-to-company.dto';
+import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompanyPlansService } from '../company-plans/company-plans.service';
 import {
@@ -369,6 +370,45 @@ export class AdminController {
     return {
       success: true,
       ...result,
+    };
+  }
+
+  // ==================== API Keys ====================
+
+  @Get('companies/:companyId/api-keys')
+  async getCompanyApiKeys(@Param('companyId') companyId: string) {
+    const apiKeys = await this.adminService.findApiKeysByCompany(companyId);
+    return {
+      success: true,
+      apiKeys,
+    };
+  }
+
+  @Post('companies/:companyId/api-keys')
+  async createCompanyApiKey(
+    @Param('companyId') companyId: string,
+    @Body() dto: CreateApiKeyDto,
+  ) {
+    const { apiKey, rawKey } = await this.adminService.createApiKey(
+      companyId,
+      dto,
+    );
+    return {
+      success: true,
+      apiKey,
+      rawKey,
+    };
+  }
+
+  @Delete('companies/:companyId/api-keys/:id')
+  async deleteCompanyApiKey(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+  ) {
+    await this.adminService.deleteApiKey(companyId, id);
+    return {
+      success: true,
+      message: 'API key deleted successfully',
     };
   }
 }

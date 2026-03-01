@@ -86,3 +86,21 @@ export class CreateGoodsReceiptDto {
   @Type(() => CreateGoodsReceiptItemDto)
   items: CreateGoodsReceiptItemDto[];
 }
+
+export class ItemSerialNumbersDto {
+  @IsString()
+  @IsNotEmpty()
+  goodsReceiptItemId: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  serialNumbers: string[];
+}
+
+export class ConfirmGoodsReceiptDto {
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ItemSerialNumbersDto)
+  itemSerials?: ItemSerialNumbersDto[];
+}

@@ -322,6 +322,23 @@ export class InventoryService {
             },
           },
         },
+        inventorySerials: {
+          where: {
+            status: 'IN_STOCK',
+            ...(locationId && { locationId }),
+          },
+          select: {
+            id: true,
+            locationId: true,
+            location: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+              },
+            },
+          },
+        },
       },
       skip: (page - 1) * limit,
       take: limit,
@@ -330,25 +347,45 @@ export class InventoryService {
 
     // Calculate stock levels
     const stockLevels = products.map((product) => {
-      const totalQuantity = product.inventoryBatches.reduce(
-        (sum, batch) => sum + Number(batch.quantity),
-        0,
-      );
-
-      // Group by location
       const locationMap = new Map<
         string,
         { location: any; quantity: number }
       >();
-      for (const batch of product.inventoryBatches) {
-        const existing = locationMap.get(batch.locationId);
-        if (existing) {
-          existing.quantity += Number(batch.quantity);
-        } else {
-          locationMap.set(batch.locationId, {
-            location: batch.location,
-            quantity: Number(batch.quantity),
-          });
+
+      let totalQuantity: number;
+
+      if (product.type === 'SERIAL') {
+        // For SERIAL products: count InventorySerial records with IN_STOCK status
+        totalQuantity = product.inventorySerials.length;
+
+        for (const serial of product.inventorySerials) {
+          const existing = locationMap.get(serial.locationId);
+          if (existing) {
+            existing.quantity += 1;
+          } else {
+            locationMap.set(serial.locationId, {
+              location: serial.location,
+              quantity: 1,
+            });
+          }
+        }
+      } else {
+        // For PRODUCT, BATCH — sum batch quantities
+        totalQuantity = product.inventoryBatches.reduce(
+          (sum, batch) => sum + Number(batch.quantity),
+          0,
+        );
+
+        for (const batch of product.inventoryBatches) {
+          const existing = locationMap.get(batch.locationId);
+          if (existing) {
+            existing.quantity += Number(batch.quantity);
+          } else {
+            locationMap.set(batch.locationId, {
+              location: batch.location,
+              quantity: Number(batch.quantity),
+            });
+          }
         }
       }
 
@@ -369,7 +406,10 @@ export class InventoryService {
           ? totalQuantity < Number(product.minStock)
           : false,
         locationBreakdown: Array.from(locationMap.values()),
-        batchCount: product.inventoryBatches.length,
+        batchCount:
+          product.type === 'SERIAL'
+            ? product.inventorySerials.length
+            : product.inventoryBatches.length,
       };
     });
 
@@ -388,6 +428,96 @@ export class InventoryService {
 
     return {
       data: filtered,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async findAllSerials(
+    companyId: string,
+    params: {
+      productId?: string;
+      locationId?: string;
+      status?: string;
+      search?: string;
+      page?: number;
+      limit?: number;
+    },
+  ) {
+    const {
+      productId,
+      locationId,
+      status,
+      search,
+      page = 1,
+      limit = 20,
+    } = params;
+
+    const where: Prisma.InventorySerialWhereInput = {
+      companyId,
+      ...(productId && { productId }),
+      ...(locationId && { locationId }),
+      ...(status && { status: status as any }),
+      ...(search && {
+        OR: [
+          { serialNumber: { contains: search, mode: 'insensitive' } },
+          {
+            product: {
+              name: { contains: search, mode: 'insensitive' },
+            },
+          },
+          {
+            product: {
+              sku: { contains: search, mode: 'insensitive' },
+            },
+          },
+        ],
+      }),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.inventorySerial.findMany({
+        where,
+        include: {
+          product: {
+            select: {
+              id: true,
+              sku: true,
+              name: true,
+              unit: true,
+              type: true,
+            },
+          },
+          location: {
+            select: { id: true, code: true, name: true },
+          },
+          goodsReceiptItem: {
+            select: {
+              id: true,
+              goodsReceipt: {
+                select: {
+                  id: true,
+                  receiptNumber: true,
+                  receiptDate: true,
+                  status: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.inventorySerial.count({ where }),
+    ]);
+
+    return {
+      data,
       meta: {
         total,
         page,
