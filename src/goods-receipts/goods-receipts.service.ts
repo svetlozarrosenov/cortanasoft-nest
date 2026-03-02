@@ -185,6 +185,14 @@ export class GoodsReceiptsService {
             select: { id: true, firstName: true, lastName: true },
           },
           _count: { select: { items: true } },
+          items: {
+            select: {
+              quantity: true,
+              unitPrice: true,
+              exchangeRate: true,
+              vatRate: true,
+            },
+          },
         },
         orderBy: { [sortBy]: sortOrder },
         skip: (page - 1) * limit,
@@ -193,8 +201,21 @@ export class GoodsReceiptsService {
       this.prisma.goodsReceipt.count({ where }),
     ]);
 
+    const dataWithTotals = data.map((receipt) => {
+      const totalAmount = receipt.items.reduce((sum, item) => {
+        const itemTotal =
+          Number(item.quantity) *
+          Number(item.unitPrice) *
+          Number(item.exchangeRate);
+        const vatAmount = itemTotal * (Number(item.vatRate) / 100);
+        return sum + itemTotal + vatAmount;
+      }, 0);
+      const { items: _items, ...rest } = receipt;
+      return { ...rest, totalAmount };
+    });
+
     return {
-      data,
+      data: dataWithTotals,
       meta: {
         total,
         page,
