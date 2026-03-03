@@ -88,6 +88,88 @@ export class DashboardService {
       this.prisma.department.count({ where: { companyId } }),
     ]);
 
+    // Business KPIs
+    const [
+      revenueThisMonth,
+      revenueLastMonth,
+      ordersLastMonth,
+      unpaidInvoices,
+      unpaidInvoiceAmount,
+    ] = await Promise.all([
+      // Revenue this month (confirmed+ orders)
+      this.prisma.order.aggregate({
+        where: {
+          companyId,
+          createdAt: { gte: startOfMonth },
+          status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+        },
+        _sum: { total: true },
+      }),
+      // Revenue last month
+      this.prisma.order.aggregate({
+        where: {
+          companyId,
+          createdAt: { gte: startOfLastMonth, lte: endOfLastMonth },
+          status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+        },
+        _sum: { total: true },
+      }),
+      // Orders last month (for comparison)
+      this.prisma.order.count({
+        where: {
+          companyId,
+          createdAt: { gte: startOfLastMonth, lte: endOfLastMonth },
+          status: { not: 'CANCELLED' },
+        },
+      }),
+      // Unpaid invoices count
+      this.prisma.invoice.count({
+        where: {
+          companyId,
+          status: { in: ['ISSUED', 'PARTIALLY_PAID'] },
+        },
+      }),
+      // Unpaid invoices total amount
+      this.prisma.invoice.aggregate({
+        where: {
+          companyId,
+          status: { in: ['ISSUED', 'PARTIALLY_PAID'] },
+        },
+        _sum: { total: true },
+      }),
+    ]);
+
+    // Low stock products (inventory below minStock)
+    const lowStockProducts = await this.prisma.$queryRaw<
+      { count: bigint }[]
+    >`
+      SELECT COUNT(*) as count FROM (
+        SELECT p.id
+        FROM products p
+        LEFT JOIN inventory_batches ib ON p.id = ib."productId" AND ib."companyId" = ${companyId}
+        WHERE p."companyId" = ${companyId}
+          AND p."trackInventory" = true
+          AND p."minStock" IS NOT NULL
+        GROUP BY p.id, p."minStock"
+        HAVING COALESCE(SUM(ib.quantity), 0) < p."minStock"
+      ) sub
+    `;
+
+    // Recent orders for dashboard table
+    const recentOrders = await this.prisma.order.findMany({
+      where: { companyId, status: { not: 'CANCELLED' } },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: {
+        id: true,
+        orderNumber: true,
+        customerName: true,
+        total: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
     // Calculate percentage changes
     const calculateChange = (current: number, previous: number): string => {
       if (previous === 0) return current > 0 ? '+100%' : '0%';
@@ -95,23 +177,25 @@ export class DashboardService {
       return `${change >= 0 ? '+' : ''}${Math.round(change)}%`;
     };
 
+    const revenue = Number(revenueThisMonth._sum.total ?? 0);
+    const prevRevenue = Number(revenueLastMonth._sum.total ?? 0);
+
     return {
       quickStats: {
-        activeTasks: {
-          value: activeTickets,
-          change: calculateChange(activeTickets, activeTicketsLastMonth),
+        revenue: {
+          value: revenue,
+          change: calculateChange(revenue, prevRevenue),
         },
-        pending: {
-          value: pendingTickets,
-          change: '0%', // No comparison for pending
+        ordersThisMonth: {
+          value: ordersThisMonth,
+          change: calculateChange(ordersThisMonth, ordersLastMonth),
         },
-        completed: {
-          value: completedTickets,
-          change: calculateChange(completedTickets, completedTicketsLastMonth),
+        unpaidInvoices: {
+          value: unpaidInvoices,
+          amount: Number(unpaidInvoiceAmount._sum.total ?? 0),
         },
-        overdue: {
-          value: overdueTickets,
-          change: '0%',
+        lowStock: {
+          value: Number(lowStockProducts[0]?.count ?? 0),
         },
       },
       modules: {
@@ -134,6 +218,14 @@ export class DashboardService {
           completed: completedTickets,
         },
       },
+      recentOrders: recentOrders.map((o) => ({
+        id: o.id,
+        orderNumber: o.orderNumber,
+        customerName: o.customerName,
+        total: Number(o.total),
+        status: o.status,
+        createdAt: o.createdAt,
+      })),
     };
   }
 
