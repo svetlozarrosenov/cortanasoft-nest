@@ -25,6 +25,7 @@ const ORDER_INCLUDE = {
       product: true,
       inventoryBatch: true,
       inventorySerial: true,
+      location: true,
     },
   },
   _count: { select: { items: true } },
@@ -96,6 +97,7 @@ export class OrdersService {
         subtotal: itemSubtotal,
         inventoryBatchId: item.inventoryBatchId,
         inventorySerialId: item.inventorySerialId,
+        locationId: item.locationId,
       };
     });
 
@@ -259,13 +261,13 @@ export class OrdersService {
     return order;
   }
 
-  // Valid status transitions state machine
+  // Valid status transitions: Нова → Заприходена or Анулирана
   private readonly validTransitions: Record<OrderStatus, OrderStatus[]> = {
     DRAFT: ['PENDING', 'CANCELLED'],
     PENDING: ['CONFIRMED', 'CANCELLED'],
-    CONFIRMED: ['PROCESSING', 'CANCELLED'],
-    PROCESSING: ['SHIPPED', 'CANCELLED'],
-    SHIPPED: ['DELIVERED', 'CANCELLED'],
+    CONFIRMED: ['CANCELLED'],
+    PROCESSING: ['CANCELLED'],
+    SHIPPED: ['CANCELLED'],
     DELIVERED: [],
     CANCELLED: [],
   };
@@ -488,12 +490,14 @@ export class OrdersService {
             });
           } else {
             // Auto-deduct using FIFO (oldest batches first)
+            // Prefer item-level locationId, fall back to order-level
+            const deductLocationId = item.locationId || order.locationId;
             const batches = await tx.inventoryBatch.findMany({
               where: {
                 companyId,
                 productId: item.productId,
                 quantity: { gt: 0 },
-                ...(order.locationId && { locationId: order.locationId }),
+                ...(deductLocationId && { locationId: deductLocationId }),
               },
               orderBy: { createdAt: 'asc' }, // FIFO
             });
@@ -584,12 +588,13 @@ export class OrdersService {
               data: { quantity: { increment: quantity } },
             });
           } else {
-            // If no specific batch, restore to the oldest batch of this product at the order location
+            // If no specific batch, restore to the oldest batch of this product at the item/order location
+            const restoreLocationId = item.locationId || order.locationId;
             const batch = await tx.inventoryBatch.findFirst({
               where: {
                 companyId,
                 productId: item.productId,
-                ...(order.locationId && { locationId: order.locationId }),
+                ...(restoreLocationId && { locationId: restoreLocationId }),
               },
               orderBy: { createdAt: 'asc' },
             });

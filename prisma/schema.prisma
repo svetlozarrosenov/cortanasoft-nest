@@ -881,6 +881,7 @@ model Location {
   inventoryBatches InventoryBatch[]
   inventorySerials InventorySerial[]
   orders           Order[]
+  orderItems       OrderItem[]
   productionOrders ProductionOrder[]
   stockTransfersFrom StockTransfer[] @relation("StockTransferFrom")
   stockTransfersTo   StockTransfer[] @relation("StockTransferTo")
@@ -1392,6 +1393,10 @@ model OrderItem {
   // От кой сериен номер е взето (само за SERIAL продукти)
   inventorySerialId String?
   inventorySerial   InventorySerial? @relation(fields: [inventorySerialId], references: [id], onDelete: SetNull)
+
+  // От кой склад се изпълнява (per-item location)
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
   invoiceItems InvoiceItem[]
 

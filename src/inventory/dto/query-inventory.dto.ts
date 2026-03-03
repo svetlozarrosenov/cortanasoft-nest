@@ -39,6 +39,11 @@ export class QueryInventoryDto {
   expiryDateTo?: string;
 
   @IsOptional()
+  @IsString()
+  @IsIn(['PRODUCT', 'BATCH', 'SERIAL', 'SERVICE'])
+  productType?: string;
+
+  @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   hasStock?: boolean;

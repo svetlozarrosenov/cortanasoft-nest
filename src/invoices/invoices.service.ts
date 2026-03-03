@@ -125,7 +125,7 @@ export class InvoicesService {
         invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(),
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         type: 'REGULAR',
-        status: 'DRAFT',
+        status: 'ISSUED',
         orderId: order.id,
         customerId: order.customerId,
         customerName: order.customerName,

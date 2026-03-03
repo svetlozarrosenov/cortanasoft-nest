@@ -26,6 +26,7 @@ export class InventoryService {
       goodsReceiptId,
       expiryDateFrom,
       expiryDateTo,
+      productType,
       hasStock,
       expiringSoon,
       page = 1,
@@ -43,6 +44,7 @@ export class InventoryService {
       ...(productId && { productId }),
       ...(locationId && { locationId }),
       ...(storageZoneId && { storageZoneId }),
+      ...(productType && { product: { type: productType as any } }),
       ...(goodsReceiptId && {
         goodsReceiptItem: {
           goodsReceiptId: goodsReceiptId,

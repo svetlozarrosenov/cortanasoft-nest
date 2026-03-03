@@ -39,6 +39,10 @@ export class CreateOrderItemDto {
   @IsString()
   @IsOptional()
   inventorySerialId?: string;
+
+  @IsString()
+  @IsOptional()
+  locationId?: string;
 }
 
 export class CreateOrderDto {
