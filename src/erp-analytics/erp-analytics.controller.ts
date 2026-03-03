@@ -12,8 +12,10 @@ import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import { PermissionsGuard, RequireView } from '../common/guards/permissions.guard';
 import {
   ProfitAnalyticsResult,
-  PurchaseSummaryResult,
   FinancialSummaryResult,
+  SalesReportResult,
+  CustomersReportResult,
+  ProductsReportResult,
 } from './erp-analytics.service';
 
 @Controller('companies/:companyId/erp-analytics')
@@ -30,15 +32,6 @@ export class ErpAnalyticsController {
     return this.analyticsService.getProfitAnalytics(companyId, query);
   }
 
-  @Get('purchases')
-  @RequireView('erp', 'analytics')
-  async getPurchaseSummary(
-    @Param('companyId') companyId: string,
-    @Query() query: QueryProfitAnalyticsDto,
-  ): Promise<PurchaseSummaryResult> {
-    return this.analyticsService.getPurchaseSummary(companyId, query);
-  }
-
   @Get('financial-summary')
   @RequireView('erp', 'analytics')
   async getFinancialSummary(
@@ -46,5 +39,32 @@ export class ErpAnalyticsController {
     @Query() query: QueryProfitAnalyticsDto,
   ): Promise<FinancialSummaryResult> {
     return this.analyticsService.getFinancialSummary(companyId, query);
+  }
+
+  @Get('sales')
+  @RequireView('bi', 'sales')
+  async getSalesReport(
+    @Param('companyId') companyId: string,
+    @Query() query: QueryProfitAnalyticsDto,
+  ): Promise<SalesReportResult> {
+    return this.analyticsService.getSalesReport(companyId, query);
+  }
+
+  @Get('customers')
+  @RequireView('bi', 'customers')
+  async getCustomersReport(
+    @Param('companyId') companyId: string,
+    @Query() query: QueryProfitAnalyticsDto,
+  ): Promise<CustomersReportResult> {
+    return this.analyticsService.getCustomersReport(companyId, query);
+  }
+
+  @Get('products')
+  @RequireView('bi', 'products')
+  async getProductsReport(
+    @Param('companyId') companyId: string,
+    @Query() query: QueryProfitAnalyticsDto,
+  ): Promise<ProductsReportResult> {
+    return this.analyticsService.getProductsReport(companyId, query);
   }
 }

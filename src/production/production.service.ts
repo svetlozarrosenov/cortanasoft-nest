@@ -225,10 +225,14 @@ export class ProductionService {
           ...(dto.quantity !== undefined && { quantity: dto.quantity }),
           ...(dto.locationId !== undefined && { locationId: dto.locationId }),
           ...(dto.plannedStartDate !== undefined && {
-            plannedStartDate: new Date(dto.plannedStartDate),
+            plannedStartDate: dto.plannedStartDate
+              ? new Date(dto.plannedStartDate)
+              : null,
           }),
           ...(dto.plannedEndDate !== undefined && {
-            plannedEndDate: new Date(dto.plannedEndDate),
+            plannedEndDate: dto.plannedEndDate
+              ? new Date(dto.plannedEndDate)
+              : null,
           }),
           ...(dto.notes !== undefined && { notes: dto.notes }),
           ...(dto.materials && {

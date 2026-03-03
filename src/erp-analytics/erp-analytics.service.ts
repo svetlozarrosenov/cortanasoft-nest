@@ -92,6 +92,83 @@ export interface PayrollSummary {
   employeeCount: number;
 }
 
+// ==================== Sales Report ====================
+
+export interface SalesReportResult {
+  revenue: number;
+  orderCount: number;
+  avgOrderValue: number;
+  periodComparison?: {
+    previousRevenue: number;
+    previousOrderCount: number;
+    previousAvgOrderValue: number;
+    revenueGrowth: number;
+    orderGrowth: number;
+    avgOrderValueGrowth: number;
+  };
+  topProducts: Array<{
+    productId: string;
+    productName: string;
+    productSku: string;
+    quantitySold: number;
+    revenue: number;
+  }>;
+  topCustomers: Array<{
+    customerId: string;
+    customerName: string;
+    orderCount: number;
+    totalSpent: number;
+  }>;
+  trend: Array<{ date: string; revenue: number; orderCount: number }>;
+}
+
+// ==================== Customers Report ====================
+
+export interface CustomersReportResult {
+  totalCustomers: number;
+  newCustomers: number;
+  avgOrderValue: number;
+  totalOrders: number;
+  periodComparison?: {
+    previousNewCustomers: number;
+    previousTotalOrders: number;
+    newCustomersGrowth: number;
+    ordersGrowth: number;
+  };
+  topCustomers: Array<{
+    customerId: string;
+    customerName: string;
+    orderCount: number;
+    avgOrderValue: number;
+    totalSpent: number;
+  }>;
+  newCustomersTrend: Array<{ date: string; count: number }>;
+}
+
+// ==================== Products Report ====================
+
+export interface ProductsReportResult {
+  totalProducts: number;
+  lowStockCount: number;
+  noMovementCount: number;
+  totalInventoryValue: number;
+  topProducts: Array<{
+    productId: string;
+    productName: string;
+    productSku: string;
+    quantitySold: number;
+    revenue: number;
+    currentStock: number;
+  }>;
+  lowStockProducts: Array<{
+    productId: string;
+    productName: string;
+    productSku: string;
+    currentStock: number;
+    minStockLevel: number;
+  }>;
+}
+
 export interface FinancialSummaryResult {
   // Приходи
   revenue: number;
@@ -616,6 +693,443 @@ export class ErpAnalyticsService {
       topProducts: profitData.byProduct.slice(0, 10),
       topCategories: profitData.byCategory.slice(0, 5),
       topSuppliers: purchaseData.bySupplier.slice(0, 5),
+    };
+  }
+
+  // ==================== Sales Report ====================
+  async getSalesReport(
+    companyId: string,
+    query: QueryProfitAnalyticsDto,
+  ): Promise<SalesReportResult> {
+    const now = new Date();
+    const dateFrom = query.dateFrom
+      ? new Date(query.dateFrom)
+      : new Date(now.getFullYear(), now.getMonth(), 1); // Start of current month
+    const dateTo = query.dateTo
+      ? new Date(query.dateTo + 'T23:59:59.999Z')
+      : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const periodLength = dateTo.getTime() - dateFrom.getTime();
+    const previousFrom = new Date(dateFrom.getTime() - periodLength);
+    const previousTo = new Date(dateFrom.getTime() - 1);
+
+    const orders = await this.prisma.order.findMany({
+      where: {
+        companyId,
+        orderDate: { gte: dateFrom, lte: dateTo },
+        status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+      },
+      include: {
+        items: { include: { product: true } },
+      },
+    });
+
+    // Calculate totals
+    let revenue = 0;
+    const productMap = new Map<string, { productId: string; productName: string; productSku: string; quantitySold: number; revenue: number }>();
+    const customerMap = new Map<string, { customerId: string; customerName: string; orderCount: number; totalSpent: number }>();
+    const trendMap = new Map<string, { revenue: number; orderCount: number }>();
+
+    for (const order of orders) {
+      let orderTotal = 0;
+      for (const item of order.items) {
+        const qty = Number(item.quantity);
+        const price = Number(item.unitPrice);
+        const itemRevenue = qty * price;
+        orderTotal += itemRevenue;
+
+        const existing = productMap.get(item.productId);
+        if (existing) {
+          existing.quantitySold += qty;
+          existing.revenue += itemRevenue;
+        } else {
+          productMap.set(item.productId, {
+            productId: item.productId,
+            productName: item.product.name,
+            productSku: item.product.sku || '',
+            quantitySold: qty,
+            revenue: itemRevenue,
+          });
+        }
+      }
+      revenue += orderTotal;
+
+      // Customer aggregation (customerName is on the Order itself)
+      if (order.customerId) {
+        const cust = customerMap.get(order.customerId);
+        if (cust) {
+          cust.orderCount += 1;
+          cust.totalSpent += orderTotal;
+        } else {
+          customerMap.set(order.customerId, {
+            customerId: order.customerId,
+            customerName: order.customerName,
+            orderCount: 1,
+            totalSpent: orderTotal,
+          });
+        }
+      }
+
+      // Monthly trend
+      const monthKey = order.orderDate.toISOString().slice(0, 7); // YYYY-MM
+      const trend = trendMap.get(monthKey);
+      if (trend) {
+        trend.revenue += orderTotal;
+        trend.orderCount += 1;
+      } else {
+        trendMap.set(monthKey, { revenue: orderTotal, orderCount: 1 });
+      }
+    }
+
+    const orderCount = orders.length;
+    const avgOrderValue = orderCount > 0 ? revenue / orderCount : 0;
+
+    // Previous period
+    const previousOrders = await this.prisma.order.findMany({
+      where: {
+        companyId,
+        orderDate: { gte: previousFrom, lte: previousTo },
+        status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+      },
+      include: { items: true },
+    });
+
+    let previousRevenue = 0;
+    for (const order of previousOrders) {
+      for (const item of order.items) {
+        previousRevenue += Number(item.quantity) * Number(item.unitPrice);
+      }
+    }
+    const previousOrderCount = previousOrders.length;
+    const previousAvgOrderValue = previousOrderCount > 0 ? previousRevenue / previousOrderCount : 0;
+
+    const calcGrowth = (current: number, previous: number) =>
+      previous > 0 ? ((current - previous) / previous) * 100 : current > 0 ? 100 : 0;
+
+    return {
+      revenue,
+      orderCount,
+      avgOrderValue,
+      periodComparison: {
+        previousRevenue,
+        previousOrderCount,
+        previousAvgOrderValue,
+        revenueGrowth: calcGrowth(revenue, previousRevenue),
+        orderGrowth: calcGrowth(orderCount, previousOrderCount),
+        avgOrderValueGrowth: calcGrowth(avgOrderValue, previousAvgOrderValue),
+      },
+      topProducts: Array.from(productMap.values())
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, 10),
+      topCustomers: Array.from(customerMap.values())
+        .sort((a, b) => b.totalSpent - a.totalSpent)
+        .slice(0, 10),
+      trend: Array.from(trendMap.entries())
+        .map(([date, data]) => ({ date, ...data }))
+        .sort((a, b) => a.date.localeCompare(b.date)),
+    };
+  }
+
+  // ==================== Customers Report ====================
+  async getCustomersReport(
+    companyId: string,
+    query: QueryProfitAnalyticsDto,
+  ): Promise<CustomersReportResult> {
+    const now = new Date();
+    const dateFrom = query.dateFrom
+      ? new Date(query.dateFrom)
+      : new Date(now.getFullYear(), now.getMonth(), 1);
+    const dateTo = query.dateTo
+      ? new Date(query.dateTo + 'T23:59:59.999Z')
+      : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    const periodLength = dateTo.getTime() - dateFrom.getTime();
+    const previousFrom = new Date(dateFrom.getTime() - periodLength);
+    const previousTo = new Date(dateFrom.getTime() - 1);
+
+    // Fetch orders in period
+    const orders = await this.prisma.order.findMany({
+      where: {
+        companyId,
+        orderDate: { gte: dateFrom, lte: dateTo },
+        status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+      },
+      include: {
+        items: true,
+      },
+    });
+
+    // Customer aggregation
+    const customerMap = new Map<string, {
+      customerId: string; customerName: string;
+      orderCount: number; totalSpent: number;
+      firstOrderDate: Date;
+    }>();
+
+    for (const order of orders) {
+      if (!order.customerId) continue;
+
+      let orderTotal = 0;
+      for (const item of order.items) {
+        orderTotal += Number(item.quantity) * Number(item.unitPrice);
+      }
+
+      const existing = customerMap.get(order.customerId);
+      if (existing) {
+        existing.orderCount += 1;
+        existing.totalSpent += orderTotal;
+        if (order.orderDate < existing.firstOrderDate) {
+          existing.firstOrderDate = order.orderDate;
+        }
+      } else {
+        customerMap.set(order.customerId, {
+          customerId: order.customerId,
+          customerName: order.customerName,
+          orderCount: 1,
+          totalSpent: orderTotal,
+          firstOrderDate: order.orderDate,
+        });
+      }
+    }
+
+    const totalCustomers = customerMap.size;
+    const totalOrders = orders.length;
+    const totalRevenue = Array.from(customerMap.values()).reduce((sum, c) => sum + c.totalSpent, 0);
+    const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+
+    // Find "new" customers — customers whose first-ever order is in this period
+    const newCustomerIds: string[] = [];
+    for (const [customerId] of customerMap) {
+      const earlierOrder = await this.prisma.order.findFirst({
+        where: {
+          companyId,
+          customerId,
+          orderDate: { lt: dateFrom },
+          status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+        },
+        select: { id: true },
+      });
+      if (!earlierOrder) {
+        newCustomerIds.push(customerId);
+      }
+    }
+    const newCustomers = newCustomerIds.length;
+
+    // New customers per month trend
+    const newCustomerMonthMap = new Map<string, Set<string>>();
+    for (const order of orders) {
+      if (!order.customerId || !newCustomerIds.includes(order.customerId)) continue;
+      const monthKey = order.orderDate.toISOString().slice(0, 7);
+      if (!newCustomerMonthMap.has(monthKey)) {
+        newCustomerMonthMap.set(monthKey, new Set());
+      }
+      newCustomerMonthMap.get(monthKey)!.add(order.customerId);
+    }
+
+    // Previous period for comparison
+    const previousOrders = await this.prisma.order.findMany({
+      where: {
+        companyId,
+        orderDate: { gte: previousFrom, lte: previousTo },
+        status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+      },
+      select: { id: true, customerId: true, orderDate: true },
+    });
+
+    const previousCustomerIds = new Set(previousOrders.filter(o => o.customerId).map(o => o.customerId!));
+    let previousNewCustomers = 0;
+    for (const customerId of previousCustomerIds) {
+      const earlierOrder = await this.prisma.order.findFirst({
+        where: {
+          companyId,
+          customerId,
+          orderDate: { lt: previousFrom },
+          status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+        },
+        select: { id: true },
+      });
+      if (!earlierOrder) previousNewCustomers++;
+    }
+
+    const calcGrowth = (current: number, previous: number) =>
+      previous > 0 ? ((current - previous) / previous) * 100 : current > 0 ? 100 : 0;
+
+    return {
+      totalCustomers,
+      newCustomers,
+      avgOrderValue,
+      totalOrders,
+      periodComparison: {
+        previousNewCustomers,
+        previousTotalOrders: previousOrders.length,
+        newCustomersGrowth: calcGrowth(newCustomers, previousNewCustomers),
+        ordersGrowth: calcGrowth(totalOrders, previousOrders.length),
+      },
+      topCustomers: Array.from(customerMap.values())
+        .map(c => ({
+          customerId: c.customerId,
+          customerName: c.customerName,
+          orderCount: c.orderCount,
+          avgOrderValue: c.orderCount > 0 ? c.totalSpent / c.orderCount : 0,
+          totalSpent: c.totalSpent,
+        }))
+        .sort((a, b) => b.totalSpent - a.totalSpent)
+        .slice(0, 10),
+      newCustomersTrend: Array.from(newCustomerMonthMap.entries())
+        .map(([date, ids]) => ({ date, count: ids.size }))
+        .sort((a, b) => a.date.localeCompare(b.date)),
+    };
+  }
+
+  // ==================== Products Report ====================
+  async getProductsReport(
+    companyId: string,
+    query: QueryProfitAnalyticsDto,
+  ): Promise<ProductsReportResult> {
+    const now = new Date();
+    const dateFrom = query.dateFrom
+      ? new Date(query.dateFrom)
+      : new Date(now.getFullYear(), now.getMonth(), 1);
+    const dateTo = query.dateTo
+      ? new Date(query.dateTo + 'T23:59:59.999Z')
+      : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    // All active products
+    const products = await this.prisma.product.findMany({
+      where: { companyId, isActive: true },
+      include: {
+        inventoryBatches: {
+          select: { quantity: true, unitCost: true },
+        },
+      },
+    });
+
+    const totalProducts = products.length;
+
+    // Calculate inventory values and stock levels per product
+    const productStockMap = new Map<string, { currentStock: number; inventoryValue: number; minStock: number }>();
+    let totalInventoryValue = 0;
+    let lowStockCount = 0;
+
+    for (const product of products) {
+      let currentStock = 0;
+      let inventoryValue = 0;
+      for (const batch of product.inventoryBatches) {
+        const qty = Number(batch.quantity);
+        currentStock += qty;
+        inventoryValue += qty * Number(batch.unitCost);
+      }
+      totalInventoryValue += inventoryValue;
+
+      const minStock = Number(product.minStock) || 0;
+      productStockMap.set(product.id, { currentStock, inventoryValue, minStock });
+
+      if (minStock > 0 && currentStock < minStock) {
+        lowStockCount++;
+      }
+    }
+
+    // Orders in period — for sales data
+    const orders = await this.prisma.order.findMany({
+      where: {
+        companyId,
+        orderDate: { gte: dateFrom, lte: dateTo },
+        status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+      },
+      include: {
+        items: { include: { product: true } },
+      },
+    });
+
+    // Product sales aggregation
+    const salesMap = new Map<string, { productId: string; productName: string; productSku: string; quantitySold: number; revenue: number }>();
+    const soldProductIds = new Set<string>();
+
+    for (const order of orders) {
+      for (const item of order.items) {
+        soldProductIds.add(item.productId);
+        const qty = Number(item.quantity);
+        const itemRevenue = qty * Number(item.unitPrice);
+        const existing = salesMap.get(item.productId);
+        if (existing) {
+          existing.quantitySold += qty;
+          existing.revenue += itemRevenue;
+        } else {
+          salesMap.set(item.productId, {
+            productId: item.productId,
+            productName: item.product.name,
+            productSku: item.product.sku || '',
+            quantitySold: qty,
+            revenue: itemRevenue,
+          });
+        }
+      }
+    }
+
+    // No movement: products with no sales in last 90 days
+    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const recentSoldProductIds = new Set<string>();
+
+    const recentOrders = await this.prisma.order.findMany({
+      where: {
+        companyId,
+        orderDate: { gte: ninetyDaysAgo },
+        status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+      },
+      include: { items: { select: { productId: true } } },
+    });
+    for (const order of recentOrders) {
+      for (const item of order.items) {
+        recentSoldProductIds.add(item.productId);
+      }
+    }
+
+    let noMovementCount = 0;
+    for (const product of products) {
+      if (product.trackInventory && !recentSoldProductIds.has(product.id)) {
+        const stock = productStockMap.get(product.id);
+        if (stock && stock.currentStock > 0) {
+          noMovementCount++;
+        }
+      }
+    }
+
+    // Top products with current stock
+    const topProducts = Array.from(salesMap.values())
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10)
+      .map(p => ({
+        ...p,
+        currentStock: productStockMap.get(p.productId)?.currentStock || 0,
+      }));
+
+    // Low stock products list
+    const lowStockProducts = products
+      .filter(p => {
+        const minStock = Number(p.minStock) || 0;
+        if (minStock <= 0) return false;
+        const stock = productStockMap.get(p.id);
+        return stock && stock.currentStock < minStock;
+      })
+      .map(p => {
+        const stock = productStockMap.get(p.id)!;
+        return {
+          productId: p.id,
+          productName: p.name,
+          productSku: p.sku || '',
+          currentStock: stock.currentStock,
+          minStockLevel: stock.minStock,
+        };
+      })
+      .sort((a, b) => (a.currentStock / a.minStockLevel) - (b.currentStock / b.minStockLevel));
+
+    return {
+      totalProducts,
+      lowStockCount,
+      noMovementCount,
+      totalInventoryValue,
+      topProducts,
+      lowStockProducts,
     };
   }
 }
