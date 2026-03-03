@@ -10,8 +10,38 @@ import {
   UpdateGoodsReceiptDto,
   QueryGoodsReceiptsDto,
 } from './dto';
-import { Prisma } from '@prisma/client';
+import { Prisma, GoodsReceiptStatus } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
+
+// Standard include for goods receipt queries
+const RECEIPT_INCLUDE = {
+  location: true,
+  supplier: true,
+  currency: true,
+  createdBy: {
+    select: { id: true, firstName: true, lastName: true },
+  },
+  items: {
+    include: {
+      product: true,
+      currency: true,
+    },
+  },
+  expenses: {
+    include: {
+      supplier: true,
+    },
+  },
+  _count: { select: { items: true } },
+};
+
+// Valid status transitions
+const VALID_TRANSITIONS: Record<GoodsReceiptStatus, GoodsReceiptStatus[]> = {
+  EXPECTED: ['DELIVERED_PAID', 'DELIVERED_UNPAID', 'CANCELLED'],
+  DELIVERED_PAID: ['CANCELLED'],
+  DELIVERED_UNPAID: ['DELIVERED_PAID', 'CANCELLED'],
+  CANCELLED: [],
+};
 
 @Injectable()
 export class GoodsReceiptsService {
@@ -118,24 +148,39 @@ export class GoodsReceiptsService {
       const receiptNumber =
         dto.receiptNumber || (await this.generateReceiptNumber(companyId, tx));
 
-      return tx.goodsReceipt.create({
+      const receipt = await tx.goodsReceipt.create({
         data: { ...createData, receiptNumber },
-        include: {
-          location: true,
-          supplier: true,
-          currency: true,
-          createdBy: {
-            select: { id: true, firstName: true, lastName: true },
-          },
-          items: {
-            include: {
-              product: true,
-              currency: true,
-            },
-          },
-          _count: { select: { items: true } },
-        },
+        include: RECEIPT_INCLUDE,
       });
+
+      // Create expense records if provided
+      if (dto.expenses && dto.expenses.length > 0) {
+        for (const exp of dto.expenses) {
+          await tx.expense.create({
+            data: {
+              description: exp.description,
+              category: exp.category,
+              amount: exp.amount,
+              vatAmount: 0,
+              totalAmount: exp.amount,
+              expenseDate: receipt.receiptDate,
+              status: 'PENDING',
+              companyId,
+              supplierId: dto.supplierId || undefined,
+              createdById: userId,
+              goodsReceiptId: receipt.id,
+            },
+          });
+        }
+
+        // Re-fetch to include expenses
+        return tx.goodsReceipt.findUnique({
+          where: { id: receipt.id },
+          include: RECEIPT_INCLUDE,
+        });
+      }
+
+      return receipt;
     });
   }
 
@@ -193,6 +238,12 @@ export class GoodsReceiptsService {
               vatRate: true,
             },
           },
+          expenses: {
+            select: {
+              amount: true,
+              totalAmount: true,
+            },
+          },
         },
         orderBy: { [sortBy]: sortOrder },
         skip: (page - 1) * limit,
@@ -210,8 +261,12 @@ export class GoodsReceiptsService {
         const vatAmount = itemTotal * (Number(item.vatRate) / 100);
         return sum + itemTotal + vatAmount;
       }, 0);
-      const { items: _items, ...rest } = receipt;
-      return { ...rest, totalAmount };
+      const totalExpenses = receipt.expenses.reduce(
+        (sum, exp) => sum + Number(exp.totalAmount),
+        0,
+      );
+      const { items: _items, expenses: _expenses, ...rest } = receipt;
+      return { ...rest, totalAmount, totalExpenses };
     });
 
     return {
@@ -228,21 +283,7 @@ export class GoodsReceiptsService {
   async findOne(companyId: string, id: string) {
     const receipt = await this.prisma.goodsReceipt.findFirst({
       where: { id, companyId },
-      include: {
-        location: true,
-        supplier: true,
-        currency: true,
-        createdBy: {
-          select: { id: true, firstName: true, lastName: true },
-        },
-        items: {
-          include: {
-            product: true,
-            currency: true,
-          },
-        },
-        _count: { select: { items: true } },
-      },
+      include: RECEIPT_INCLUDE,
     });
 
     if (!receipt) {
@@ -255,8 +296,8 @@ export class GoodsReceiptsService {
   async update(companyId: string, id: string, dto: UpdateGoodsReceiptDto) {
     const receipt = await this.findOne(companyId, id);
 
-    if (receipt.status !== 'DRAFT') {
-      throw new BadRequestException(ErrorMessages.goodsReceipts.canOnlyUpdateDraft);
+    if (receipt.status !== 'EXPECTED') {
+      throw new BadRequestException(ErrorMessages.goodsReceipts.canOnlyUpdateExpected);
     }
 
     // Verify new location if provided
@@ -269,226 +310,220 @@ export class GoodsReceiptsService {
       }
     }
 
-    // If items are provided, validate products and replace all items in a transaction
-    if (dto.items && dto.items.length > 0) {
-      const newItems = dto.items;
-      const company = await this.prisma.company.findUnique({
-        where: { id: companyId },
-      });
+    return this.prisma.$transaction(async (tx) => {
+      // If items are provided, validate products and replace all items
+      if (dto.items && dto.items.length > 0) {
+        const newItems = dto.items;
+        const company = await tx.company.findUnique({
+          where: { id: companyId },
+        });
 
-      const uniqueProductIds = [...new Set(newItems.map((item) => item.productId))];
-      const products = await this.prisma.product.findMany({
-        where: { id: { in: uniqueProductIds }, companyId },
-      });
-      if (products.length !== uniqueProductIds.length) {
-        throw new BadRequestException(ErrorMessages.goodsReceipts.productsNotFound);
-      }
+        const uniqueProductIds = [...new Set(newItems.map((item) => item.productId))];
+        const products = await tx.product.findMany({
+          where: { id: { in: uniqueProductIds }, companyId },
+        });
+        if (products.length !== uniqueProductIds.length) {
+          throw new BadRequestException(ErrorMessages.goodsReceipts.productsNotFound);
+        }
 
-      const currencyId = dto.currencyId || receipt.currencyId;
+        const currencyId = dto.currencyId || receipt.currencyId;
 
-      return this.prisma.$transaction(async (tx) => {
         // Delete existing items
         await tx.goodsReceiptItem.deleteMany({
           where: { goodsReceiptId: id },
         });
 
-        // Update receipt with new items
-        return tx.goodsReceipt.update({
-          where: { id },
-          data: {
-            ...(dto.receiptDate && { receiptDate: new Date(dto.receiptDate) }),
-            ...(dto.locationId && { locationId: dto.locationId }),
-            ...(dto.supplierId !== undefined && {
-              supplierId: dto.supplierId || null,
-            }),
-            ...(dto.invoiceNumber !== undefined && {
-              invoiceNumber: dto.invoiceNumber,
-            }),
-            ...(dto.invoiceDate !== undefined && {
-              invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : null,
-            }),
-            ...(dto.notes !== undefined && { notes: dto.notes }),
-            ...(dto.attachmentUrl !== undefined && {
-              attachmentUrl: dto.attachmentUrl || null,
-            }),
-            ...(dto.currencyId && { currencyId: dto.currencyId }),
-            ...(dto.exchangeRate !== undefined && {
-              exchangeRate: dto.exchangeRate,
-            }),
-            items: {
-              create: newItems.map((item) => ({
-                productId: item.productId,
-                quantity: item.quantity,
-                unitPrice: item.unitPrice,
-                vatRate: item.vatRate ?? (company?.vatNumber ? 20 : 0),
-                currencyId: item.currencyId || currencyId,
-                exchangeRate: item.exchangeRate ?? 1,
-              })),
+        // Create new items
+        for (const item of newItems) {
+          await tx.goodsReceiptItem.create({
+            data: {
+              goodsReceiptId: id,
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              vatRate: item.vatRate ?? (company?.vatNumber ? 20 : 0),
+              currencyId: item.currencyId || currencyId,
+              exchangeRate: item.exchangeRate ?? 1,
             },
-          },
-          include: {
-            location: true,
-            supplier: true,
-            currency: true,
-            createdBy: {
-              select: { id: true, firstName: true, lastName: true },
-            },
-            items: {
-              include: {
-                product: true,
-                currency: true,
-              },
-            },
-            _count: { select: { items: true } },
-          },
-        });
-      });
-    }
+          });
+        }
+      }
 
-    return this.prisma.goodsReceipt.update({
-      where: { id },
-      data: {
-        ...(dto.receiptDate && { receiptDate: new Date(dto.receiptDate) }),
-        ...(dto.locationId && { locationId: dto.locationId }),
-        ...(dto.supplierId !== undefined && {
-          supplierId: dto.supplierId || null,
-        }),
-        ...(dto.invoiceNumber !== undefined && {
-          invoiceNumber: dto.invoiceNumber,
-        }),
-        ...(dto.invoiceDate !== undefined && {
-          invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : null,
-        }),
-        ...(dto.notes !== undefined && { notes: dto.notes }),
-        ...(dto.attachmentUrl !== undefined && {
-          attachmentUrl: dto.attachmentUrl || null,
-        }),
-        ...(dto.currencyId && { currencyId: dto.currencyId }),
-        ...(dto.exchangeRate !== undefined && {
-          exchangeRate: dto.exchangeRate,
-        }),
-      },
-      include: {
-        location: true,
-        supplier: true,
-        currency: true,
-        createdBy: {
-          select: { id: true, firstName: true, lastName: true },
+      // If expenses are provided, replace all linked expenses
+      if (dto.expenses !== undefined) {
+        // Delete old expenses linked to this receipt
+        await tx.expense.deleteMany({
+          where: { goodsReceiptId: id },
+        });
+
+        // Create new expenses
+        if (dto.expenses && dto.expenses.length > 0) {
+          for (const exp of dto.expenses) {
+            await tx.expense.create({
+              data: {
+                description: exp.description,
+                category: exp.category,
+                amount: exp.amount,
+                vatAmount: 0,
+                totalAmount: exp.amount,
+                expenseDate: receipt.receiptDate,
+                status: 'PENDING',
+                companyId,
+                supplierId: dto.supplierId ?? receipt.supplierId ?? undefined,
+                goodsReceiptId: id,
+              },
+            });
+          }
+        }
+      }
+
+      // Update receipt fields
+      return tx.goodsReceipt.update({
+        where: { id },
+        data: {
+          ...(dto.receiptDate && { receiptDate: new Date(dto.receiptDate) }),
+          ...(dto.locationId && { locationId: dto.locationId }),
+          ...(dto.supplierId !== undefined && {
+            supplierId: dto.supplierId || null,
+          }),
+          ...(dto.invoiceNumber !== undefined && {
+            invoiceNumber: dto.invoiceNumber,
+          }),
+          ...(dto.invoiceDate !== undefined && {
+            invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : null,
+          }),
+          ...(dto.notes !== undefined && { notes: dto.notes }),
+          ...(dto.attachmentUrl !== undefined && {
+            attachmentUrl: dto.attachmentUrl || null,
+          }),
+          ...(dto.currencyId && { currencyId: dto.currencyId }),
+          ...(dto.exchangeRate !== undefined && {
+            exchangeRate: dto.exchangeRate,
+          }),
         },
-        items: {
-          include: {
-            product: true,
-            currency: true,
-          },
-        },
-        _count: { select: { items: true } },
-      },
+        include: RECEIPT_INCLUDE,
+      });
     });
   }
 
-  async confirm(
+  async updateStatus(
     companyId: string,
     id: string,
+    targetStatus: GoodsReceiptStatus,
     itemSerials?: { goodsReceiptItemId: string; serialNumbers: string[] }[],
   ) {
     const receipt = await this.findOne(companyId, id);
 
-    if (receipt.status !== 'DRAFT') {
-      throw new BadRequestException(ErrorMessages.goodsReceipts.canOnlyConfirmDraft);
+    // Validate transition
+    const allowedTransitions = VALID_TRANSITIONS[receipt.status];
+    if (!allowedTransitions.includes(targetStatus)) {
+      throw new BadRequestException(ErrorMessages.goodsReceipts.invalidStatusTransition);
     }
 
-    if (!receipt.items || receipt.items.length === 0) {
-      throw new BadRequestException(ErrorMessages.goodsReceipts.cannotConfirmWithoutItems);
-    }
+    const isDelivering =
+      receipt.status === 'EXPECTED' &&
+      (targetStatus === 'DELIVERED_PAID' || targetStatus === 'DELIVERED_UNPAID');
 
-    // Build a map from goodsReceiptItemId -> serial numbers
-    const serialsMap = new Map<string, string[]>();
-    (itemSerials ?? []).forEach(({ goodsReceiptItemId, serialNumbers }) => {
-      serialsMap.set(
-        goodsReceiptItemId,
-        serialNumbers.filter((s) => s.trim() !== ''),
-      );
-    });
+    const isCancellingDelivered =
+      (receipt.status === 'DELIVERED_PAID' || receipt.status === 'DELIVERED_UNPAID') &&
+      targetStatus === 'CANCELLED';
 
-    // Validate that ALL serial products have complete serial numbers
-    for (const item of receipt.items) {
-      if (item.product?.type !== 'SERIAL') continue;
+    const isMarkingPaid =
+      receipt.status === 'DELIVERED_UNPAID' && targetStatus === 'DELIVERED_PAID';
 
-      const quantity = Math.round(Number(item.quantity));
-      const provided = serialsMap.get(item.id) ?? [];
+    const isCancellingExpected =
+      receipt.status === 'EXPECTED' && targetStatus === 'CANCELLED';
 
-      if (provided.length < quantity) {
-        throw new BadRequestException(
-          `Всички серийни номера са задължителни. Продукт "${item.product.name}" изисква ${quantity} серийни номер(а), но са предоставени ${provided.length}.`,
+    // Validate serial numbers if delivering
+    if (isDelivering) {
+      if (!receipt.items || receipt.items.length === 0) {
+        throw new BadRequestException(ErrorMessages.goodsReceipts.cannotConfirmWithoutItems);
+      }
+
+      const serialsMap = new Map<string, string[]>();
+      (itemSerials ?? []).forEach(({ goodsReceiptItemId, serialNumbers }) => {
+        serialsMap.set(
+          goodsReceiptItemId,
+          serialNumbers.filter((s) => s.trim() !== ''),
         );
+      });
+
+      // Validate that ALL serial products have complete serial numbers
+      for (const item of receipt.items) {
+        if (item.product?.type !== 'SERIAL') continue;
+
+        const quantity = Math.round(Number(item.quantity));
+        const provided = serialsMap.get(item.id) ?? [];
+
+        if (provided.length < quantity) {
+          throw new BadRequestException(
+            `Всички серийни номера са задължителни. Продукт "${item.product.name}" изисква ${quantity} серийни номер(а), но са предоставени ${provided.length}.`,
+          );
+        }
       }
     }
 
-    // Use transaction to update receipt status and create inventory
-    const updated = await this.prisma.$transaction(async (tx) => {
-      // Update receipt status
-      const updatedReceipt = await tx.goodsReceipt.update({
-        where: { id },
-        data: { status: 'COMPLETED' },
-        include: {
-          location: true,
-          supplier: true,
-          currency: true,
-          createdBy: {
-            select: { id: true, firstName: true, lastName: true },
-          },
-          items: {
-            include: {
-              product: true,
-              currency: true,
-            },
-          },
-          _count: { select: { items: true } },
-        },
-      });
-
-      // Create inventory records for each item
-      for (const item of updatedReceipt.items) {
-        const product = await tx.product.findUnique({
-          where: { id: item.productId },
+    return this.prisma.$transaction(async (tx) => {
+      // === Create inventory when delivering ===
+      if (isDelivering) {
+        const serialsMap = new Map<string, string[]>();
+        (itemSerials ?? []).forEach(({ goodsReceiptItemId, serialNumbers }) => {
+          serialsMap.set(
+            goodsReceiptItemId,
+            serialNumbers.filter((s) => s.trim() !== ''),
+          );
         });
 
-        if (!product) continue;
-
-        // Skip inventory creation for SERVICE products
-        if (product.type === 'SERVICE') continue;
-
-        if (product.type === 'SERIAL') {
-          // For SERIAL products: create one InventorySerial per unit
-          const quantity = Math.round(Number(item.quantity));
-          const provided = serialsMap.get(item.id) ?? [];
-
-          // All serials are validated above — use provided ones
-          const serialsToCreate = provided.map((s) => s.trim());
-
-          // Check for duplicate serial numbers
-          const existing = await tx.inventorySerial.findMany({
-            where: {
-              companyId,
-              productId: item.productId,
-              serialNumber: { in: serialsToCreate },
-            },
-            select: { serialNumber: true },
+        for (const item of receipt.items) {
+          const product = await tx.product.findUnique({
+            where: { id: item.productId },
           });
 
-          if (existing.length > 0) {
-            const dupes = existing.map((s) => s.serialNumber).join(', ');
-            throw new BadRequestException(
-              `Дублирани серийни номера: ${dupes}`,
-            );
-          }
+          if (!product || product.type === 'SERVICE') continue;
 
-          // Create InventorySerial records
-          for (const serialNumber of serialsToCreate) {
-            await tx.inventorySerial.create({
+          if (product.type === 'SERIAL') {
+            const provided = serialsMap.get(item.id) ?? [];
+            const serialsToCreate = provided.map((s) => s.trim());
+
+            // Check for duplicate serial numbers
+            const existing = await tx.inventorySerial.findMany({
+              where: {
+                companyId,
+                productId: item.productId,
+                serialNumber: { in: serialsToCreate },
+              },
+              select: { serialNumber: true },
+            });
+
+            if (existing.length > 0) {
+              const dupes = existing.map((s) => s.serialNumber).join(', ');
+              throw new BadRequestException(
+                `Дублирани серийни номера: ${dupes}`,
+              );
+            }
+
+            for (const serialNumber of serialsToCreate) {
+              await tx.inventorySerial.create({
+                data: {
+                  serialNumber,
+                  status: 'IN_STOCK',
+                  unitCost: item.unitPrice,
+                  companyId,
+                  productId: item.productId,
+                  locationId: receipt.locationId,
+                  goodsReceiptItemId: item.id,
+                },
+              });
+            }
+          } else {
+            // PRODUCT, BATCH — create InventoryBatch
+            const batchNumber = `${receipt.receiptNumber}-${item.id.slice(-4)}`;
+
+            await tx.inventoryBatch.create({
               data: {
-                serialNumber,
-                status: 'IN_STOCK',
+                batchNumber,
+                quantity: item.quantity,
+                initialQty: item.quantity,
                 unitCost: item.unitPrice,
                 companyId,
                 productId: item.productId,
@@ -497,48 +532,16 @@ export class GoodsReceiptsService {
               },
             });
           }
-        } else {
-          // For PRODUCT, BATCH — create InventoryBatch
-          const batchNumber = `${receipt.receiptNumber}-${item.id.slice(-4)}`;
-
-          await tx.inventoryBatch.create({
-            data: {
-              batchNumber,
-              quantity: item.quantity,
-              initialQty: item.quantity,
-              unitCost: item.unitPrice,
-              companyId,
-              productId: item.productId,
-              locationId: receipt.locationId,
-              goodsReceiptItemId: item.id,
-            },
-          });
         }
       }
 
-      return updatedReceipt;
-    });
-
-    return updated;
-  }
-
-  async cancel(companyId: string, id: string) {
-    const receipt = await this.findOne(companyId, id);
-
-    if (receipt.status === 'CANCELLED') {
-      throw new BadRequestException(ErrorMessages.goodsReceipts.alreadyCancelled);
-    }
-
-    // If completed, we need to remove inventory entries
-    if (receipt.status === 'COMPLETED') {
-      return this.prisma.$transaction(async (tx) => {
+      // === Remove inventory when cancelling a delivered receipt ===
+      if (isCancellingDelivered) {
         const itemIds = receipt.items.map((item) => item.id);
 
         // Check that no inventory batches have been partially consumed
         const consumedBatches = await tx.inventoryBatch.findMany({
-          where: {
-            goodsReceiptItemId: { in: itemIds },
-          },
+          where: { goodsReceiptItemId: { in: itemIds } },
         });
         for (const batch of consumedBatches) {
           if (Number(batch.quantity) < Number(batch.initialQty)) {
@@ -571,61 +574,52 @@ export class GoodsReceiptsService {
         await tx.inventorySerial.deleteMany({
           where: { goodsReceiptItemId: { in: itemIds } },
         });
+      }
 
-        // Update status
-        return tx.goodsReceipt.update({
-          where: { id },
-          data: { status: 'CANCELLED' },
-          include: {
-            location: true,
-            supplier: true,
-            currency: true,
-            createdBy: {
-              select: { id: true, firstName: true, lastName: true },
-            },
-            items: {
-              include: {
-                product: true,
-                currency: true,
-              },
-            },
-            _count: { select: { items: true } },
-          },
-        });
+      // === Update expense statuses ===
+      const expenseStatus =
+        targetStatus === 'DELIVERED_PAID'
+          ? 'PAID'
+          : targetStatus === 'CANCELLED'
+            ? 'CANCELLED'
+            : 'PENDING'; // DELIVERED_UNPAID or EXPECTED
+
+      await tx.expense.updateMany({
+        where: { goodsReceiptId: id },
+        data: {
+          status: expenseStatus,
+          ...(targetStatus === 'DELIVERED_PAID' ? { paidAt: new Date() } : {}),
+        },
       });
-    }
 
-    // If draft, just cancel
-    return this.prisma.goodsReceipt.update({
-      where: { id },
-      data: { status: 'CANCELLED' },
-      include: {
-        location: true,
-        supplier: true,
-        currency: true,
-        createdBy: {
-          select: { id: true, firstName: true, lastName: true },
-        },
-        items: {
-          include: {
-            product: true,
-            currency: true,
-          },
-        },
-        _count: { select: { items: true } },
-      },
+      // === Update receipt status ===
+      return tx.goodsReceipt.update({
+        where: { id },
+        data: { status: targetStatus },
+        include: RECEIPT_INCLUDE,
+      });
     });
+  }
+
+  async cancel(companyId: string, id: string) {
+    return this.updateStatus(companyId, id, 'CANCELLED');
   }
 
   async remove(companyId: string, id: string) {
     const receipt = await this.findOne(companyId, id);
 
-    if (receipt.status !== 'DRAFT') {
-      throw new BadRequestException(ErrorMessages.goodsReceipts.canOnlyDeleteDraft);
+    if (receipt.status !== 'EXPECTED') {
+      throw new BadRequestException(ErrorMessages.goodsReceipts.canOnlyDeleteExpected);
     }
 
-    await this.prisma.goodsReceipt.delete({ where: { id } });
+    // Delete linked expenses first, then the receipt
+    await this.prisma.$transaction(async (tx) => {
+      await tx.expense.deleteMany({
+        where: { goodsReceiptId: id },
+      });
+      await tx.goodsReceipt.delete({ where: { id } });
+    });
 
-    return { message: 'Стоковата разписка е изтрита успешно' };
+    return { message: 'Доставката е изтрита успешно' };
   }
 }

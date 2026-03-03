@@ -14,7 +14,7 @@ import {
   CreateGoodsReceiptDto,
   UpdateGoodsReceiptDto,
   QueryGoodsReceiptsDto,
-  ConfirmGoodsReceiptDto,
+  UpdateGoodsReceiptStatusDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -52,15 +52,16 @@ export class GoodsReceiptsController {
     return this.goodsReceiptsService.update(user.currentCompany.id, id, dto);
   }
 
-  @Post(':id/confirm')
-  confirm(
+  @Patch(':id/status')
+  updateStatus(
     @CurrentUser() user: any,
     @Param('id') id: string,
-    @Body() dto: ConfirmGoodsReceiptDto,
+    @Body() dto: UpdateGoodsReceiptStatusDto,
   ) {
-    return this.goodsReceiptsService.confirm(
+    return this.goodsReceiptsService.updateStatus(
       user.currentCompany.id,
       id,
+      dto.status,
       dto.itemSerials,
     );
   }

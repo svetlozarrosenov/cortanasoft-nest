@@ -15,6 +15,16 @@ SET "permissions" = jsonb_set(
 )
 WHERE "permissions"::jsonb #> '{modules,bi}' IS NOT NULL
   AND "permissions"::jsonb #> '{modules,bi,pages,sales}' IS NULL;
+
+-- Add stockTransfers page to warehouse permissions for existing roles
+UPDATE "roles"
+SET "permissions" = jsonb_set(
+  "permissions"::jsonb,
+  '{modules,warehouse,pages,stockTransfers}',
+  '{"enabled":true,"actions":{"view":true,"create":true,"edit":true,"delete":true}}'::jsonb
+)
+WHERE "permissions"::jsonb #> '{modules,warehouse}' IS NOT NULL
+  AND "permissions"::jsonb #> '{modules,warehouse,pages,stockTransfers}' IS NULL;
 SQL
 
 echo "Starting application..."

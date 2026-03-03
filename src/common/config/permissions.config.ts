@@ -195,60 +195,6 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
-        key: 'locations',
-        labelKey: 'modules.erp.locations',
-        actions: ['view', 'create', 'edit', 'delete'],
-        tables: [
-          {
-            key: 'locationsList',
-            labelKey: 'modules.erp.locationsList',
-            columns: [
-              { key: 'code', labelKey: 'modules.erp.locationCode' },
-              { key: 'name', labelKey: 'common.name' },
-              { key: 'type', labelKey: 'common.type' },
-              { key: 'address', labelKey: 'common.address' },
-              { key: 'status', labelKey: 'common.status' },
-            ],
-          },
-        ],
-      },
-      {
-        key: 'inventory',
-        labelKey: 'modules.erp.inventory',
-        actions: ['view', 'create', 'edit', 'delete'],
-        tables: [
-          {
-            key: 'inventoryList',
-            labelKey: 'modules.erp.inventoryList',
-            columns: [
-              { key: 'product', labelKey: 'modules.erp.product' },
-              { key: 'warehouse', labelKey: 'modules.erp.warehouse' },
-              { key: 'quantity', labelKey: 'modules.erp.quantity' },
-              { key: 'reserved', labelKey: 'modules.erp.reserved' },
-              { key: 'available', labelKey: 'modules.erp.available' },
-            ],
-          },
-        ],
-      },
-      {
-        key: 'goodsReceipts',
-        labelKey: 'modules.erp.goodsReceipts',
-        actions: ['view', 'create', 'edit', 'delete'],
-        tables: [
-          {
-            key: 'goodsReceiptsList',
-            labelKey: 'modules.erp.goodsReceiptsList',
-            columns: [
-              { key: 'receiptNumber', labelKey: 'modules.erp.receiptNumber' },
-              { key: 'supplier', labelKey: 'modules.erp.supplier' },
-              { key: 'location', labelKey: 'modules.erp.location' },
-              { key: 'date', labelKey: 'common.date' },
-              { key: 'status', labelKey: 'common.status' },
-            ],
-          },
-        ],
-      },
-      {
         key: 'orders',
         labelKey: 'modules.erp.sales',
         actions: ['view', 'create', 'edit', 'delete'],
@@ -345,6 +291,85 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         key: 'analytics',
         labelKey: 'modules.erp.profitAnalytics',
         actions: ['view'],
+      },
+    ],
+  },
+  {
+    key: 'warehouse',
+    labelKey: 'modules.warehouse.title',
+    icon: 'Warehouse',
+    pages: [
+      {
+        key: 'locations',
+        labelKey: 'modules.warehouse.locations',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'locationsList',
+            labelKey: 'modules.erp.locationsList',
+            columns: [
+              { key: 'code', labelKey: 'modules.erp.locationCode' },
+              { key: 'name', labelKey: 'common.name' },
+              { key: 'type', labelKey: 'common.type' },
+              { key: 'address', labelKey: 'common.address' },
+              { key: 'status', labelKey: 'common.status' },
+            ],
+          },
+        ],
+      },
+      {
+        key: 'inventory',
+        labelKey: 'modules.warehouse.inventory',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'inventoryList',
+            labelKey: 'modules.erp.inventoryList',
+            columns: [
+              { key: 'product', labelKey: 'modules.erp.product' },
+              { key: 'warehouse', labelKey: 'modules.erp.warehouse' },
+              { key: 'quantity', labelKey: 'modules.erp.quantity' },
+              { key: 'reserved', labelKey: 'modules.erp.reserved' },
+              { key: 'available', labelKey: 'modules.erp.available' },
+            ],
+          },
+        ],
+      },
+      {
+        key: 'goodsReceipts',
+        labelKey: 'modules.warehouse.goodsReceipts',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'goodsReceiptsList',
+            labelKey: 'modules.erp.goodsReceiptsList',
+            columns: [
+              { key: 'receiptNumber', labelKey: 'modules.erp.receiptNumber' },
+              { key: 'supplier', labelKey: 'modules.erp.supplier' },
+              { key: 'location', labelKey: 'modules.erp.location' },
+              { key: 'date', labelKey: 'common.date' },
+              { key: 'status', labelKey: 'common.status' },
+            ],
+          },
+        ],
+      },
+      {
+        key: 'stockTransfers',
+        labelKey: 'modules.warehouse.stockTransfers',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'stockTransfersList',
+            labelKey: 'modules.warehouse.stockTransfersList',
+            columns: [
+              { key: 'transferNumber', labelKey: 'modules.warehouse.transferNumber' },
+              { key: 'fromLocation', labelKey: 'modules.warehouse.fromLocation' },
+              { key: 'toLocation', labelKey: 'modules.warehouse.toLocation' },
+              { key: 'date', labelKey: 'common.date' },
+              { key: 'status', labelKey: 'common.status' },
+            ],
+          },
+        ],
       },
     ],
   },

@@ -22,7 +22,7 @@ export class UploadsController {
   constructor(private readonly uploadsService: UploadsService) {}
 
   @Post('invoice')
-  @RequireCreate('erp', 'goodsReceipts')
+  @RequireCreate('warehouse', 'goodsReceipts')
   @UseInterceptors(FileInterceptor('file'))
   async uploadInvoice(
     @Param('companyId') companyId: string,

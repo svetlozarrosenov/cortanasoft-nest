@@ -64,7 +64,6 @@ export class CompanyContactsController {
       { header: 'Last Name', key: 'lastName', width: 20 },
       { header: 'Email', key: 'email', width: 25 },
       { header: 'Phone', key: 'phone', width: 15 },
-      { header: 'Position', key: 'position', width: 20 },
       { header: 'Company', key: 'customer.companyName', width: 25 },
     ];
     const buffer = await this.exportService.generateFile(columns, data, format, 'Contacts');

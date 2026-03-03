@@ -189,6 +189,7 @@ model Company {
   billOfMaterials    BillOfMaterial[]
   productionOrders   ProductionOrder[]
   apiKeys            ApiKey[]
+  stockTransfers     StockTransfer[]
 
   @@map("companies")
 }
@@ -386,6 +387,10 @@ model User {
   // Производство
   createdBOMs             BillOfMaterial[]  @relation("BOMCreatedBy")
   createdProductionOrders ProductionOrder[] @relation("ProductionOrderCreatedBy")
+
+  // Трансфери между складове
+  responsibleStockTransfers StockTransfer[] @relation("StockTransferResponsible")
+  createdStockTransfers     StockTransfer[] @relation("StockTransferCreator")
 
   // Terms acceptance
   termsAcceptedAt DateTime?
@@ -685,18 +690,28 @@ enum ProductType {
 
 // Статус на приемане на стока
 enum GoodsReceiptStatus {
-  DRAFT // Чернова
-  COMPLETED // Завършено
-  CANCELLED // Анулирано
+  EXPECTED       // Очаквана
+  DELIVERED_PAID // Доставена и платена
+  DELIVERED_UNPAID // Доставена и неплатена
+  CANCELLED      // Анулирана
 }
 
 // Статус на сериен номер
 enum SerialStatus {
   IN_STOCK // На склад
+  IN_TRANSIT // В транзит (преместване между складове)
   RESERVED // Резервиран
   SOLD // Продаден
   RETURNED // Върнат
   SCRAPPED // Бракуван
+}
+
+// Статус на трансфер между складове
+enum StockTransferStatus {
+  DRAFT // Чернова
+  SHIPPED // Изпратен
+  RECEIVED // Приет
+  CANCELLED // Анулиран
 }
 
 // Тип на локация
@@ -784,6 +799,9 @@ model Product {
   productionOrders    ProductionOrder[]         @relation("ProductionOrderProduct")
   productionMaterials ProductionOrderMaterial[] @relation("ProductionMaterialProduct")
 
+  // Трансфери между складове
+  stockTransferItems StockTransferItem[]
+
   @@unique([companyId, sku])
   @@index([companyId, name])
   @@index([companyId, barcode])
@@ -864,6 +882,8 @@ model Location {
   inventorySerials InventorySerial[]
   orders           Order[]
   productionOrders ProductionOrder[]
+  stockTransfersFrom StockTransfer[] @relation("StockTransferFrom")
+  stockTransfersTo   StockTransfer[] @relation("StockTransferTo")
 
   @@unique([companyId, code])
   @@map("locations")
@@ -896,7 +916,7 @@ model GoodsReceipt {
   id            String             @id @default(cuid())
   receiptNumber String // Номер на документа
   receiptDate   DateTime           @default(now()) // Дата на приемане
-  status        GoodsReceiptStatus @default(DRAFT)
+  status        GoodsReceiptStatus @default(EXPECTED)
   notes         String? // Бележки
   invoiceNumber String? // Номер на фактура от доставчик
   invoiceDate   DateTime? // Дата на фактура
@@ -924,6 +944,7 @@ model GoodsReceipt {
 
   items     GoodsReceiptItem[]
   documents Document[]
+  expenses  Expense[]
 
   @@unique([companyId, receiptNumber])
   @@index([companyId, status])
@@ -1093,8 +1114,8 @@ model Contact {
   updatedAt DateTime @updatedAt
 
   // Релации
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -1409,7 +1430,8 @@ model InventoryBatch {
   goodsReceiptItemId String?
   goodsReceiptItem   GoodsReceiptItem? @relation(fields: [goodsReceiptItemId], references: [id], onDelete: SetNull)
 
-  orderItems OrderItem[]
+  orderItems         OrderItem[]
+  stockTransferItems StockTransferItem[]
 
   @@unique([companyId, productId, batchNumber])
   @@index([companyId, productId])
@@ -1444,7 +1466,8 @@ model InventorySerial {
   goodsReceiptItemId String?
   goodsReceiptItem   GoodsReceiptItem? @relation(fields: [goodsReceiptItemId], references: [id], onDelete: SetNull)
 
-  orderItems OrderItem[]
+  orderItems            OrderItem[]
+  stockTransferSerials  StockTransferSerial[]
 
   @@unique([companyId, productId, serialNumber])
   @@index([companyId, productId])
@@ -2125,8 +2148,7 @@ model DemoRequest {
 // Категории разходи
 enum ExpenseCategory {
   DELIVERY         // Доставка/Транспорт
-  SALARY           // Заплати (ръчно добавени)
-  RENT             // Наем
+RENT             // Наем
   UTILITIES        // Комунални (ток, вода, отопление)
   MARKETING        // Маркетинг и реклама
   OFFICE_SUPPLIES  // Офис консумативи
@@ -2188,6 +2210,10 @@ model Expense {
   // Доставчик (ако е свързан с доставчик)
   supplierId String?
   supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  // Доставка (ако разходът е от доставка)
+  goodsReceiptId String?
+  goodsReceipt   GoodsReceipt? @relation(fields: [goodsReceiptId], references: [id], onDelete: SetNull)
 
   // Създател
   createdById String?
@@ -2441,4 +2467,73 @@ model ProductionOrderMaterial {
 
   @@index([productionOrderId])
   @@map("production_order_materials")
+}
+
+// ==================== ТРАНСФЕРИ МЕЖДУ СКЛАДОВЕ ====================
+
+// Трансфер между складове
+model StockTransfer {
+  id             String              @id @default(cuid())
+  transferNumber String // Номер на трансфера (ST-2026-00001)
+  transferDate   DateTime            @default(now()) // Дата на трансфера
+  status         StockTransferStatus @default(DRAFT)
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  fromLocationId String
+  fromLocation   Location @relation("StockTransferFrom", fields: [fromLocationId], references: [id], onDelete: Restrict)
+
+  toLocationId String
+  toLocation   Location @relation("StockTransferTo", fields: [toLocationId], references: [id], onDelete: Restrict)
+
+  responsibleId String?
+  responsible   User?   @relation("StockTransferResponsible", fields: [responsibleId], references: [id], onDelete: SetNull)
+
+  createdById String?
+  createdBy   User?   @relation("StockTransferCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  items StockTransferItem[]
+
+  @@unique([companyId, transferNumber])
+  @@index([companyId, status])
+  @@map("stock_transfers")
+}
+
+// Артикул в трансфер
+model StockTransferItem {
+  id          String  @id @default(cuid())
+  quantity    Decimal @db.Decimal(10, 3) // Изпратено количество
+  receivedQty Decimal @default(0) @db.Decimal(10, 3) // Получено количество
+
+  stockTransferId String
+  stockTransfer   StockTransfer @relation(fields: [stockTransferId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  inventoryBatchId String?
+  inventoryBatch   InventoryBatch? @relation(fields: [inventoryBatchId], references: [id], onDelete: SetNull)
+
+  serials StockTransferSerial[]
+
+  @@map("stock_transfer_items")
+}
+
+// Сериен номер в трансфер
+model StockTransferSerial {
+  id       String  @id @default(cuid())
+  received Boolean @default(false) // Дали е приет на новата локация
+
+  stockTransferItemId String
+  stockTransferItem   StockTransferItem @relation(fields: [stockTransferItemId], references: [id], onDelete: Cascade)
+
+  inventorySerialId String
+  inventorySerial   InventorySerial @relation(fields: [inventorySerialId], references: [id], onDelete: Restrict)
+
+  @@map("stock_transfer_serials")
 }

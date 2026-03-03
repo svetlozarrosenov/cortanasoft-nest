@@ -116,11 +116,12 @@ export const ErrorMessages = {
     locationNotFound: 'Локацията не е намерена',
     supplierNotFound: 'Доставчикът не е намерен',
     productsNotFound: 'Един или повече продукти не са намерени',
-    canOnlyUpdateDraft: 'Може да редактирате само чернови разписки',
+    canOnlyUpdateExpected: 'Може да редактирате само очаквани доставки',
     canOnlyConfirmDraft: 'Може да потвърдите само чернови разписки',
     cannotConfirmWithoutItems: 'Не може да потвърдите разписка без артикули',
-    alreadyCancelled: 'Разписката вече е отменена',
-    canOnlyDeleteDraft: 'Може да изтриете само чернови разписки',
+    alreadyCancelled: 'Доставката вече е анулирана',
+    canOnlyDeleteExpected: 'Може да изтриете само очаквани доставки',
+    invalidStatusTransition: 'Невалиден преход на статус',
   },
 
 

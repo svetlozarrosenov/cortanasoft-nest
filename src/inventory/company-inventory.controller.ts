@@ -37,7 +37,7 @@ export class CompanyInventoryController {
   ) {}
 
   @Get()
-  @RequireView('erp', 'inventory')
+  @RequireView('warehouse', 'inventory')
   findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryInventoryDto,
@@ -46,7 +46,7 @@ export class CompanyInventoryController {
   }
 
   @Get('stock-levels')
-  @RequireView('erp', 'inventory')
+  @RequireView('warehouse', 'inventory')
   getStockLevels(
     @Param('companyId') companyId: string,
     @Query() query: QueryStockLevelsDto,
@@ -55,7 +55,7 @@ export class CompanyInventoryController {
   }
 
   @Get('serials')
-  @RequireView('erp', 'inventory')
+  @RequireView('warehouse', 'inventory')
   getSerials(
     @Param('companyId') companyId: string,
     @Query() query: QuerySerialsDto,
@@ -71,7 +71,7 @@ export class CompanyInventoryController {
   }
 
   @Get('serials/:id')
-  @RequireView('erp', 'inventory')
+  @RequireView('warehouse', 'inventory')
   findOneSerial(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -80,7 +80,7 @@ export class CompanyInventoryController {
   }
 
   @Patch('serials/:id')
-  @RequireEdit('erp', 'inventory')
+  @RequireEdit('warehouse', 'inventory')
   updateSerial(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -90,7 +90,7 @@ export class CompanyInventoryController {
   }
 
   @Get('by-location/:locationId')
-  @RequireView('erp', 'inventory')
+  @RequireView('warehouse', 'inventory')
   getByLocation(
     @Param('companyId') companyId: string,
     @Param('locationId') locationId: string,
@@ -100,7 +100,7 @@ export class CompanyInventoryController {
   }
 
   @Get('by-product/:productId')
-  @RequireView('erp', 'inventory')
+  @RequireView('warehouse', 'inventory')
   getByProduct(
     @Param('companyId') companyId: string,
     @Param('productId') productId: string,
@@ -110,7 +110,7 @@ export class CompanyInventoryController {
   }
 
   @Get('by-receipt/:goodsReceiptId')
-  @RequireView('erp', 'inventory')
+  @RequireView('warehouse', 'inventory')
   getByGoodsReceipt(
     @Param('companyId') companyId: string,
     @Param('goodsReceiptId') goodsReceiptId: string,
@@ -119,7 +119,7 @@ export class CompanyInventoryController {
   }
 
   @Get('export')
-  @RequireView('erp', 'inventory')
+  @RequireView('warehouse', 'inventory')
   async export(
     @Param('companyId') companyId: string,
     @Query() query: QueryInventoryDto,
@@ -146,13 +146,13 @@ export class CompanyInventoryController {
   }
 
   @Get(':id')
-  @RequireView('erp', 'inventory')
+  @RequireView('warehouse', 'inventory')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.inventoryService.findOne(companyId, id);
   }
 
   @Patch(':id')
-  @RequireEdit('erp', 'inventory')
+  @RequireEdit('warehouse', 'inventory')
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,

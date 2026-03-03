@@ -2,35 +2,19 @@ import {
   IsString,
   IsOptional,
   IsEmail,
-  IsBoolean,
-  IsDateString,
-  MinLength,
   MaxLength,
 } from 'class-validator';
 
 export class CreateContactDto {
+  @IsOptional()
   @IsString()
-  @MinLength(1)
   @MaxLength(100)
-  firstName: string;
-
-  @IsString()
-  @MinLength(1)
-  @MaxLength(100)
-  lastName: string;
-
-  @IsString()
-  customerId: string;
+  firstName?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  jobTitle?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  department?: string;
+  lastName?: string;
 
   @IsOptional()
   @IsEmail()
@@ -43,32 +27,5 @@ export class CreateContactDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(50)
-  mobile?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  linkedIn?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  skype?: string;
-
-  @IsOptional()
-  @IsString()
   notes?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  isPrimary?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
-
-  @IsOptional()
-  @IsDateString()
-  birthDate?: string;
 }

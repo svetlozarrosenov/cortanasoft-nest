@@ -128,6 +128,12 @@ export class ExpensesService {
               email: true,
             },
           },
+          goodsReceipt: {
+            select: {
+              id: true,
+              receiptNumber: true,
+            },
+          },
         },
       }),
       this.prisma.expense.count({ where }),

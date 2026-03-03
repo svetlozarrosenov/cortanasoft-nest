@@ -8,8 +8,10 @@ import {
   IsNumber,
   Min,
   IsNotEmpty,
+  IsEnum,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ExpenseCategory } from '@prisma/client';
 
 export class CreateGoodsReceiptItemDto {
   @IsString()
@@ -38,6 +40,19 @@ export class CreateGoodsReceiptItemDto {
   @Min(0.000001)
   exchangeRate?: number;
 
+}
+
+export class CreateGoodsReceiptExpenseDto {
+  @IsEnum(ExpenseCategory)
+  category: ExpenseCategory;
+
+  @IsString()
+  @IsNotEmpty()
+  description: string;
+
+  @IsNumber()
+  @Min(0)
+  amount: number;
 }
 
 export class CreateGoodsReceiptDto {
@@ -87,22 +102,11 @@ export class CreateGoodsReceiptDto {
   @ValidateNested({ each: true })
   @Type(() => CreateGoodsReceiptItemDto)
   items: CreateGoodsReceiptItemDto[];
-}
-
-export class ItemSerialNumbersDto {
-  @IsString()
-  @IsNotEmpty()
-  goodsReceiptItemId: string;
 
   @IsArray()
-  @IsString({ each: true })
-  serialNumbers: string[];
-}
-
-export class ConfirmGoodsReceiptDto {
   @IsOptional()
-  @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ItemSerialNumbersDto)
-  itemSerials?: ItemSerialNumbersDto[];
+  @Type(() => CreateGoodsReceiptExpenseDto)
+  expenses?: CreateGoodsReceiptExpenseDto[];
 }
+

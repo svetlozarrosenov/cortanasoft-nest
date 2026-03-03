@@ -35,7 +35,7 @@ export class CompanyLocationsController {
   // ==================== LOCATION ENDPOINTS ====================
 
   @Post()
-  @RequireCreate('erp', 'locations')
+  @RequireCreate('warehouse', 'locations')
   create(
     @Param('companyId') companyId: string,
     @Body() dto: CreateLocationDto,
@@ -44,7 +44,7 @@ export class CompanyLocationsController {
   }
 
   @Get()
-  @RequireView('erp', 'locations')
+  @RequireView('warehouse', 'locations')
   findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryLocationsDto,
@@ -53,13 +53,13 @@ export class CompanyLocationsController {
   }
 
   @Get(':id')
-  @RequireView('erp', 'locations')
+  @RequireView('warehouse', 'locations')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.locationsService.findOne(companyId, id);
   }
 
   @Patch(':id')
-  @RequireEdit('erp', 'locations')
+  @RequireEdit('warehouse', 'locations')
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -69,7 +69,7 @@ export class CompanyLocationsController {
   }
 
   @Delete(':id')
-  @RequireDelete('erp', 'locations')
+  @RequireDelete('warehouse', 'locations')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.locationsService.remove(companyId, id);
   }
@@ -77,7 +77,7 @@ export class CompanyLocationsController {
   // ==================== STORAGE ZONE ENDPOINTS ====================
 
   @Post(':locationId/zones')
-  @RequireCreate('erp', 'locations')
+  @RequireCreate('warehouse', 'locations')
   createStorageZone(
     @Param('companyId') companyId: string,
     @Param('locationId') locationId: string,
@@ -87,7 +87,7 @@ export class CompanyLocationsController {
   }
 
   @Get(':locationId/zones')
-  @RequireView('erp', 'locations')
+  @RequireView('warehouse', 'locations')
   findAllStorageZones(
     @Param('companyId') companyId: string,
     @Param('locationId') locationId: string,
@@ -96,7 +96,7 @@ export class CompanyLocationsController {
   }
 
   @Get(':locationId/zones/:zoneId')
-  @RequireView('erp', 'locations')
+  @RequireView('warehouse', 'locations')
   findOneStorageZone(
     @Param('companyId') companyId: string,
     @Param('locationId') locationId: string,
@@ -110,7 +110,7 @@ export class CompanyLocationsController {
   }
 
   @Patch(':locationId/zones/:zoneId')
-  @RequireEdit('erp', 'locations')
+  @RequireEdit('warehouse', 'locations')
   updateStorageZone(
     @Param('companyId') companyId: string,
     @Param('locationId') locationId: string,
@@ -126,7 +126,7 @@ export class CompanyLocationsController {
   }
 
   @Delete(':locationId/zones/:zoneId')
-  @RequireDelete('erp', 'locations')
+  @RequireDelete('warehouse', 'locations')
   removeStorageZone(
     @Param('companyId') companyId: string,
     @Param('locationId') locationId: string,

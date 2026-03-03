@@ -14,7 +14,7 @@ import {
   CreateGoodsReceiptDto,
   UpdateGoodsReceiptDto,
   QueryGoodsReceiptsDto,
-  ConfirmGoodsReceiptDto,
+  UpdateGoodsReceiptStatusDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -33,7 +33,7 @@ export class CompanyGoodsReceiptsController {
   constructor(private readonly goodsReceiptsService: GoodsReceiptsService) {}
 
   @Post()
-  @RequireCreate('erp', 'goodsReceipts')
+  @RequireCreate('warehouse', 'goodsReceipts')
   create(
     @Param('companyId') companyId: string,
     @CurrentUser() user: any,
@@ -43,7 +43,7 @@ export class CompanyGoodsReceiptsController {
   }
 
   @Get()
-  @RequireView('erp', 'goodsReceipts')
+  @RequireView('warehouse', 'goodsReceipts')
   findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryGoodsReceiptsDto,
@@ -52,13 +52,13 @@ export class CompanyGoodsReceiptsController {
   }
 
   @Get(':id')
-  @RequireView('erp', 'goodsReceipts')
+  @RequireView('warehouse', 'goodsReceipts')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.goodsReceiptsService.findOne(companyId, id);
   }
 
   @Patch(':id')
-  @RequireEdit('erp', 'goodsReceipts')
+  @RequireEdit('warehouse', 'goodsReceipts')
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -67,24 +67,29 @@ export class CompanyGoodsReceiptsController {
     return this.goodsReceiptsService.update(companyId, id, dto);
   }
 
-  @Post(':id/confirm')
-  @RequireEdit('erp', 'goodsReceipts')
-  confirm(
+  @Patch(':id/status')
+  @RequireEdit('warehouse', 'goodsReceipts')
+  updateStatus(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
-    @Body() dto: ConfirmGoodsReceiptDto,
+    @Body() dto: UpdateGoodsReceiptStatusDto,
   ) {
-    return this.goodsReceiptsService.confirm(companyId, id, dto.itemSerials);
+    return this.goodsReceiptsService.updateStatus(
+      companyId,
+      id,
+      dto.status,
+      dto.itemSerials,
+    );
   }
 
   @Post(':id/cancel')
-  @RequireEdit('erp', 'goodsReceipts')
+  @RequireEdit('warehouse', 'goodsReceipts')
   cancel(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.goodsReceiptsService.cancel(companyId, id);
   }
 
   @Delete(':id')
-  @RequireDelete('erp', 'goodsReceipts')
+  @RequireDelete('warehouse', 'goodsReceipts')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.goodsReceiptsService.remove(companyId, id);
   }

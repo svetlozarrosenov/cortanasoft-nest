@@ -8,7 +8,7 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CreateGoodsReceiptItemDto } from './create-goods-receipt.dto';
+import { CreateGoodsReceiptItemDto, CreateGoodsReceiptExpenseDto } from './create-goods-receipt.dto';
 
 export class UpdateGoodsReceiptDto {
   @IsDateString()
@@ -53,4 +53,10 @@ export class UpdateGoodsReceiptDto {
   @ValidateNested({ each: true })
   @Type(() => CreateGoodsReceiptItemDto)
   items?: CreateGoodsReceiptItemDto[];
+
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => CreateGoodsReceiptExpenseDto)
+  expenses?: CreateGoodsReceiptExpenseDto[];
 }

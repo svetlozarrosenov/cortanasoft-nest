@@ -2,34 +2,15 @@ import {
   IsOptional,
   IsString,
   IsNumber,
-  IsBoolean,
   Min,
   Max,
 } from 'class-validator';
-import { Transform, Type } from 'class-transformer';
+import { Type } from 'class-transformer';
 
 export class QueryContactsDto {
   @IsOptional()
   @IsString()
   search?: string;
-
-  @IsOptional()
-  @IsString()
-  customerId?: string;
-
-  @IsOptional()
-  @Transform(({ value }) => value === 'true' || value === true)
-  @IsBoolean()
-  isActive?: boolean;
-
-  @IsOptional()
-  @Transform(({ value }) => value === 'true' || value === true)
-  @IsBoolean()
-  isPrimary?: boolean;
-
-  @IsOptional()
-  @IsString()
-  department?: string;
 
   @IsOptional()
   @Type(() => Number)

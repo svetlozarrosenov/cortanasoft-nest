@@ -39,6 +39,7 @@ import { ExportModule } from './common/export/export.module';
 import { BOMModule } from './bom/bom.module';
 import { ProductionModule } from './production/production.module';
 import { IntegrationsModule } from './integrations/integrations.module';
+import { StockTransfersModule } from './stock-transfers/stock-transfers.module';
 
 @Module({
   imports: [
@@ -84,6 +85,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
     BOMModule,
     ProductionModule,
     IntegrationsModule,
+    StockTransfersModule,
   ],
   controllers: [],
   providers: [],

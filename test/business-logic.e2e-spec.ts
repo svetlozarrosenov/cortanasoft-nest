@@ -196,12 +196,12 @@ async function testInventoryIncrease() {
   console.log(`  [ПРЕДИ] Наличност за продукт "${product.name}": ${stockBefore.length} партиди`);
   assert(stockBefore.length === 0, 'Не трябва да има наличност преди стоковата разписка');
 
-  // Създай стокова разписка (DRAFT)
+  // Създай стокова разписка (EXPECTED)
   const goodsReceipt = await prisma.goodsReceipt.create({
     data: {
       receiptNumber: `${TEST_PREFIX}_GR001`,
       receiptDate: new Date(),
-      status: 'DRAFT',
+      status: 'EXPECTED',
       companyId: testCompanyWithVat.id,
       locationId: testLocation.id,
       createdById: testUser.id,
@@ -221,21 +221,21 @@ async function testInventoryIncrease() {
 
   console.log(`  Стокова разписка създадена: ${goodsReceipt.receiptNumber} (статус: ${goodsReceipt.status})`);
 
-  // Провери че DRAFT разписка НЕ създава наличност
+  // Провери че EXPECTED разписка НЕ създава наличност
   const stockAfterDraft = await prisma.inventoryBatch.findMany({
     where: { companyId: testCompanyWithVat.id, productId: product.id },
   });
   assert(
     stockAfterDraft.length === 0,
-    'DRAFT разписка не трябва да създава наличност',
+    'EXPECTED разписка не трябва да създава наличност',
   );
-  console.log('  [OK] DRAFT разписка не създава наличност');
+  console.log('  [OK] EXPECTED разписка не създава наличност');
 
   // Потвърди разписката - симулираме confirm логиката от goods-receipts.service.ts
   await prisma.$transaction(async (tx) => {
     await tx.goodsReceipt.update({
       where: { id: goodsReceipt.id },
-      data: { status: 'COMPLETED' },
+      data: { status: 'DELIVERED_PAID' },
     });
 
     for (const item of goodsReceipt.items) {
@@ -461,7 +461,7 @@ async function testCurrencyConversion() {
     data: {
       receiptNumber: `${TEST_PREFIX}_GR_USD`,
       receiptDate: new Date(),
-      status: 'DRAFT',
+      status: 'EXPECTED',
       currencyId: usdCurrency.id,
       exchangeRate: usdExchangeRate,
       companyId: testCompanyWithVat.id,
@@ -522,7 +522,7 @@ async function testCurrencyConversion() {
   await prisma.$transaction(async (tx) => {
     await tx.goodsReceipt.update({
       where: { id: goodsReceipt.id },
-      data: { status: 'COMPLETED' },
+      data: { status: 'DELIVERED_PAID' },
     });
 
     for (const item of goodsReceipt.items) {
@@ -568,7 +568,7 @@ async function testCurrencyConversion() {
     data: {
       receiptNumber: `${TEST_PREFIX}_GR_DEFAULT_CUR`,
       receiptDate: new Date(),
-      status: 'DRAFT',
+      status: 'EXPECTED',
       // НЕ подаваме currencyId - трябва ли да е EUR (валутата на компанията)?
       companyId: testCompanyWithVat.id,
       locationId: testLocation.id,
@@ -823,7 +823,7 @@ async function testGoodsReceiptCancellation() {
   const gr = await prisma.goodsReceipt.create({
     data: {
       receiptNumber: `${TEST_PREFIX}_GR_CANCEL`,
-      status: 'DRAFT',
+      status: 'EXPECTED',
       companyId: testCompanyWithVat.id,
       locationId: testLocation.id,
       createdById: testUser.id,
@@ -845,7 +845,7 @@ async function testGoodsReceiptCancellation() {
   await prisma.$transaction(async (tx) => {
     await tx.goodsReceipt.update({
       where: { id: gr.id },
-      data: { status: 'COMPLETED' },
+      data: { status: 'DELIVERED_PAID' },
     });
     for (const item of gr.items) {
       await tx.inventoryBatch.create({
