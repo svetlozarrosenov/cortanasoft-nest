@@ -410,6 +410,20 @@ export class GoodsReceiptsService {
       );
     });
 
+    // Validate that ALL serial products have complete serial numbers
+    for (const item of receipt.items) {
+      if (item.product?.type !== 'SERIAL') continue;
+
+      const quantity = Math.round(Number(item.quantity));
+      const provided = serialsMap.get(item.id) ?? [];
+
+      if (provided.length < quantity) {
+        throw new BadRequestException(
+          `Всички серийни номера са задължителни. Продукт "${item.product.name}" изисква ${quantity} серийни номер(а), но са предоставени ${provided.length}.`,
+        );
+      }
+    }
+
     // Use transaction to update receipt status and create inventory
     const updated = await this.prisma.$transaction(async (tx) => {
       // Update receipt status
@@ -449,18 +463,8 @@ export class GoodsReceiptsService {
           const quantity = Math.round(Number(item.quantity));
           const provided = serialsMap.get(item.id) ?? [];
 
-          // Build list of serial numbers
-          const serialsToCreate: string[] = [];
-          for (let i = 0; i < quantity; i++) {
-            if (i < provided.length && provided[i].trim() !== '') {
-              serialsToCreate.push(provided[i].trim());
-            } else {
-              const padded = String(i + 1).padStart(3, '0');
-              serialsToCreate.push(
-                `SN-${receipt.receiptNumber}-${padded}`,
-              );
-            }
-          }
+          // All serials are validated above — use provided ones
+          const serialsToCreate = provided.map((s) => s.trim());
 
           // Check for duplicate serial numbers
           const existing = await tx.inventorySerial.findMany({

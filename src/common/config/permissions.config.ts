@@ -518,23 +518,18 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
     icon: 'BarChart3',
     pages: [
       {
-        key: 'analytics',
-        labelKey: 'modules.bi.analytics',
+        key: 'sales',
+        labelKey: 'modules.bi.sales',
         actions: ['view'],
       },
       {
-        key: 'salesReports',
-        labelKey: 'modules.bi.salesReports',
-        actions: ['view', 'create', 'edit', 'delete'],
+        key: 'customers',
+        labelKey: 'modules.bi.customers',
+        actions: ['view'],
       },
       {
-        key: 'financialReports',
-        labelKey: 'modules.bi.financialReports',
-        actions: ['view', 'create', 'edit', 'delete'],
-      },
-      {
-        key: 'performance',
-        labelKey: 'modules.bi.performance',
+        key: 'products',
+        labelKey: 'modules.bi.products',
         actions: ['view'],
       },
     ],
