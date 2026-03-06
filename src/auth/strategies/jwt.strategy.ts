@@ -4,6 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
+import { normalizePermissions } from '../../common/config/permissions.config';
 
 export interface JwtPayload {
   sub: string;
@@ -70,6 +71,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     const { password, ...userWithoutPassword } = user;
 
+    // Normalize role permissions to fill in missing tables/columns from config
+    const normalizedRole = {
+      ...currentUserCompany.role,
+      permissions: normalizePermissions(currentUserCompany.role.permissions as any),
+    };
+
     return {
       id: userWithoutPassword.id,
       email: userWithoutPassword.email,
@@ -78,7 +85,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       isActive: userWithoutPassword.isActive,
       termsAcceptedAt: userWithoutPassword.termsAcceptedAt,
       currentCompany: currentUserCompany.company,
-      currentRole: currentUserCompany.role,
+      currentRole: normalizedRole,
       isSuperAdmin: currentUserCompany.company.role === 'OWNER',
       companies: user.userCompanies.map((uc) => ({
         id: uc.company.id,

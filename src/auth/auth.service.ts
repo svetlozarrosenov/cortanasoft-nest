@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import { normalizePermissions } from '../common/config/permissions.config';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
 
@@ -88,7 +89,10 @@ export class AuthService {
 
     // Форматираме потребителя за frontend
     const currentCompany = user.defaultUserCompany.company;
-    const currentRole = user.defaultUserCompany.role;
+    const currentRole = {
+      ...user.defaultUserCompany.role,
+      permissions: normalizePermissions(user.defaultUserCompany.role.permissions as any),
+    };
 
     return {
       user: {
@@ -153,7 +157,10 @@ export class AuthService {
     return {
       accessToken,
       currentCompany: userCompany.company,
-      currentRole: userCompany.role,
+      currentRole: {
+        ...userCompany.role,
+        permissions: normalizePermissions(userCompany.role.permissions as any),
+      },
       isSuperAdmin: userCompany.company.role === 'OWNER',
     };
   }

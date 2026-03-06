@@ -15,6 +15,7 @@ import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { PERMISSIONS_CONFIG } from '../common/config/permissions.config';
 
 @Controller('auth')
 export class AuthController {
@@ -102,5 +103,14 @@ export class AuthController {
     @Body() dto: ChangePasswordDto,
   ) {
     return this.authService.changePassword(user.id, dto.currentPassword, dto.newPassword);
+  }
+
+  @Get('permissions-config')
+  @UseGuards(JwtAuthGuard)
+  async getPermissionsConfig() {
+    return {
+      success: true,
+      config: PERMISSIONS_CONFIG,
+    };
   }
 }

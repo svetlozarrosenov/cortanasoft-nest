@@ -189,7 +189,6 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
             columns: [
               { key: 'name', labelKey: 'common.name' },
               { key: 'description', labelKey: 'common.description' },
-              { key: 'productsCount', labelKey: 'modules.erp.productsCount' },
             ],
           },
         ],
@@ -831,6 +830,42 @@ export function createFullPermissions(): RolePermissions {
             enabled: true,
             columns: table.columns.map((col) => col.key),
           };
+        }
+      }
+    }
+  }
+
+  return permissions;
+}
+
+// Нормализира permissions спрямо текущия конфиг.
+// Попълва липсващи модули, страници, таблици и колони от конфига,
+// без да променя вече зададени стойности.
+export function normalizePermissions(permissions: RolePermissions): RolePermissions {
+  if (!permissions || !permissions.modules) {
+    return permissions;
+  }
+
+  for (const module of PERMISSIONS_CONFIG) {
+    const mod = permissions.modules[module.key];
+    if (!mod) continue;
+
+    for (const page of module.pages) {
+      const pg = mod.pages?.[page.key];
+      if (!pg) continue;
+
+      if (page.tables) {
+        if (!pg.tables) {
+          pg.tables = {};
+        }
+        for (const table of page.tables) {
+          if (!pg.tables[table.key]) {
+            // Таблицата липсва — добавяме я с всички колони видими
+            pg.tables[table.key] = {
+              enabled: true,
+              columns: table.columns.map((col) => col.key),
+            };
+          }
         }
       }
     }
