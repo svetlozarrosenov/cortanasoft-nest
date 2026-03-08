@@ -33,7 +33,7 @@ export class ErpAnalyticsController {
   }
 
   @Get('financial-summary')
-  @RequireView('erp', 'analytics')
+  @RequireView('bi', 'sales')
   async getFinancialSummary(
     @Param('companyId') companyId: string,
     @Query() query: QueryProfitAnalyticsDto,

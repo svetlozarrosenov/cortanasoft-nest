@@ -34,6 +34,7 @@ model Currency {
   invoices           Invoice[] // Фактури в тази валута
   deals              Deal[] // Сделки в тази валута
   companyPlans       CompanyPlan[] // Планове в тази валута
+  expenses           Expense[] // Разходи в тази валута
 
   @@map("currencies")
 }
@@ -55,6 +56,7 @@ model Country {
   suppliers    Supplier[] // Доставчици от тази държава
   settlements  Settlement[] // Населени места в тази държава
   customers    Customer[] // Клиенти от тази държава
+  locations    Location[] // Локации в тази държава
 
   @@map("countries")
 }
@@ -425,6 +427,8 @@ model UserCompany {
   isDefault Boolean  @default(false) // Компанията по подразбиране при логин
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  maxVacationDays Int? // Максимален брой дни годишен отпуск
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -867,6 +871,10 @@ model Location {
   code        String // Код на локацията
   type        LocationType @default(WAREHOUSE) // Тип: склад или магазин
   address     String? // Адрес
+  city        String? // Град
+  postalCode  String? // Пощенски код
+  countryId   String? // Държава
+  country     Country? @relation(fields: [countryId], references: [id])
   description String? // Описание
   isDefault   Boolean      @default(false) // Дали е локация по подразбиране
   isActive    Boolean      @default(true)
@@ -987,8 +995,6 @@ enum CustomerType {
 
 // Етап на клиента (обединява Lead → Prospect → Active)
 enum CustomerStage {
-  LEAD // Потенциален клиент (лийд)
-  PROSPECT // Проспект (в процес на комуникация)
   ACTIVE // Активен клиент
   INACTIVE // Неактивен
 }
@@ -2187,6 +2193,11 @@ model Expense {
   amount      Decimal  @db.Decimal(12, 2) // Сума
   vatAmount   Decimal  @default(0) @db.Decimal(12, 2) // ДДС сума
   totalAmount Decimal  @db.Decimal(12, 2) // Обща сума (с ДДС)
+
+  // Валута
+  currencyId   String?
+  currency     Currency? @relation(fields: [currencyId], references: [id])
+  exchangeRate Decimal   @default(1) @db.Decimal(10, 6) // Курс към фирмена валута
 
   // Дати
   expenseDate DateTime @default(now()) // Дата на разхода

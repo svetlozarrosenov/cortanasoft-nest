@@ -140,6 +140,8 @@ export class DashboardService {
     ]);
 
     // Low stock products (inventory below minStock)
+    // For SERIAL products, count inventory_serials with IN_STOCK status
+    // For PRODUCT/BATCH products, sum inventory_batches quantities
     const lowStockProducts = await this.prisma.$queryRaw<
       { count: bigint }[]
     >`
@@ -147,11 +149,15 @@ export class DashboardService {
         SELECT p.id
         FROM products p
         LEFT JOIN inventory_batches ib ON p.id = ib."productId" AND ib."companyId" = ${companyId}
+        LEFT JOIN inventory_serials ins ON p.id = ins."productId" AND ins."companyId" = ${companyId} AND ins.status = 'IN_STOCK'
         WHERE p."companyId" = ${companyId}
           AND p."trackInventory" = true
           AND p."minStock" IS NOT NULL
-        GROUP BY p.id, p."minStock"
-        HAVING COALESCE(SUM(ib.quantity), 0) < p."minStock"
+        GROUP BY p.id, p."minStock", p.type
+        HAVING CASE
+          WHEN p.type = 'SERIAL' THEN COUNT(DISTINCT ins.id)
+          ELSE COALESCE(SUM(ib.quantity), 0)
+        END < p."minStock"
       ) sub
     `;
 

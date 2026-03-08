@@ -120,7 +120,6 @@ export class DealsService {
 
     return {
       items,
-      data: items,
       total,
       page,
       limit,

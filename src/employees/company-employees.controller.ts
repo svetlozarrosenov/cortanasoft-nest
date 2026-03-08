@@ -1,8 +1,9 @@
-import { Controller, Get, Param, Query, Res, StreamableFile, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Param, Body, Query, Res, StreamableFile, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { EmployeesService } from './employees.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
+import { PermissionsGuard, RequireEdit } from '../common/guards/permissions.guard';
 import { ExportService } from '../common/export/export.service';
 import type { ExportFormat } from '../common/export/export.service';
 
@@ -46,5 +47,16 @@ export class CompanyEmployeesController {
   @Get(':id')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.employeesService.findOne(companyId, id);
+  }
+
+  @Patch(':id')
+  @UseGuards(PermissionsGuard)
+  @RequireEdit('hr', 'employees')
+  update(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() body: { maxVacationDays?: number | null },
+  ) {
+    return this.employeesService.update(companyId, id, body);
   }
 }

@@ -214,7 +214,7 @@ export class ErpAnalyticsService {
     const now = new Date();
     const dateFrom = query.dateFrom
       ? new Date(query.dateFrom)
-      : new Date(now.getFullYear(), now.getMonth(), now.getDate()); // Today start
+      : new Date(now.getFullYear(), now.getMonth(), 1); // Start of current month
     const dateTo = query.dateTo
       ? new Date(query.dateTo + 'T23:59:59.999Z')
       : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999); // Today end
@@ -440,7 +440,7 @@ export class ErpAnalyticsService {
     const now = new Date();
     const dateFrom = query.dateFrom
       ? new Date(query.dateFrom)
-      : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      : new Date(now.getFullYear(), now.getMonth(), 1); // Start of current month
     const dateTo = query.dateTo
       ? new Date(query.dateTo + 'T23:59:59.999Z')
       : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
@@ -451,7 +451,7 @@ export class ErpAnalyticsService {
         gte: dateFrom,
         lte: dateTo,
       },
-      status: 'COMPLETED',
+      status: { in: ['DELIVERED_PAID', 'DELIVERED_UNPAID'] },
     };
 
     if (query.supplierId) {
@@ -638,7 +638,7 @@ export class ErpAnalyticsService {
     const now = new Date();
     const dateFrom = query.dateFrom
       ? new Date(query.dateFrom)
-      : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      : new Date(now.getFullYear(), now.getMonth(), 1); // Start of current month
     const dateTo = query.dateTo
       ? new Date(query.dateTo + 'T23:59:59.999Z')
       : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
@@ -1001,6 +1001,10 @@ export class ErpAnalyticsService {
         inventoryBatches: {
           select: { quantity: true, unitCost: true },
         },
+        inventorySerials: {
+          where: { status: 'IN_STOCK' },
+          select: { unitCost: true },
+        },
       },
     });
 
@@ -1014,11 +1018,22 @@ export class ErpAnalyticsService {
     for (const product of products) {
       let currentStock = 0;
       let inventoryValue = 0;
-      for (const batch of product.inventoryBatches) {
-        const qty = Number(batch.quantity);
-        currentStock += qty;
-        inventoryValue += qty * Number(batch.unitCost);
+
+      if (product.type === 'SERIAL') {
+        // SERIAL products: count inventory serials with IN_STOCK status
+        currentStock = product.inventorySerials.length;
+        for (const serial of product.inventorySerials) {
+          inventoryValue += Number(serial.unitCost);
+        }
+      } else {
+        // PRODUCT, BATCH: sum inventory batch quantities
+        for (const batch of product.inventoryBatches) {
+          const qty = Number(batch.quantity);
+          currentStock += qty;
+          inventoryValue += qty * Number(batch.unitCost);
+        }
       }
+
       totalInventoryValue += inventoryValue;
 
       const minStock = Number(product.minStock) || 0;

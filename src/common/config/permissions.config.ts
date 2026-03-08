@@ -436,6 +436,7 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
               { key: 'email', labelKey: 'common.email' },
               { key: 'phone', labelKey: 'common.phone' },
               { key: 'startDate', labelKey: 'modules.hr.startDate' },
+              { key: 'vacationDays', labelKey: 'modules.hr.vacationDays' },
               { key: 'status', labelKey: 'common.status' },
             ],
           },

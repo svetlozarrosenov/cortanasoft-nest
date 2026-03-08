@@ -2,15 +2,21 @@ import {
   IsOptional,
   IsString,
   IsNumber,
+  IsBoolean,
   Min,
   Max,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
 export class QueryContactsDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  unlinked?: boolean;
 
   @IsOptional()
   @Type(() => Number)

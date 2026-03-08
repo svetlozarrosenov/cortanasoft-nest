@@ -7,6 +7,8 @@ import {
   Min,
   IsEnum,
   IsEmail,
+  IsBoolean,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaymentMethod } from '@prisma/client';
@@ -106,6 +108,14 @@ export class CreateOrderDto {
   @IsString()
   @IsOptional()
   currencyId?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  autoConfirm?: boolean;
+
+  @IsIn(['PENDING', 'PARTIAL', 'PAID'])
+  @IsOptional()
+  paymentStatus?: string;
 
   @IsArray()
   @ValidateNested({ each: true })

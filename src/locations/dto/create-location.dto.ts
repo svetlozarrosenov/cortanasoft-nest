@@ -27,6 +27,20 @@ export class CreateLocationDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
+  city?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(20)
+  postalCode?: string;
+
+  @IsString()
+  @IsOptional()
+  countryId?: string;
+
+  @IsString()
+  @IsOptional()
   @MaxLength(1000)
   description?: string;
 

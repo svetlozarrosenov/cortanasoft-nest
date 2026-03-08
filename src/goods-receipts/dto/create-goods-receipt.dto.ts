@@ -53,6 +53,15 @@ export class CreateGoodsReceiptExpenseDto {
   @IsNumber()
   @Min(0)
   amount: number;
+
+  @IsString()
+  @IsOptional()
+  currencyId?: string;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0.000001)
+  exchangeRate?: number;
 }
 
 export class CreateGoodsReceiptDto {

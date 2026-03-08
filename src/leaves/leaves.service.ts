@@ -155,7 +155,7 @@ export class LeavesService {
 
     return {
       data,
-      pagination: {
+      meta: {
         page,
         limit,
         total,

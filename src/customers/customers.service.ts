@@ -44,7 +44,7 @@ export class CustomersService {
       }
     }
 
-    return this.prisma.customer.create({
+    const customer = await this.prisma.customer.create({
       data: {
         type,
         companyName: dto.companyName,
@@ -83,6 +83,16 @@ export class CustomersService {
         _count: { select: { orders: true } },
       },
     });
+
+    // Link the contact (lead) to the new customer
+    if (dto.contactId) {
+      await this.prisma.contact.updateMany({
+        where: { id: dto.contactId, companyId, customerId: null },
+        data: { customerId: customer.id },
+      });
+    }
+
+    return customer;
   }
 
   async findAll(companyId: string, query: QueryCustomersDto) {

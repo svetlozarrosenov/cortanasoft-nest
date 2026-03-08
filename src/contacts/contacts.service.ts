@@ -26,6 +26,7 @@ export class ContactsService {
   async findAll(companyId: string, query: QueryContactsDto) {
     const {
       search,
+      unlinked,
       page = 1,
       limit = 20,
       sortBy = 'lastName',
@@ -34,6 +35,7 @@ export class ContactsService {
 
     const where: Prisma.ContactWhereInput = {
       companyId,
+      ...(unlinked && { customerId: null }),
     };
 
     if (search) {

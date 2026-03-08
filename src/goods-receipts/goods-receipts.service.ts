@@ -30,6 +30,7 @@ const RECEIPT_INCLUDE = {
   expenses: {
     include: {
       supplier: true,
+      currency: true,
     },
   },
   _count: { select: { items: true } },
@@ -156,13 +157,17 @@ export class GoodsReceiptsService {
       // Create expense records if provided
       if (dto.expenses && dto.expenses.length > 0) {
         for (const exp of dto.expenses) {
+          const rate = exp.exchangeRate ?? 1;
+          const convertedAmount = exp.amount * rate;
           await tx.expense.create({
             data: {
               description: exp.description,
               category: exp.category,
               amount: exp.amount,
               vatAmount: 0,
-              totalAmount: exp.amount,
+              totalAmount: convertedAmount,
+              currencyId: exp.currencyId || currencyId,
+              exchangeRate: rate,
               expenseDate: receipt.receiptDate,
               status: 'PENDING',
               companyId,
@@ -265,8 +270,9 @@ export class GoodsReceiptsService {
         (sum, exp) => sum + Number(exp.totalAmount),
         0,
       );
+      const totalQuantity = receipt.items.reduce((sum, item) => sum + Number(item.quantity), 0);
       const { items: _items, expenses: _expenses, ...rest } = receipt;
-      return { ...rest, totalAmount, totalExpenses };
+      return { ...rest, totalAmount: totalAmount + totalExpenses, totalExpenses, totalQuantity };
     });
 
     return {
@@ -358,14 +364,19 @@ export class GoodsReceiptsService {
 
         // Create new expenses
         if (dto.expenses && dto.expenses.length > 0) {
+          const receiptCurrencyId = dto.currencyId || receipt.currencyId;
           for (const exp of dto.expenses) {
+            const rate = exp.exchangeRate ?? 1;
+            const convertedAmount = exp.amount * rate;
             await tx.expense.create({
               data: {
                 description: exp.description,
                 category: exp.category,
                 amount: exp.amount,
                 vatAmount: 0,
-                totalAmount: exp.amount,
+                totalAmount: convertedAmount,
+                currencyId: exp.currencyId || receiptCurrencyId || undefined,
+                exchangeRate: rate,
                 expenseDate: receipt.receiptDate,
                 status: 'PENDING',
                 companyId,

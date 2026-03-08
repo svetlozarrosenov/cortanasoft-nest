@@ -88,7 +88,7 @@ export class CompanyDealsController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.dealsService.findAll(companyId, { ...query, page: 1, limit: 100000 } as any);
-    const data = (result as any).data || (result as any).items || [];
+    const data = (result as any).items || [];
     const columns = [
       { header: 'Name', key: 'name', width: 25 },
       { header: 'Amount', key: 'amount', width: 15 },

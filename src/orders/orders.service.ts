@@ -153,7 +153,7 @@ export class OrdersService {
     const total = round2(subtotal + vatAmount + shippingCost - orderDiscount);
 
     // Generate order number inside transaction to avoid race condition
-    return this.prisma.$transaction(async (tx) => {
+    const order = await this.prisma.$transaction(async (tx) => {
       const orderNumber =
         dto.orderNumber || (await this.generateOrderNumber(companyId, tx));
 
@@ -162,6 +162,7 @@ export class OrdersService {
           orderNumber,
           orderDate: dto.orderDate ? new Date(dto.orderDate) : new Date(),
           status: 'PENDING',
+          paymentStatus: (dto.paymentStatus as 'PENDING' | 'PARTIAL' | 'PAID') || 'PENDING',
           customerId: dto.customerId,
           customerName: dto.customerName,
           customerEmail: dto.customerEmail,
@@ -187,6 +188,17 @@ export class OrdersService {
         include: ORDER_INCLUDE,
       });
     });
+
+    // Auto-process: skip PENDING and go directly to PROCESSING
+    if (dto.autoConfirm) {
+      return this.prisma.order.update({
+        where: { id: order.id },
+        data: { status: 'PROCESSING' },
+        include: ORDER_INCLUDE,
+      });
+    }
+
+    return order;
   }
 
   async findAll(companyId: string, query: QueryOrdersDto) {
@@ -261,13 +273,13 @@ export class OrdersService {
     return order;
   }
 
-  // Valid status transitions: Нова → Заприходена or Анулирана
+  // Valid status transitions
   private readonly validTransitions: Record<OrderStatus, OrderStatus[]> = {
     DRAFT: ['PENDING', 'CANCELLED'],
     PENDING: ['CONFIRMED', 'CANCELLED'],
-    CONFIRMED: ['CANCELLED'],
-    PROCESSING: ['CANCELLED'],
-    SHIPPED: ['CANCELLED'],
+    CONFIRMED: ['PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'],
+    PROCESSING: ['CONFIRMED', 'SHIPPED', 'DELIVERED', 'CANCELLED'],
+    SHIPPED: ['DELIVERED', 'CANCELLED'],
     DELIVERED: [],
     CANCELLED: [],
   };
@@ -283,7 +295,7 @@ export class OrdersService {
       }
 
       // Route to confirm/cancel for transitions with inventory side effects
-      if (dto.status === 'CONFIRMED' && order.status === 'PENDING') {
+      if (dto.status === 'CONFIRMED' && (order.status === 'PENDING' || order.status === 'PROCESSING')) {
         return this.confirm(companyId, id);
       }
       if (dto.status === 'CANCELLED') {
@@ -298,8 +310,8 @@ export class OrdersService {
       });
     }
 
-    // Allow payment status updates for non-pending orders
-    if (order.status !== 'PENDING') {
+    // Allow payment status updates for confirmed+ orders
+    if (order.status !== 'PENDING' && order.status !== 'PROCESSING') {
       if (dto.paymentStatus) {
         return this.prisma.order.update({
           where: { id },
@@ -406,7 +418,7 @@ export class OrdersService {
   async confirm(companyId: string, id: string) {
     const order = await this.findOne(companyId, id);
 
-    if (order.status !== 'PENDING') {
+    if (order.status !== 'PENDING' && order.status !== 'PROCESSING') {
       throw new BadRequestException(ErrorMessages.orders.canOnlyConfirmPending);
     }
 
