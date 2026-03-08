@@ -103,7 +103,7 @@ export class StockDocumentsService {
           ? new Date(dto.documentDate)
           : new Date(),
         type: dto.type,
-        status: 'DRAFT',
+        status: 'ISSUED',
         customerId: dto.customerId || null,
         recipientName: dto.recipientName,
         recipientEik: dto.recipientEik || null,
@@ -214,9 +214,9 @@ export class StockDocumentsService {
   async update(companyId: string, id: string, dto: UpdateStockDocumentDto) {
     const doc = await this.findOne(companyId, id);
 
-    if (doc.status !== 'DRAFT') {
+    if (doc.status === 'CANCELLED') {
       throw new BadRequestException(
-        'Само документи в статус Чернова могат да бъдат редактирани',
+        'Анулирани документи не могат да бъдат редактирани',
       );
     }
 
@@ -287,22 +287,6 @@ export class StockDocumentsService {
     });
   }
 
-  async issue(companyId: string, id: string) {
-    const doc = await this.findOne(companyId, id);
-
-    if (doc.status !== 'DRAFT') {
-      throw new BadRequestException(
-        'Само документи в статус Чернова могат да бъдат издадени',
-      );
-    }
-
-    return this.prisma.stockDocument.update({
-      where: { id },
-      data: { status: 'ISSUED' },
-      include: this.documentInclude,
-    });
-  }
-
   async cancel(companyId: string, id: string) {
     const doc = await this.findOne(companyId, id);
 
@@ -320,9 +304,9 @@ export class StockDocumentsService {
   async remove(companyId: string, id: string) {
     const doc = await this.findOne(companyId, id);
 
-    if (doc.status !== 'DRAFT') {
+    if (doc.status === 'CANCELLED') {
       throw new BadRequestException(
-        'Само документи в статус Чернова могат да бъдат изтрити',
+        'Анулирани документи не могат да бъдат изтрити',
       );
     }
 

@@ -114,12 +114,6 @@ export class CompanyStockDocumentsController {
     return this.stockDocumentsService.update(companyId, id, dto);
   }
 
-  @Post(':id/issue')
-  @RequireEdit('erp', 'stockDocuments')
-  issue(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.stockDocumentsService.issue(companyId, id);
-  }
-
   @Post(':id/cancel')
   @RequireEdit('erp', 'stockDocuments')
   cancel(@Param('companyId') companyId: string, @Param('id') id: string) {
