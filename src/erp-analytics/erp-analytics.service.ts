@@ -240,7 +240,7 @@ export class ErpAnalyticsService {
       orderWhere.customerId = query.customerId;
     }
 
-    // Fetch orders with items and inventory batch info
+    // Fetch orders with items and inventory batch/serial info
     const orders = await this.prisma.order.findMany({
       where: orderWhere,
       include: {
@@ -252,6 +252,7 @@ export class ErpAnalyticsService {
               },
             },
             inventoryBatch: true,
+            inventorySerial: true,
           },
           ...(query.productId && {
             where: { productId: query.productId },
@@ -259,6 +260,55 @@ export class ErpAnalyticsService {
         },
       },
     });
+
+    // Pre-load weighted average cost per product from goods receipts
+    // This handles cases where order items don't have a direct inventoryBatchId (FIFO deduction)
+    const productIds = new Set<string>();
+    for (const order of orders) {
+      for (const item of order.items) {
+        productIds.add(item.productId);
+      }
+    }
+
+    const avgCostMap = new Map<string, number>();
+    if (productIds.size > 0) {
+      // Calculate weighted average cost from delivered goods receipt items
+      const receiptItems = await this.prisma.goodsReceiptItem.findMany({
+        where: {
+          productId: { in: Array.from(productIds) },
+          goodsReceipt: {
+            companyId,
+            status: { in: ['DELIVERED_PAID', 'DELIVERED_UNPAID'] },
+          },
+        },
+        select: {
+          productId: true,
+          quantity: true,
+          unitPrice: true,
+          exchangeRate: true,
+        },
+      });
+
+      // Group by product and calculate weighted average
+      const productCosts = new Map<string, { totalCost: number; totalQty: number }>();
+      for (const ri of receiptItems) {
+        const qty = Number(ri.quantity);
+        const cost = qty * Number(ri.unitPrice) * (Number(ri.exchangeRate) || 1);
+        const existing = productCosts.get(ri.productId);
+        if (existing) {
+          existing.totalCost += cost;
+          existing.totalQty += qty;
+        } else {
+          productCosts.set(ri.productId, { totalCost: cost, totalQty: qty });
+        }
+      }
+
+      for (const [productId, { totalCost: tc, totalQty: tq }] of productCosts) {
+        if (tq > 0) {
+          avgCostMap.set(productId, tc / tq);
+        }
+      }
+    }
 
     // Calculate product-level profits
     const productMap = new Map<string, ProductProfitData>();
@@ -278,10 +328,14 @@ export class ErpAnalyticsService {
         const unitPrice = Number(item.unitPrice);
         const itemRevenue = quantity * unitPrice;
 
-        // Get cost from inventory batch if available, otherwise use product's purchase price
+        // Get cost: 1) linked batch, 2) linked serial, 3) weighted avg from goods receipts, 4) product purchasePrice
         let unitCost = 0;
         if (item.inventoryBatch) {
           unitCost = Number(item.inventoryBatch.unitCost);
+        } else if ((item as any).inventorySerial) {
+          unitCost = Number((item as any).inventorySerial.unitCost);
+        } else if (avgCostMap.has(item.productId)) {
+          unitCost = avgCostMap.get(item.productId)!;
         } else if (item.product.purchasePrice) {
           unitCost = Number(item.product.purchasePrice);
         }
@@ -378,6 +432,7 @@ export class ErpAnalyticsService {
         items: {
           include: {
             inventoryBatch: true,
+            inventorySerial: true,
             product: true,
           },
         },
@@ -396,6 +451,10 @@ export class ErpAnalyticsService {
         let unitCost = 0;
         if (item.inventoryBatch) {
           unitCost = Number(item.inventoryBatch.unitCost);
+        } else if (item.inventorySerial) {
+          unitCost = Number(item.inventorySerial.unitCost);
+        } else if (avgCostMap.has(item.productId)) {
+          unitCost = avgCostMap.get(item.productId)!;
         } else if (item.product.purchasePrice) {
           unitCost = Number(item.product.purchasePrice);
         }

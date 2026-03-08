@@ -455,7 +455,7 @@ describe('LeavesService', () => {
       const result = await service.findAll('c1', { page: 1, limit: 20 } as any);
 
       expect(result.data).toHaveLength(1);
-      expect(result.pagination.total).toBe(1);
+      expect(result.meta.total).toBe(1);
     });
 
     it('should filter by status and type', async () => {

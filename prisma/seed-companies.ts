@@ -1877,7 +1877,7 @@ async function seedBrokerage() {
   }
 
   // Attendance records
-  const attendanceDates = [];
+  const attendanceDates: string[] = [];
   for (let i = 1; i <= 5; i++) {
     attendanceDates.push(daysAgo(i + 2).split('T')[0]);
   }
