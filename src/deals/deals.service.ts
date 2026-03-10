@@ -104,11 +104,25 @@ export class DealsService {
       ...(isActive !== undefined && { isActive }),
     };
 
-    const [items, total] = await Promise.all([
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    const [rawItems, total] = await Promise.all([
       this.prisma.deal.findMany({
         where,
         include: {
           ...DEAL_INCLUDE,
+          tasks: {
+            where: { isDone: false },
+            select: {
+              id: true,
+              title: true,
+              dueDate: true,
+              isDone: true,
+            },
+            orderBy: { dueDate: 'asc' },
+            take: 3,
+          },
           _count: { select: { tasks: true } },
         },
         orderBy: { [sortBy]: sortOrder },
@@ -117,6 +131,21 @@ export class DealsService {
       }),
       this.prisma.deal.count({ where }),
     ]);
+
+    const items = rawItems.map((deal) => {
+      const pendingTasks = deal.tasks || [];
+      const overdueTaskCount = pendingTasks.filter(
+        (t) => t.dueDate && new Date(t.dueDate) < now,
+      ).length;
+      const nextTask = pendingTasks[0] || null;
+
+      return {
+        ...deal,
+        pendingTaskCount: pendingTasks.length,
+        overdueTaskCount,
+        nextTask,
+      };
+    });
 
     return {
       items,
@@ -181,7 +210,19 @@ export class DealsService {
       throw new NotFoundException('Deal not found');
     }
 
-    return deal;
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const pendingTasks = (deal.tasks || []).filter((t) => !t.isDone);
+    const overdueTaskCount = pendingTasks.filter(
+      (t) => t.dueDate && new Date(t.dueDate) < now,
+    ).length;
+
+    return {
+      ...deal,
+      pendingTaskCount: pendingTasks.length,
+      overdueTaskCount,
+      nextTask: pendingTasks[0] || null,
+    };
   }
 
   async update(companyId: string, id: string, dto: UpdateDealDto) {
@@ -301,14 +342,43 @@ export class DealsService {
   // ==================== KANBAN ====================
 
   async findAllForKanban(companyId: string) {
-    return this.prisma.deal.findMany({
+    const deals = await this.prisma.deal.findMany({
       where: { companyId, isActive: true },
       include: {
         ...DEAL_INCLUDE,
+        tasks: {
+          where: { isDone: false },
+          select: {
+            id: true,
+            title: true,
+            dueDate: true,
+            isDone: true,
+          },
+          orderBy: { dueDate: 'asc' },
+          take: 3,
+        },
         _count: { select: { tasks: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 1000,
+    });
+
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    return deals.map((deal) => {
+      const pendingTasks = deal.tasks || [];
+      const overdueTaskCount = pendingTasks.filter(
+        (t) => t.dueDate && new Date(t.dueDate) < now,
+      ).length;
+      const nextTask = pendingTasks[0] || null;
+
+      return {
+        ...deal,
+        pendingTaskCount: pendingTasks.length,
+        overdueTaskCount,
+        nextTask,
+      };
     });
   }
 
