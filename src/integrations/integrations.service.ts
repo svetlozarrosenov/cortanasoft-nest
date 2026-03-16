@@ -66,6 +66,7 @@ export class IntegrationsService {
       discount: totals?.discountTotal || 0,
       notes,
       items: orderItems,
+      autoConfirm: true,
     });
 
     this.logger.log(
@@ -76,6 +77,36 @@ export class IntegrationsService {
       orderId: createdOrder.id,
       orderNumber: createdOrder.orderNumber,
     };
+  }
+
+  async getStock(companyId: string, skus?: string[]) {
+    const where: any = { companyId, isActive: true };
+    if (skus && skus.length > 0) {
+      where.sku = { in: skus };
+    }
+
+    const products = await this.prisma.product.findMany({
+      where,
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        trackInventory: true,
+        inventoryBatches: {
+          where: { quantity: { gt: 0 } },
+          select: { quantity: true },
+        },
+      },
+    });
+
+    return products.map((p) => ({
+      sku: p.sku,
+      name: p.name,
+      trackInventory: p.trackInventory,
+      stock: p.trackInventory
+        ? p.inventoryBatches.reduce((sum, b) => sum + Number(b.quantity), 0)
+        : null,
+    }));
   }
 
   private async matchOrCreateProduct(

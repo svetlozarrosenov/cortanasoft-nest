@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushNotificationsService } from '../push-notifications/push-notifications.service';
+import { MailService } from '../mail/mail.service';
 import {
   CreateDemoRequestDto,
   UpdateDemoRequestDto,
@@ -15,6 +16,7 @@ export class DemoRequestsService {
   constructor(
     private prisma: PrismaService,
     private pushNotificationsService: PushNotificationsService,
+    private mailService: MailService,
   ) {}
 
   /**
@@ -51,6 +53,27 @@ export class DemoRequestsService {
       }
     } catch (error) {
       this.logger.error('Failed to send push notification for demo request', error);
+    }
+
+    // Send email notification
+    try {
+      await this.mailService.send({
+        to: process.env.SMTP_FROM || 'info@cortanasoft.com',
+        subject: `Нова заявка за демо от ${dto.companyName}`,
+        html: `
+          <h2>Нова заявка за демо</h2>
+          <table style="border-collapse:collapse;font-family:sans-serif;">
+            <tr><td style="padding:6px 12px;font-weight:bold;">Име:</td><td style="padding:6px 12px;">${dto.name}</td></tr>
+            <tr><td style="padding:6px 12px;font-weight:bold;">Email:</td><td style="padding:6px 12px;">${dto.email}</td></tr>
+            <tr><td style="padding:6px 12px;font-weight:bold;">Телефон:</td><td style="padding:6px 12px;">${dto.phone || '—'}</td></tr>
+            <tr><td style="padding:6px 12px;font-weight:bold;">Фирма:</td><td style="padding:6px 12px;">${dto.companyName}</td></tr>
+            <tr><td style="padding:6px 12px;font-weight:bold;">Брой служители:</td><td style="padding:6px 12px;">${dto.employeeCount || '—'}</td></tr>
+            <tr><td style="padding:6px 12px;font-weight:bold;">Съобщение:</td><td style="padding:6px 12px;">${dto.message || '—'}</td></tr>
+          </table>
+        `,
+      });
+    } catch (error) {
+      this.logger.error('Failed to send email notification for demo request', error);
     }
 
     return demoRequest;

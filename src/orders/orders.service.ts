@@ -189,13 +189,9 @@ export class OrdersService {
       });
     });
 
-    // Auto-process: skip PENDING and go directly to PROCESSING
+    // Auto-confirm: deduct inventory and set to CONFIRMED
     if (dto.autoConfirm) {
-      return this.prisma.order.update({
-        where: { id: order.id },
-        data: { status: 'PROCESSING' },
-        include: ORDER_INCLUDE,
-      });
+      return this.confirm(companyId, order.id);
     }
 
     return order;

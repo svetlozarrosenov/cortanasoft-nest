@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Body,
+  Query,
   Req,
   UseGuards,
   HttpCode,
@@ -31,6 +32,20 @@ export class IntegrationsController {
     return {
       success: true,
       ...result,
+    };
+  }
+
+  @Get('stock')
+  async getStock(
+    @Req() req: any,
+    @Query('skus') skus?: string,
+  ) {
+    const companyId = req.apiKeyCompanyId;
+    const skuList = skus ? skus.split(',').map((s) => s.trim()) : undefined;
+    const result = await this.integrationsService.getStock(companyId, skuList);
+    return {
+      success: true,
+      products: result,
     };
   }
 }
