@@ -58,7 +58,7 @@ export class DemoRequestsService {
     // Send email notification
     try {
       await this.mailService.send({
-        to: process.env.SMTP_FROM || 'info@cortanasoft.com',
+        to: process.env.SES_FROM || 'info@cortanasoft.com',
         subject: `Нова заявка за демо от ${dto.companyName}`,
         html: `
           <h2>Нова заявка за демо</h2>
