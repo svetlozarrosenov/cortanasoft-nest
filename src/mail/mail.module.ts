@@ -12,8 +12,8 @@ import { MailService } from './mail.service';
       useFactory: (config: ConfigService) => ({
         transport: {
           host: config.get('SMTP_HOST'),
-          port: Number(config.get('SMTP_PORT', 587)),
-          secure: false,
+          port: Number(config.get('SMTP_PORT', 465)),
+          secure: Number(config.get('SMTP_PORT', 465)) === 465,
           auth: {
             user: config.get('SMTP_USER'),
             pass: config.get('SMTP_PASS'),
