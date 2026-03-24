@@ -192,6 +192,8 @@ model Company {
   productionOrders   ProductionOrder[]
   apiKeys            ApiKey[]
   stockTransfers     StockTransfer[]
+  shippingConfigs    ShippingConfig[]
+  shipments          Shipment[]
 
   @@map("companies")
 }
@@ -1369,6 +1371,7 @@ model Order {
   items          OrderItem[]
   invoices       Invoice[]
   stockDocuments StockDocument[]
+  shipments      Shipment[]
 
   @@unique([companyId, orderNumber])
   @@index([companyId, status])
@@ -2552,4 +2555,151 @@ model StockTransferSerial {
   inventorySerial   InventorySerial @relation(fields: [inventorySerialId], references: [id], onDelete: Restrict)
 
   @@map("stock_transfer_serials")
+}
+
+// ==================== Доставка / Shipping ====================
+
+// Статус на пратка
+enum ShipmentStatus {
+  PENDING // Очаква създаване на товарителница
+  CREATED // Товарителницата е създадена
+  IN_TRANSIT // В процес на доставка
+  DELIVERED // Доставена
+  RETURNED // Върната
+  CANCELLED // Анулирана
+}
+
+// Тип доставка (офис или адрес)
+enum DeliveryType {
+  OFFICE // До офис на куриер
+  ADDRESS // До адрес
+}
+
+// Конфигурация на доставчик за компания
+model ShippingConfig {
+  id        String  @id @default(cuid())
+  provider  String  @default("econt") // econt, speedy, etc.
+  isActive  Boolean @default(true)
+
+  // Econt credentials
+  username String? // API потребител
+  password String? // API парола
+  mode     String  @default("test") // test | live
+
+  // Подател по подразбиране
+  senderName       String? // Име на подателя
+  senderPhone      String? // Телефон на подателя
+  senderOfficeCode String? // Код на офис подател
+
+  // Тип пратка по подразбиране
+  shipmentType String @default("PACK") // PACK, document, pallet...
+
+  // Кой плаща доставката
+  paymentBy String @default("sender") // sender | receiver
+
+  // Наложен платеж (COD)
+  codEnabled     Boolean @default(false)
+  cdAgreementNum String? // Номер на договор за НП
+  cdPayMethod    String? // bank | office | door
+  cdIban         String? // IBAN за получаване
+  cdBic          String? // BIC код
+
+  // Услуги
+  smsNotification      Boolean @default(false)
+  deliveryReceipt      Boolean @default(false)
+  declaredValueEnabled Boolean @default(false)
+
+  // Инструкции за обработка
+  sizeUnder60cm    Boolean @default(false)
+  keepUpright      Boolean @default(false)
+  payAfterAccept   Boolean @default(false)
+  payAfterTest     Boolean @default(false)
+  partialDelivery  Boolean @default(false)
+  emailOnDelivery  Boolean @default(false)
+
+  // Инструкции за връщане
+  returnDaysUntilReturn Int?    // Дни до автоматично връщане
+  returnFailAction      String? // Действие при неуспешна доставка
+  instructionsDefault   String? // Инструкции по подразбиране
+
+  // Споделяне на плащане
+  paymentShareAmount  Decimal? @db.Decimal(10, 2) // Сума/процент за получателя
+  paymentSharePercent Boolean  @default(false) // Дали е процент
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Релации
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  shipments Shipment[]
+
+  @@unique([companyId, provider])
+  @@index([companyId])
+  @@map("shipping_configs")
+}
+
+// Пратка
+model Shipment {
+  id             String         @id @default(cuid())
+  shipmentNumber String? // Номер на пратка от куриера
+  status         ShipmentStatus @default(PENDING)
+
+  // Тип доставка
+  deliveryType DeliveryType @default(OFFICE)
+
+  // Получател
+  receiverName  String // Име на получателя
+  receiverPhone String // Телефон на получателя
+
+  // Офис (ако deliveryType == OFFICE)
+  officeCode String? // Код на офис
+  officeName String? // Име на офис
+
+  // Адрес (ако deliveryType == ADDRESS)
+  addressCity       String?
+  addressPostCode   String?
+  addressStreet     String?
+  addressNum        String?
+  addressOther      String? // Блок/Вход/Етаж/Апартамент
+
+  // Данни за пратката
+  weight      Decimal? @db.Decimal(10, 3) // Тегло в кг
+  packCount   Int      @default(1) // Брой пакети
+  dimensionsL Decimal? @db.Decimal(10, 2) // Дължина в см
+  dimensionsW Decimal? @db.Decimal(10, 2) // Ширина в см
+  dimensionsH Decimal? @db.Decimal(10, 2) // Височина в см
+  description String? // Описание на съдържанието
+
+  // Наложен платеж
+  codAmount  Decimal? @db.Decimal(12, 2) // Сума за наложен платеж
+  currency   String   @default("BGN")
+
+  // Разходи
+  shippingCost       Decimal? @db.Decimal(10, 2) // Цена на доставката
+  senderDueAmount    Decimal? @db.Decimal(10, 2)
+  receiverDueAmount  Decimal? @db.Decimal(10, 2)
+
+  // Tracking
+  pdfUrl               String? // URL на товарителницата
+  expectedDeliveryDate DateTime? // Очаквана дата на доставка
+  trackingData         Json? // Пълни данни от куриера
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Релации
+  orderId String
+  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  shippingConfigId String
+  shippingConfig   ShippingConfig @relation(fields: [shippingConfigId], references: [id])
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status])
+  @@index([orderId])
+  @@map("shipments")
 }

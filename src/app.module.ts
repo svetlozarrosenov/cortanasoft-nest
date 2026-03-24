@@ -41,6 +41,7 @@ import { ProductionModule } from './production/production.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { StockTransfersModule } from './stock-transfers/stock-transfers.module';
 import { MailModule } from './mail/mail.module';
+import { ShippingModule } from './shipping/shipping.module';
 
 @Module({
   imports: [
@@ -88,6 +89,7 @@ import { MailModule } from './mail/mail.module';
     IntegrationsModule,
     StockTransfersModule,
     MailModule,
+    ShippingModule,
   ],
   controllers: [],
   providers: [],
