@@ -399,7 +399,26 @@ model User {
   // Terms acceptance
   termsAcceptedAt DateTime?
 
+  // Password reset
+  passwordResets PasswordReset[]
+
   @@map("users")
+}
+
+// Токен за възстановяване на парола
+model PasswordReset {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("password_resets")
 }
 
 // Push Notification Subscription - съхранява FCM токени за всеки потребител/устройство

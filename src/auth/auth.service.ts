@@ -1,18 +1,23 @@
-import { Injectable, UnauthorizedException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
 import { normalizePermissions } from '../common/config/permissions.config';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
     private configService: ConfigService,
+    private mailService: MailService,
   ) {}
 
   async validateUser(email: string, password: string) {
@@ -213,6 +218,105 @@ export class AuthService {
       where: { id: userId },
       data: { password: hashedPassword },
     });
+
+    return { success: true };
+  }
+
+  async forgotPassword(email: string) {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+
+    // Always return success to prevent email enumeration
+    if (!user || !user.isActive) {
+      return { success: true };
+    }
+
+    // Invalidate any existing unused tokens for this user
+    await this.prisma.passwordReset.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    // Generate secure random token
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await this.prisma.passwordReset.create({
+      data: {
+        token,
+        expiresAt,
+        userId: user.id,
+      },
+    });
+
+    // Send email
+    const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
+    const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
+
+    try {
+      await this.mailService.send({
+        to: user.email,
+        subject: 'Възстановяване на парола — CortanaSoft',
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
+            <div style="text-align: center; margin-bottom: 32px;">
+              <h1 style="color: #ffffff; font-size: 24px; margin: 0;">CortanaSoft</h1>
+            </div>
+            <div style="background: #18181b; border: 1px solid #27272a; border-radius: 16px; padding: 32px;">
+              <h2 style="color: #ffffff; font-size: 18px; margin: 0 0 16px;">Забравена парола</h2>
+              <p style="color: #a1a1aa; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">
+                Здравейте, ${user.firstName}. Получихме заявка за промяна на паролата ви.
+                Натиснете бутона по-долу, за да зададете нова парола.
+              </p>
+              <div style="text-align: center; margin: 24px 0;">
+                <a href="${resetUrl}"
+                   style="display: inline-block; background: linear-gradient(to right, #6366f1, #8b5cf6); color: #ffffff; text-decoration: none; padding: 12px 32px; border-radius: 12px; font-weight: 600; font-size: 14px;">
+                  Задай нова парола
+                </a>
+              </div>
+              <p style="color: #71717a; font-size: 12px; line-height: 1.6; margin: 24px 0 0;">
+                Линкът е валиден 1 час. Ако не сте заявили промяна на паролата, игнорирайте този имейл.
+              </p>
+            </div>
+          </div>
+        `,
+      });
+    } catch (error) {
+      this.logger.error(`Failed to send password reset email to ${email}`, error);
+    }
+
+    return { success: true };
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    const resetRecord = await this.prisma.passwordReset.findUnique({
+      where: { token },
+      include: { user: true },
+    });
+
+    if (!resetRecord) {
+      throw new BadRequestException('Невалиден или изтекъл линк за промяна на парола');
+    }
+
+    if (resetRecord.usedAt) {
+      throw new BadRequestException('Този линк вече е бил използван');
+    }
+
+    if (resetRecord.expiresAt < new Date()) {
+      throw new BadRequestException('Линкът е изтекъл. Моля, заявете нов.');
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: resetRecord.userId },
+        data: { password: hashedPassword },
+      }),
+      this.prisma.passwordReset.update({
+        where: { id: resetRecord.id },
+        data: { usedAt: new Date() },
+      }),
+    ]);
 
     return { success: true };
   }
