@@ -71,6 +71,11 @@ export class CreateOrderDto {
   @IsOptional()
   customerPhone?: string;
 
+  // Доставка
+  @IsString()
+  @IsOptional()
+  deliveryMethod?: string; // none, manual, econt_office, econt_address
+
   @IsString()
   @IsOptional()
   shippingAddress?: string;
@@ -82,6 +87,22 @@ export class CreateOrderDto {
   @IsString()
   @IsOptional()
   shippingPostalCode?: string;
+
+  @IsString()
+  @IsOptional()
+  receiverName?: string;
+
+  @IsString()
+  @IsOptional()
+  receiverPhone?: string;
+
+  @IsString()
+  @IsOptional()
+  econtOfficeCode?: string;
+
+  @IsString()
+  @IsOptional()
+  econtOfficeName?: string;
 
   @IsEnum(PaymentMethod)
   @IsOptional()

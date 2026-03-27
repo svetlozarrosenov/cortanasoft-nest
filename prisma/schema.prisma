@@ -780,6 +780,12 @@ model Product {
   salePrice     Decimal  @db.Decimal(10, 2) // Продажна цена по подразбиране
   vatRate       Decimal  @default(20) @db.Decimal(5, 2) // ДДС ставка (%)
 
+  // Тегло и размери (за доставка)
+  weight      Decimal? @db.Decimal(10, 3) // Тегло в кг
+  dimensionsL Decimal? @db.Decimal(10, 2) // Дължина в см
+  dimensionsW Decimal? @db.Decimal(10, 2) // Ширина в см
+  dimensionsH Decimal? @db.Decimal(10, 2) // Височина в см
+
   // Наличност
   minStock       Decimal? @db.Decimal(10, 3) // Минимална наличност за известие
   trackInventory Boolean  @default(true) // Дали да се следи наличността
@@ -1351,10 +1357,15 @@ model Order {
   customerEmail String? // Имейл
   customerPhone String? // Телефон
 
-  // Адрес за доставка
+  // Доставка
+  deliveryMethod     String   @default("none") // none, manual, econt_office, econt_address
   shippingAddress    String? // Адрес за доставка
   shippingCity       String? // Град
   shippingPostalCode String? // Пощенски код
+  receiverName       String? // Име на получател (за куриер)
+  receiverPhone      String? // Телефон на получател
+  econtOfficeCode    String? // Код на офис на Еконт
+  econtOfficeName    String? // Име на офис на Еконт
 
   // Плащане
   paymentMethod PaymentMethod @default(CASH)

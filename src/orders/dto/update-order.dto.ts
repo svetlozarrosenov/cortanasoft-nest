@@ -39,6 +39,10 @@ export class UpdateOrderDto {
 
   @IsString()
   @IsOptional()
+  deliveryMethod?: string;
+
+  @IsString()
+  @IsOptional()
   shippingAddress?: string;
 
   @IsString()
@@ -48,6 +52,22 @@ export class UpdateOrderDto {
   @IsString()
   @IsOptional()
   shippingPostalCode?: string;
+
+  @IsString()
+  @IsOptional()
+  receiverName?: string;
+
+  @IsString()
+  @IsOptional()
+  receiverPhone?: string;
+
+  @IsString()
+  @IsOptional()
+  econtOfficeCode?: string;
+
+  @IsString()
+  @IsOptional()
+  econtOfficeName?: string;
 
   @IsEnum(PaymentMethod)
   @IsOptional()

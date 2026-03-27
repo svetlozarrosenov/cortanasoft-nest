@@ -59,6 +59,27 @@ export class CreateProductDto {
   @IsOptional()
   trackInventory?: boolean;
 
+  // Тегло и размери (за доставка)
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  weight?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  dimensionsL?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  dimensionsW?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  dimensionsH?: number;
+
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
