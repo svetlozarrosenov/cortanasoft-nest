@@ -653,6 +653,11 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         labelKey: 'modules.settings.usersRoles',
         actions: ['view', 'create', 'edit', 'delete'],
       },
+      {
+        key: 'shipping',
+        labelKey: 'modules.settings.shipping',
+        actions: ['view', 'edit'],
+      },
     ],
   },
   {

@@ -26,13 +26,13 @@ export class ShippingController {
   // ==================== Config ====================
 
   @Get('config')
-  @RequireView('erp', 'orders')
+  @RequireView('settings', 'shipping')
   getConfig(@Param('companyId') companyId: string) {
     return this.shippingService.getConfig(companyId);
   }
 
   @Patch('config')
-  @RequireEdit('erp', 'orders')
+  @RequireEdit('settings', 'shipping')
   updateConfig(
     @Param('companyId') companyId: string,
     @Body() dto: UpdateShippingConfigDto,
@@ -41,19 +41,19 @@ export class ShippingController {
   }
 
   @Post('test-connection')
-  @RequireEdit('erp', 'orders')
+  @RequireEdit('settings', 'shipping')
   testConnection(@Param('companyId') companyId: string) {
     return this.shippingService.testConnection(companyId);
   }
 
   @Get('offices')
-  @RequireView('erp', 'orders')
+  @RequireView('settings', 'shipping')
   getOffices(@Param('companyId') companyId: string) {
     return this.shippingService.getOffices(companyId);
   }
 
   @Get('client-profiles')
-  @RequireView('erp', 'orders')
+  @RequireView('settings', 'shipping')
   getClientProfiles(@Param('companyId') companyId: string) {
     return this.shippingService.getClientProfiles(companyId);
   }
