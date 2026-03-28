@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Headers, ForbiddenException } from '@nestjs/common';
+import { Controller, Post, Body } from '@nestjs/common';
 import { IsString, IsEmail, IsOptional, MaxLength } from 'class-validator';
 import { DemoRequestsService } from './demo-requests.service';
 import { MailService } from '../mail/mail.service';
@@ -46,15 +46,7 @@ export class DemoRequestsController {
    * POST /api/demo-requests
    */
   @Post()
-  async create(
-    @Headers('x-internal-key') internalKey: string,
-    @Body() dto: CreateDemoRequestDto,
-  ) {
-    const expectedKey = process.env.INTERNAL_API_KEY;
-    if (expectedKey && internalKey !== expectedKey) {
-      throw new ForbiddenException('Невалидна заявка');
-    }
-
+  async create(@Body() dto: CreateDemoRequestDto) {
     const demoRequest = await this.demoRequestsService.create(dto);
     return {
       success: true,
