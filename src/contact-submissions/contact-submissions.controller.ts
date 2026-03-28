@@ -1,52 +1,62 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { PushNotificationsService } from '../push-notifications/push-notifications.service';
+import { Controller, Post, Body, Logger } from '@nestjs/common';
+import { ContactSubmissionsService } from './contact-submissions.service';
+import { CreateContactSubmissionDto } from './dto';
 import { MailService } from '../mail/mail.service';
-import {
-  CreateDemoRequestDto,
-  UpdateDemoRequestDto,
-  QueryDemoRequestsDto,
-} from './dto';
-import { Prisma, DemoRequestStatus } from '@prisma/client';
+import { PushNotificationsService } from '../push-notifications/push-notifications.service';
+import { PrismaService } from '../prisma/prisma.service';
 
-@Injectable()
-export class DemoRequestsService {
-  private readonly logger = new Logger(DemoRequestsService.name);
+/**
+ * Public controller for contact submissions (no auth required)
+ */
+@Controller('contact-submissions')
+export class ContactSubmissionsController {
+  private readonly logger = new Logger(ContactSubmissionsController.name);
 
   constructor(
-    private prisma: PrismaService,
-    private pushNotificationsService: PushNotificationsService,
+    private contactSubmissionsService: ContactSubmissionsService,
     private mailService: MailService,
+    private pushNotificationsService: PushNotificationsService,
+    private prisma: PrismaService,
   ) {}
 
   /**
-   * Create a new demo request (public endpoint, no auth required)
+   * Create a new contact submission from the public website
+   * POST /api/contact-submissions
    */
-  async create(dto: CreateDemoRequestDto) {
-    const demoRequest = await this.prisma.demoRequest.create({
-      data: {
-        name: dto.name,
-        email: dto.email,
-        phone: dto.phone,
-        companyName: dto.companyName,
-        employeeCount: dto.employeeCount,
-        message: dto.message,
-        status: DemoRequestStatus.NEW,
-      },
-    });
+  @Post()
+  async create(@Body() dto: CreateContactSubmissionDto) {
+    const submission = await this.contactSubmissionsService.create(dto);
 
     // Fire-and-forget: send notifications without blocking the response
     this.sendNotifications(dto).catch((error) => {
-      this.logger.error('Unexpected error in demo request notifications', error);
+      this.logger.error('Unexpected error in contact submission notifications', error);
     });
 
-    return demoRequest;
+    return {
+      success: true,
+      message: 'Съобщението е изпратено успешно! Ще се свържем с Вас скоро.',
+      submission: {
+        id: submission.id,
+        name: submission.name,
+        email: submission.email,
+      },
+    };
   }
 
   /**
-   * Send all notifications for a new demo request (runs in background)
+   * Send all notifications for a new contact submission (runs in background)
    */
-  private async sendNotifications(dto: CreateDemoRequestDto) {
+  private async sendNotifications(dto: CreateContactSubmissionDto) {
+    const subjectLabels: Record<string, string> = {
+      sales: 'Запитване за продажби',
+      demo: 'Заявка за демонстрация',
+      support: 'Техническа поддръжка',
+      partnership: 'Партньорство',
+      other: 'Друго',
+    };
+
+    const subjectLabel = subjectLabels[dto.subject] || dto.subject;
+
     // Push notification to super admins
     try {
       const ownerCompanyUsers = await this.prisma.userCompany.findMany({
@@ -58,170 +68,48 @@ export class DemoRequestsService {
 
       if (adminUserIds.length > 0) {
         await this.pushNotificationsService.sendToUsers(adminUserIds, {
-          title: 'Нова заявка за демо',
-          body: `${dto.companyName} - ${dto.name}`,
-          url: '/dashboard/admin/demo-requests',
+          title: 'Ново запитване от контактна форма',
+          body: `${dto.name} — ${subjectLabel}`,
+          url: '/dashboard/admin/contact-submissions',
         });
       }
     } catch (error) {
-      this.logger.error('Failed to send push notification for demo request', error);
+      this.logger.error('Failed to send push notification for contact submission', error);
     }
 
     // Email notification to admin
     try {
       await this.mailService.send({
         to: process.env.SMTP_FROM || process.env.SES_FROM || 'info@cortanasoft.com',
-        subject: `Нова заявка за демо от ${dto.companyName || dto.name}`,
-        html: this.buildAdminNotificationEmail(dto),
+        subject: `Контактна форма: ${subjectLabel} — ${dto.name}`,
+        html: this.buildAdminNotificationEmail(dto, subjectLabel),
       });
     } catch (error) {
-      this.logger.error('Failed to send admin email notification for demo request', error);
+      this.logger.error('Failed to send admin email notification for contact submission', error);
     }
 
     // Confirmation email to the requester
     try {
       await this.mailService.send({
         to: dto.email,
-        subject: 'CortanaSoft — Потвърждение за заявка за демо',
-        html: this.buildConfirmationEmail(dto.name, dto.companyName),
+        subject: 'CortanaSoft — Получихме Вашето запитване',
+        html: this.buildConfirmationEmail(dto.name, subjectLabel),
       });
     } catch (error) {
-      this.logger.error('Failed to send confirmation email to requester', error);
+      this.logger.error('Failed to send confirmation email for contact submission', error);
     }
   }
 
-  /**
-   * Get all demo requests with pagination and filters (admin only)
-   */
-  async findAll(query: QueryDemoRequestsDto) {
-    const {
-      search,
-      status,
-      page = 1,
-      limit = 10,
-      sortBy = 'createdAt',
-      sortOrder = 'desc',
-    } = query;
-
-    const where: Prisma.DemoRequestWhereInput = {
-      ...(search && {
-        OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { email: { contains: search, mode: 'insensitive' } },
-          { companyName: { contains: search, mode: 'insensitive' } },
-          { phone: { contains: search, mode: 'insensitive' } },
-        ],
-      }),
-      ...(status && { status }),
-    };
-
-    const [items, total] = await Promise.all([
-      this.prisma.demoRequest.findMany({
-        where,
-        orderBy: { [sortBy]: sortOrder },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.demoRequest.count({ where }),
-    ]);
-
-    return {
-      items,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
-  }
-
-  /**
-   * Get a single demo request by ID (admin only)
-   */
-  async findOne(id: string) {
-    const demoRequest = await this.prisma.demoRequest.findUnique({
-      where: { id },
-    });
-
-    if (!demoRequest) {
-      throw new NotFoundException('Demo request not found');
-    }
-
-    return demoRequest;
-  }
-
-  /**
-   * Update a demo request (admin only)
-   */
-  async update(id: string, dto: UpdateDemoRequestDto) {
-    await this.findOne(id);
-
-    return this.prisma.demoRequest.update({
-      where: { id },
-      data: {
-        ...(dto.status && { status: dto.status }),
-        ...(dto.notes !== undefined && { notes: dto.notes }),
-        ...(dto.contactedAt && { contactedAt: new Date(dto.contactedAt) }),
-        ...(dto.scheduledAt && { scheduledAt: new Date(dto.scheduledAt) }),
-        ...(dto.completedAt && { completedAt: new Date(dto.completedAt) }),
-      },
-    });
-  }
-
-  /**
-   * Delete a demo request (admin only)
-   */
-  async remove(id: string) {
-    await this.findOne(id);
-
-    return this.prisma.demoRequest.delete({
-      where: { id },
-    });
-  }
-
-  /**
-   * Get statistics for demo requests (admin only)
-   */
-  async getStats() {
-    const [total, byStatus] = await Promise.all([
-      this.prisma.demoRequest.count(),
-      this.prisma.demoRequest.groupBy({
-        by: ['status'],
-        _count: true,
-      }),
-    ]);
-
-    const statusCounts = byStatus.reduce(
-      (acc, item) => {
-        acc[item.status] = item._count;
-        return acc;
-      },
-      {} as Record<string, number>,
-    );
-
-    return {
-      total,
-      byStatus: statusCounts,
-    };
-  }
-
-  /**
-   * Get all possible statuses
-   */
-  getStatuses() {
-    return Object.values(DemoRequestStatus);
-  }
-
-  private buildAdminNotificationEmail(dto: CreateDemoRequestDto): string {
+  private buildAdminNotificationEmail(dto: CreateContactSubmissionDto, subjectLabel: string): string {
     const now = new Date();
     const timeStr = now.toLocaleString('bg-BG', { timeZone: 'Europe/Sofia', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
     const rows = [
       { label: 'Име', value: dto.name },
-      { label: 'Фирма', value: dto.companyName },
+      ...(dto.company ? [{ label: 'Компания', value: dto.company }] : []),
       { label: 'Email', value: dto.email, href: `mailto:${dto.email}` },
-      { label: 'Телефон', value: dto.phone, href: `tel:${dto.phone}` },
-      ...(dto.employeeCount ? [{ label: 'Брой служители', value: dto.employeeCount }] : []),
-      ...(dto.message ? [{ label: 'Съобщение', value: dto.message }] : []),
+      ...(dto.phone ? [{ label: 'Телефон', value: dto.phone, href: `tel:${dto.phone}` }] : []),
+      { label: 'Относно', value: subjectLabel },
     ];
 
     const tableRows = rows
@@ -246,12 +134,12 @@ export class DemoRequestsService {
 
           <!-- Header -->
           <tr>
-            <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:28px 40px;">
+            <td style="background:linear-gradient(135deg,#0ea5e9,#6366f1);padding:28px 40px;">
               <table width="100%" cellpadding="0" cellspacing="0">
                 <tr>
                   <td>
-                    <p style="margin:0;color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:1px;">Нова заявка за демо</p>
-                    <h1 style="margin:6px 0 0;color:#ffffff;font-size:22px;font-weight:700;">${dto.companyName || dto.name}</h1>
+                    <p style="margin:0;color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:1px;">Ново запитване</p>
+                    <h1 style="margin:6px 0 0;color:#ffffff;font-size:22px;font-weight:700;">${subjectLabel}</h1>
                   </td>
                   <td style="text-align:right;vertical-align:top;">
                     <p style="margin:0;color:rgba(255,255,255,0.7);font-size:13px;">${timeStr}</p>
@@ -270,21 +158,29 @@ export class DemoRequestsService {
             </td>
           </tr>
 
+          <!-- Message -->
+          <tr>
+            <td style="padding:0 40px 32px;">
+              <p style="margin:0 0 8px;color:#71717a;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Съобщение</p>
+              <div style="padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #f4f4f5;color:#18181b;font-size:15px;line-height:1.7;white-space:pre-wrap;">${dto.message}</div>
+            </td>
+          </tr>
+
           <!-- Actions -->
           <tr>
             <td style="padding:0 40px 32px;">
               <table cellpadding="0" cellspacing="0">
                 <tr>
                   <td style="padding-right:12px;">
-                    <a href="https://cortanasoft.com/dashboard/admin/demo-requests" style="display:inline-block;padding:12px 24px;background:#4f46e5;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;">
-                      Виж в админ панела
+                    <a href="mailto:${dto.email}?subject=Re: ${encodeURIComponent(subjectLabel)}" style="display:inline-block;padding:12px 24px;background:#4f46e5;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;">
+                      Отговори
                     </a>
                   </td>
-                  <td>
+                  ${dto.phone ? `<td>
                     <a href="tel:${dto.phone}" style="display:inline-block;padding:12px 24px;background:#f4f4f5;color:#3f3f46;font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;">
                       Обади се
                     </a>
-                  </td>
+                  </td>` : ''}
                 </tr>
               </table>
             </td>
@@ -298,7 +194,7 @@ export class DemoRequestsService {
 </html>`;
   }
 
-  private buildConfirmationEmail(name: string, companyName?: string): string {
+  private buildConfirmationEmail(name: string, subjectLabel: string): string {
     const firstName = name.split(' ')[0];
     return `
 <!DOCTYPE html>
@@ -324,7 +220,7 @@ export class DemoRequestsService {
               <h2 style="margin:0 0 20px;color:#18181b;font-size:22px;font-weight:600;">Здравейте, ${firstName}!</h2>
 
               <p style="margin:0 0 16px;color:#3f3f46;font-size:15px;line-height:1.7;">
-                Получихме заявката Ви за демонстрация${companyName ? ` на <strong>${companyName}</strong>` : ''}. Ще се свържем с Вас, за да уговорим удобно за Вас време.
+                Получихме Вашето запитване относно <strong>${subjectLabel}</strong>. Ще прегледаме съобщението Ви и ще се свържем с Вас възможно най-скоро.
               </p>
 
               <p style="margin:0 0 12px;color:#3f3f46;font-size:15px;line-height:1.7;font-weight:600;">
@@ -335,25 +231,25 @@ export class DemoRequestsService {
                 <tr>
                   <td style="padding:8px 0;color:#3f3f46;font-size:15px;line-height:1.6;">
                     <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;color:#ffffff;background:#4f46e5;border-radius:50%;font-size:13px;font-weight:700;vertical-align:middle;margin-right:8px;">1</span>
-                    Ще Ви се обадим, за да насрочим демонстрация
+                    Ще разгледаме Вашето запитване
                   </td>
                 </tr>
                 <tr>
                   <td style="padding:8px 0;color:#3f3f46;font-size:15px;line-height:1.6;">
                     <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;color:#ffffff;background:#4f46e5;border-radius:50%;font-size:13px;font-weight:700;vertical-align:middle;margin-right:8px;">2</span>
-                    30-минутна среща, фокусирана върху Вашите нужди
+                    Ще се свържем с Вас в рамките на 24 часа
                   </td>
                 </tr>
                 <tr>
                   <td style="padding:8px 0;color:#3f3f46;font-size:15px;line-height:1.6;">
                     <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;color:#ffffff;background:#4f46e5;border-radius:50%;font-size:13px;font-weight:700;vertical-align:middle;margin-right:8px;">3</span>
-                    Индивидуална оферта, съобразена с Вашите нужди
+                    Ще предложим решение, съобразено с Вашите нужди
                   </td>
                 </tr>
               </table>
 
               <p style="margin:0 0 28px;color:#3f3f46;font-size:15px;line-height:1.7;">
-                Ако искате да ускорите процеса или имате конкретни въпроси &mdash; пишете ни на
+                Ако имате допълнителни въпроси &mdash; пишете ни на
                 <a href="mailto:info@cortanasoft.com" style="color:#4f46e5;text-decoration:none;font-weight:500;">info@cortanasoft.com</a>
                 или се обадете на <a href="tel:+359876649967" style="color:#4f46e5;text-decoration:none;font-weight:500;">+359 87 664 9967</a>.
               </p>

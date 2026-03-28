@@ -2827,3 +2827,31 @@ model IssuedWarranty {
   @@index([customerId])
   @@map("issued_warranties")
 }
+
+// ==================== КОНТАКТНА ФОРМА ====================
+
+enum ContactSubmissionStatus {
+  NEW
+  READ
+  REPLIED
+  ARCHIVED
+}
+
+model ContactSubmission {
+  id        String                  @id @default(cuid())
+  name      String
+  email     String
+  company   String?
+  phone     String?
+  subject   String
+  message   String                  @db.Text
+  status    ContactSubmissionStatus @default(NEW)
+  notes     String?                 @db.Text
+  repliedAt DateTime?
+  createdAt DateTime                @default(now())
+  updatedAt DateTime                @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("contact_submissions")
+}

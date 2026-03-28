@@ -43,6 +43,7 @@ import { StockTransfersModule } from './stock-transfers/stock-transfers.module';
 import { MailModule } from './mail/mail.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { WarrantiesModule } from './warranties/warranties.module';
+import { ContactSubmissionsModule } from './contact-submissions/contact-submissions.module';
 
 @Module({
   imports: [
@@ -93,6 +94,7 @@ import { WarrantiesModule } from './warranties/warranties.module';
     MailModule,
     ShippingModule,
     WarrantiesModule,
+    ContactSubmissionsModule,
   ],
   controllers: [],
   providers: [],
