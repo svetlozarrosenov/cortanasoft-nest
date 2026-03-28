@@ -73,21 +73,25 @@ export class DemoRequestsController {
       other: 'Друго',
     };
 
-    await this.mailService.send({
-      to: process.env.SMTP_FROM || process.env.SES_FROM || 'info@cortanasoft.com',
-      subject: `Контактна форма: ${subjectLabels[dto.subject] || dto.subject} — ${dto.name}`,
-      html: `
-        <h2>Ново запитване от контактната форма</h2>
-        <table style="border-collapse:collapse;font-family:sans-serif;">
-          <tr><td style="padding:6px 12px;font-weight:bold;">Име:</td><td style="padding:6px 12px;">${dto.name}</td></tr>
-          <tr><td style="padding:6px 12px;font-weight:bold;">Email:</td><td style="padding:6px 12px;">${dto.email}</td></tr>
-          <tr><td style="padding:6px 12px;font-weight:bold;">Компания:</td><td style="padding:6px 12px;">${dto.company || '—'}</td></tr>
-          <tr><td style="padding:6px 12px;font-weight:bold;">Телефон:</td><td style="padding:6px 12px;">${dto.phone || '—'}</td></tr>
-          <tr><td style="padding:6px 12px;font-weight:bold;">Относно:</td><td style="padding:6px 12px;">${subjectLabels[dto.subject] || dto.subject}</td></tr>
-          <tr><td style="padding:6px 12px;font-weight:bold;">Съобщение:</td><td style="padding:6px 12px;">${dto.message}</td></tr>
-        </table>
-      `,
-    });
+    try {
+      await this.mailService.send({
+        to: process.env.SMTP_FROM || process.env.SES_FROM || 'info@cortanasoft.com',
+        subject: `Контактна форма: ${subjectLabels[dto.subject] || dto.subject} — ${dto.name}`,
+        html: `
+          <h2>Ново запитване от контактната форма</h2>
+          <table style="border-collapse:collapse;font-family:sans-serif;">
+            <tr><td style="padding:6px 12px;font-weight:bold;">Име:</td><td style="padding:6px 12px;">${dto.name}</td></tr>
+            <tr><td style="padding:6px 12px;font-weight:bold;">Email:</td><td style="padding:6px 12px;">${dto.email}</td></tr>
+            <tr><td style="padding:6px 12px;font-weight:bold;">Компания:</td><td style="padding:6px 12px;">${dto.company || '—'}</td></tr>
+            <tr><td style="padding:6px 12px;font-weight:bold;">Телефон:</td><td style="padding:6px 12px;">${dto.phone || '—'}</td></tr>
+            <tr><td style="padding:6px 12px;font-weight:bold;">Относно:</td><td style="padding:6px 12px;">${subjectLabels[dto.subject] || dto.subject}</td></tr>
+            <tr><td style="padding:6px 12px;font-weight:bold;">Съобщение:</td><td style="padding:6px 12px;">${dto.message}</td></tr>
+          </table>
+        `,
+      });
+    } catch (error) {
+      console.error('Failed to send contact form email:', error);
+    }
 
     return {
       success: true,
