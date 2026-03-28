@@ -1031,8 +1031,10 @@ enum CustomerType {
   COMPANY // Юридическо лице (фирма)
 }
 
-// Етап на клиента (обединява Lead → Prospect → Active)
+// Етап на клиента (Lead → Prospect → Active)
 enum CustomerStage {
+  LEAD // Лийд (некласифициран потенциален клиент)
+  PROSPECT // Перспективен (квалифициран лийд)
   ACTIVE // Активен клиент
   INACTIVE // Неактивен
 }
