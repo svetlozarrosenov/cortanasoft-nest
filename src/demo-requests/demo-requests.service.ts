@@ -60,17 +60,7 @@ export class DemoRequestsService {
       await this.mailService.send({
         to: process.env.SMTP_FROM || process.env.SES_FROM || 'info@cortanasoft.com',
         subject: `Нова заявка за демо от ${dto.companyName || dto.name}`,
-        html: `
-          <h2>Нова заявка за демо</h2>
-          <table style="border-collapse:collapse;font-family:sans-serif;">
-            <tr><td style="padding:6px 12px;font-weight:bold;">Име:</td><td style="padding:6px 12px;">${dto.name}</td></tr>
-            <tr><td style="padding:6px 12px;font-weight:bold;">Email:</td><td style="padding:6px 12px;">${dto.email}</td></tr>
-            <tr><td style="padding:6px 12px;font-weight:bold;">Телефон:</td><td style="padding:6px 12px;">${dto.phone || '—'}</td></tr>
-            <tr><td style="padding:6px 12px;font-weight:bold;">Фирма:</td><td style="padding:6px 12px;">${dto.companyName || '—'}</td></tr>
-            <tr><td style="padding:6px 12px;font-weight:bold;">Брой служители:</td><td style="padding:6px 12px;">${dto.employeeCount || '—'}</td></tr>
-            <tr><td style="padding:6px 12px;font-weight:bold;">Съобщение:</td><td style="padding:6px 12px;">${dto.message || '—'}</td></tr>
-          </table>
-        `,
+        html: this.buildAdminNotificationEmail(dto),
       });
     } catch (error) {
       this.logger.error('Failed to send admin email notification for demo request', error);
@@ -80,7 +70,7 @@ export class DemoRequestsService {
     try {
       await this.mailService.send({
         to: dto.email,
-        subject: 'Получихме вашата заявка за демо — CortanaSoft',
+        subject: 'CortanaSoft — Потвърждение за заявка за демо',
         html: this.buildConfirmationEmail(dto.name, dto.companyName),
       });
     } catch (error) {
@@ -211,6 +201,93 @@ export class DemoRequestsService {
     return Object.values(DemoRequestStatus);
   }
 
+  private buildAdminNotificationEmail(dto: CreateDemoRequestDto): string {
+    const now = new Date();
+    const timeStr = now.toLocaleString('bg-BG', { timeZone: 'Europe/Sofia', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    const rows = [
+      { label: 'Име', value: dto.name },
+      { label: 'Фирма', value: dto.companyName },
+      { label: 'Email', value: dto.email, href: `mailto:${dto.email}` },
+      { label: 'Телефон', value: dto.phone, href: `tel:${dto.phone}` },
+      ...(dto.employeeCount ? [{ label: 'Брой служители', value: dto.employeeCount }] : []),
+      ...(dto.message ? [{ label: 'Съобщение', value: dto.message }] : []),
+    ];
+
+    const tableRows = rows
+      .map(
+        (r) => `
+        <tr>
+          <td style="padding:12px 16px;color:#71717a;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;vertical-align:top;border-bottom:1px solid #f4f4f5;">${r.label}</td>
+          <td style="padding:12px 16px;color:#18181b;font-size:15px;border-bottom:1px solid #f4f4f5;">${r.href ? `<a href="${r.href}" style="color:#4f46e5;text-decoration:none;">${r.value}</a>` : r.value}</td>
+        </tr>`,
+      )
+      .join('');
+
+    return `
+<!DOCTYPE html>
+<html lang="bg">
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background-color:#f4f4f5;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:28px 40px;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <p style="margin:0;color:rgba(255,255,255,0.8);font-size:13px;text-transform:uppercase;letter-spacing:1px;">Нова заявка за демо</p>
+                    <h1 style="margin:6px 0 0;color:#ffffff;font-size:22px;font-weight:700;">${dto.companyName || dto.name}</h1>
+                  </td>
+                  <td style="text-align:right;vertical-align:top;">
+                    <p style="margin:0;color:rgba(255,255,255,0.7);font-size:13px;">${timeStr}</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Data -->
+          <tr>
+            <td style="padding:32px 40px;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                ${tableRows}
+              </table>
+            </td>
+          </tr>
+
+          <!-- Actions -->
+          <tr>
+            <td style="padding:0 40px 32px;">
+              <table cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="padding-right:12px;">
+                    <a href="https://cortanasoft.com/dashboard/admin/demo-requests" style="display:inline-block;padding:12px 24px;background:#4f46e5;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;">
+                      Виж в админ панела
+                    </a>
+                  </td>
+                  <td>
+                    <a href="tel:${dto.phone}" style="display:inline-block;padding:12px 24px;background:#f4f4f5;color:#3f3f46;font-size:14px;font-weight:600;text-decoration:none;border-radius:8px;">
+                      Обади се
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+  }
+
   private buildConfirmationEmail(name: string, companyName?: string): string {
     const firstName = name.split(' ')[0];
     return `
@@ -237,44 +314,38 @@ export class DemoRequestsService {
               <h2 style="margin:0 0 20px;color:#18181b;font-size:22px;font-weight:600;">Здравейте, ${firstName}!</h2>
 
               <p style="margin:0 0 16px;color:#3f3f46;font-size:15px;line-height:1.7;">
-                Благодарим ви, че проявихте интерес към <strong>CortanaSoft</strong>${companyName ? ` от името на <strong>${companyName}</strong>` : ''}. Получихме вашата заявка за демонстрация и екипът ни ще се свърже с вас в рамките на <strong>1 работен ден</strong>.
+                Получихме заявката ви за демонстрация${companyName ? ` на <strong>${companyName}</strong>` : ''}. Ще се свържем с вас, за да уговорим удобно за вас време.
               </p>
 
-              <p style="margin:0 0 16px;color:#3f3f46;font-size:15px;line-height:1.7;">
-                По време на демото ще ви покажем как платформата може да помогне за:
+              <p style="margin:0 0 12px;color:#3f3f46;font-size:15px;line-height:1.7;font-weight:600;">
+                Какво следва?
               </p>
 
               <table cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
                 <tr>
-                  <td style="padding:6px 0;color:#3f3f46;font-size:15px;">
-                    <span style="display:inline-block;width:24px;text-align:center;color:#4f46e5;font-weight:bold;">&#10003;</span>
-                    Управление на продажби, фактуриране и складови наличности
+                  <td style="padding:8px 0;color:#3f3f46;font-size:15px;line-height:1.6;">
+                    <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;color:#ffffff;background:#4f46e5;border-radius:50%;font-size:13px;font-weight:700;vertical-align:middle;margin-right:8px;">1</span>
+                    Ще ви се обадим, за да насрочим демонстрация
                   </td>
                 </tr>
                 <tr>
-                  <td style="padding:6px 0;color:#3f3f46;font-size:15px;">
-                    <span style="display:inline-block;width:24px;text-align:center;color:#4f46e5;font-weight:bold;">&#10003;</span>
-                    Проследяване на клиенти, сделки и комуникация
+                  <td style="padding:8px 0;color:#3f3f46;font-size:15px;line-height:1.6;">
+                    <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;color:#ffffff;background:#4f46e5;border-radius:50%;font-size:13px;font-weight:700;vertical-align:middle;margin-right:8px;">2</span>
+                    30-минутна среща, фокусирана върху вашите нужди
                   </td>
                 </tr>
                 <tr>
-                  <td style="padding:6px 0;color:#3f3f46;font-size:15px;">
-                    <span style="display:inline-block;width:24px;text-align:center;color:#4f46e5;font-weight:bold;">&#10003;</span>
-                    HR процеси — служители, отпуски, заплати, присъствие
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding:6px 0;color:#3f3f46;font-size:15px;">
-                    <span style="display:inline-block;width:24px;text-align:center;color:#4f46e5;font-weight:bold;">&#10003;</span>
-                    Производство, складови операции и доставки с Еконт
+                  <td style="padding:8px 0;color:#3f3f46;font-size:15px;line-height:1.6;">
+                    <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;color:#ffffff;background:#4f46e5;border-radius:50%;font-size:13px;font-weight:700;vertical-align:middle;margin-right:8px;">3</span>
+                    Безплатен пробен период, ако решите да продължите
                   </td>
                 </tr>
               </table>
 
               <p style="margin:0 0 28px;color:#3f3f46;font-size:15px;line-height:1.7;">
-                Ако имате въпроси междувременно, не се колебайте да ни пишете на
+                Ако искате да ускорите процеса или имате конкретни въпроси &mdash; пишете ни на
                 <a href="mailto:info@cortanasoft.com" style="color:#4f46e5;text-decoration:none;font-weight:500;">info@cortanasoft.com</a>
-                или да се обадите на <a href="tel:+359876649967" style="color:#4f46e5;text-decoration:none;font-weight:500;">+359 87 664 9967</a>.
+                или се обадете на <a href="tel:+359876649967" style="color:#4f46e5;text-decoration:none;font-weight:500;">+359 87 664 9967</a>.
               </p>
 
               <!-- CTA -->

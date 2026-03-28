@@ -17,7 +17,8 @@ export class MailService {
         pass: process.env.SMTP_PASS,
       },
     });
-    this.from = process.env.SMTP_FROM || process.env.SES_FROM || 'info@cortanasoft.com';
+    const fromAddress = process.env.SMTP_FROM || process.env.SES_FROM || 'info@cortanasoft.com';
+    this.from = `CortanaSoft <${fromAddress}>`;
   }
 
   async send(options: {

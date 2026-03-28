@@ -48,6 +48,7 @@ import { WarrantiesModule } from './warranties/warranties.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: ['.env.local', '.env'],
     }),
     ScheduleModule.forRoot(),
     PrismaModule,
