@@ -8,15 +8,13 @@ export class CreateDemoRequestDto {
   @IsEmail()
   email: string;
 
-  @IsOptional()
   @IsString()
   @MaxLength(20)
-  phone?: string;
+  phone: string;
 
-  @IsOptional()
   @IsString()
   @MaxLength(200)
-  companyName?: string;
+  companyName: string;
 
   @IsOptional()
   @IsString()
