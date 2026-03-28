@@ -88,6 +88,11 @@ export class CreateProductDto {
   @IsOptional()
   categoryId?: string;
 
+  // Гаранционен шаблон
+  @IsString()
+  @IsOptional()
+  warrantyTemplateId?: string;
+
   // Валута за покупна цена
   @IsString()
   @IsOptional()

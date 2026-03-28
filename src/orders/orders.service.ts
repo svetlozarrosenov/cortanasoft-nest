@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto, UpdateOrderDto, QueryOrdersDto } from './dto';
 import { Prisma, OrderStatus } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
+import { WarrantiesService } from '../warranties/warranties.service';
 
 /** Round a number to 2 decimal places to avoid floating-point drift */
 function round2(n: number): number {
@@ -33,7 +34,10 @@ const ORDER_INCLUDE = {
 
 @Injectable()
 export class OrdersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private warrantiesService: WarrantiesService,
+  ) {}
 
   private async generateOrderNumber(
     companyId: string,
@@ -193,6 +197,13 @@ export class OrdersService {
         include: ORDER_INCLUDE,
       });
     });
+
+    // Auto-create issued warranties for products with warranty templates
+    try {
+      await this.warrantiesService.createWarrantiesForOrder(companyId, order.id);
+    } catch {
+      // Non-blocking: warranty creation failure should not fail the order
+    }
 
     // Auto-confirm: deduct inventory and set to CONFIRMED
     if (dto.autoConfirm) {

@@ -194,6 +194,8 @@ model Company {
   stockTransfers     StockTransfer[]
   shippingConfigs    ShippingConfig[]
   shipments          Shipment[]
+  warrantyTemplates  WarrantyTemplate[]
+  issuedWarranties   IssuedWarranty[]
 
   @@map("companies")
 }
@@ -395,6 +397,9 @@ model User {
   // Трансфери между складове
   responsibleStockTransfers StockTransfer[] @relation("StockTransferResponsible")
   createdStockTransfers     StockTransfer[] @relation("StockTransferCreator")
+
+  // Гаранции
+  createdWarrantyTemplates WarrantyTemplate[] @relation("WarrantyTemplateCreator")
 
   // Terms acceptance
   termsAcceptedAt DateTime?
@@ -812,6 +817,9 @@ model Product {
   categoryId String?
   category   ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
+  warrantyTemplateId String?
+  warrantyTemplate   WarrantyTemplate? @relation(fields: [warrantyTemplateId], references: [id], onDelete: SetNull)
+
   createdById String?
   createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
@@ -832,6 +840,9 @@ model Product {
 
   // Трансфери между складове
   stockTransferItems StockTransferItem[]
+
+  // Гаранции
+  issuedWarranties IssuedWarranty[]
 
   @@unique([companyId, sku])
   @@index([companyId, name])
@@ -1098,11 +1109,12 @@ model Customer {
   assignedToId String?
   assignedTo   User?   @relation("CustomerAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
 
-  orders         Order[]
-  invoices       Invoice[]
-  contacts       Contact[]
-  deals          Deal[]
-  stockDocuments StockDocument[]
+  orders             Order[]
+  invoices           Invoice[]
+  contacts           Contact[]
+  deals              Deal[]
+  stockDocuments     StockDocument[]
+  issuedWarranties   IssuedWarranty[]
 
   @@unique([companyId, eik])
   @@index([companyId, type])
@@ -1398,10 +1410,11 @@ model Order {
   createdById String?
   createdBy   User?   @relation("OrderCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
-  items          OrderItem[]
-  invoices       Invoice[]
-  stockDocuments StockDocument[]
-  shipments      Shipment[]
+  items            OrderItem[]
+  invoices         Invoice[]
+  stockDocuments   StockDocument[]
+  shipments        Shipment[]
+  issuedWarranties IssuedWarranty[]
 
   @@unique([companyId, orderNumber])
   @@index([companyId, status])
@@ -2732,4 +2745,85 @@ model Shipment {
   @@index([companyId, status])
   @@index([orderId])
   @@map("shipments")
+}
+
+// ==================== ГАРАНЦИИ ====================
+
+enum WarrantyType {
+  STANDARD // Стандартна
+  EXTENDED // Разширена
+  LIMITED  // Ограничена
+}
+
+enum WarrantyDurationUnit {
+  DAYS
+  MONTHS
+  YEARS
+}
+
+enum IssuedWarrantyStatus {
+  ACTIVE  // Активна
+  EXPIRED // Изтекла
+  VOIDED  // Анулирана
+}
+
+// Гаранционен шаблон
+model WarrantyTemplate {
+  id           String              @id @default(cuid())
+  name         String              // Име на гаранцията
+  type         WarrantyType        @default(STANDARD)
+  duration     Int                 // Числова продължителност
+  durationUnit WarrantyDurationUnit @default(MONTHS)
+  description  String?             @db.Text // Условия (rich text HTML)
+  isActive     Boolean             @default(true)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  companyId   String
+  company     Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdById String?
+  createdBy   User?   @relation("WarrantyTemplateCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Релации
+  products         Product[]
+  issuedWarranties IssuedWarranty[]
+
+  @@index([companyId])
+  @@map("warranty_templates")
+}
+
+// Издадена гаранция (автоматично при поръчка)
+model IssuedWarranty {
+  id              String               @id @default(cuid())
+  warrantyNumber  String               // Автоматичен номер (WAR-2026-00001)
+  startDate       DateTime             // Начална дата (дата на поръчката)
+  endDate         DateTime             // Крайна дата (изчислена)
+  status          IssuedWarrantyStatus @default(ACTIVE)
+  serialNumber    String?              // Сериен номер (ако е серийно проследен)
+  notes           String?              @db.Text
+  quantity        Decimal              @default(1) @db.Decimal(10, 3) // Количество
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  warrantyTemplateId String
+  warrantyTemplate   WarrantyTemplate @relation(fields: [warrantyTemplateId], references: [id], onDelete: Restrict)
+
+  orderId String
+  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, warrantyNumber])
+  @@index([companyId, status])
+  @@index([orderId])
+  @@index([customerId])
+  @@map("issued_warranties")
 }

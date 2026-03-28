@@ -538,6 +538,51 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
     ],
   },
   {
+    key: 'warranties',
+    labelKey: 'modules.warranties.title',
+    icon: 'ShieldCheck',
+    pages: [
+      {
+        key: 'templates',
+        labelKey: 'modules.warranties.templates',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'templatesList',
+            labelKey: 'modules.warranties.templatesList',
+            columns: [
+              { key: 'name', labelKey: 'common.name' },
+              { key: 'type', labelKey: 'common.type' },
+              { key: 'duration', labelKey: 'modules.warranties.duration' },
+              { key: 'status', labelKey: 'common.status' },
+              { key: 'createdAt', labelKey: 'common.createdAt' },
+            ],
+          },
+        ],
+      },
+      {
+        key: 'issued',
+        labelKey: 'modules.warranties.issued',
+        actions: ['view', 'edit'],
+        tables: [
+          {
+            key: 'issuedList',
+            labelKey: 'modules.warranties.issuedList',
+            columns: [
+              { key: 'warrantyNumber', labelKey: 'modules.warranties.warrantyNumber' },
+              { key: 'product', labelKey: 'modules.erp.product' },
+              { key: 'customer', labelKey: 'modules.crm.customer' },
+              { key: 'startDate', labelKey: 'modules.warranties.startDate' },
+              { key: 'endDate', labelKey: 'modules.warranties.endDate' },
+              { key: 'remaining', labelKey: 'modules.warranties.remaining' },
+              { key: 'status', labelKey: 'common.status' },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
     key: 'bi',
     labelKey: 'modules.bi.title',
     icon: 'BarChart3',

@@ -67,6 +67,7 @@ export class ProductsService {
       },
       include: {
         category: true,
+        warrantyTemplate: true,
         purchaseCurrency: true,
         saleCurrency: true,
         createdBy: {
@@ -160,6 +161,7 @@ export class ProductsService {
       },
       include: {
         category: true,
+        warrantyTemplate: true,
         purchaseCurrency: true,
         saleCurrency: true,
         createdBy: {
@@ -219,6 +221,7 @@ export class ProductsService {
       data: dto,
       include: {
         category: true,
+        warrantyTemplate: true,
         purchaseCurrency: true,
         saleCurrency: true,
         createdBy: {
