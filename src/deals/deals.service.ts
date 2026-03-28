@@ -17,6 +17,8 @@ const DEAL_INCLUDE = {
       companyName: true,
       firstName: true,
       lastName: true,
+      email: true,
+      phone: true,
     },
   },
   lead: {
@@ -24,6 +26,8 @@ const DEAL_INCLUDE = {
       id: true,
       firstName: true,
       lastName: true,
+      email: true,
+      phone: true,
     },
   },
   currency: true,
@@ -178,6 +182,7 @@ export class DealsService {
             eik: true,
             vatNumber: true,
             molName: true,
+            notes: true,
           },
         },
         lead: {
