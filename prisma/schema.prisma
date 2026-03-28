@@ -1033,8 +1033,6 @@ enum CustomerType {
 
 // Етап на клиента (Lead → Prospect → Active)
 enum CustomerStage {
-  LEAD // Лийд (некласифициран потенциален клиент)
-  PROSPECT // Перспективен (квалифициран лийд)
   ACTIVE // Активен клиент
   INACTIVE // Неактивен
 }
