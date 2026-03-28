@@ -35,7 +35,19 @@ export class DemoRequestsService {
       },
     });
 
-    // Send push notification to all super admin users (users in OWNER companies)
+    // Fire-and-forget: send notifications without blocking the response
+    this.sendNotifications(dto).catch((error) => {
+      this.logger.error('Unexpected error in demo request notifications', error);
+    });
+
+    return demoRequest;
+  }
+
+  /**
+   * Send all notifications for a new demo request (runs in background)
+   */
+  private async sendNotifications(dto: CreateDemoRequestDto) {
+    // Push notification to super admins
     try {
       const ownerCompanyUsers = await this.prisma.userCompany.findMany({
         where: { company: { role: 'OWNER' } },
@@ -55,7 +67,7 @@ export class DemoRequestsService {
       this.logger.error('Failed to send push notification for demo request', error);
     }
 
-    // Send email notification to admin
+    // Email notification to admin
     try {
       await this.mailService.send({
         to: process.env.SMTP_FROM || process.env.SES_FROM || 'info@cortanasoft.com',
@@ -66,7 +78,7 @@ export class DemoRequestsService {
       this.logger.error('Failed to send admin email notification for demo request', error);
     }
 
-    // Send confirmation email to the requester
+    // Confirmation email to the requester
     try {
       await this.mailService.send({
         to: dto.email,
@@ -76,8 +88,6 @@ export class DemoRequestsService {
     } catch (error) {
       this.logger.error('Failed to send confirmation email to requester', error);
     }
-
-    return demoRequest;
   }
 
   /**
