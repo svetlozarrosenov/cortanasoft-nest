@@ -22,6 +22,7 @@ import { AssignUserToCompanyDto } from './dto/assign-user-to-company.dto';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompanyPlansService } from '../company-plans/company-plans.service';
+import { MailService } from '../mail/mail.service';
 import {
   CreateCompanyPlanDto,
   UpdateCompanyPlanDto,
@@ -35,6 +36,7 @@ export class AdminController {
     private adminService: AdminService,
     private prisma: PrismaService,
     private companyPlansService: CompanyPlansService,
+    private mailService: MailService,
   ) {}
 
   // ==================== Companies ====================
@@ -410,5 +412,169 @@ export class AdminController {
       success: true,
       message: 'API key deleted successfully',
     };
+  }
+
+  // ==================== Welcome Email ====================
+
+  @Post('companies/:companyId/users/:userId/send-welcome-email')
+  async sendWelcomeEmail(
+    @Param('companyId') companyId: string,
+    @Param('userId') userId: string,
+    @Body('password') password?: string,
+  ) {
+    const result = await this.adminService.prepareWelcomeEmail(
+      companyId,
+      userId,
+      password,
+    );
+
+    await this.mailService.send({
+      to: result.user.email,
+      subject: `Добре дошли в ${result.company.name} — CortanaSoft`,
+      html: this.buildWelcomeEmail(
+        result.user.firstName,
+        result.user.email,
+        result.company.name,
+        result.password,
+        result.roleName,
+      ),
+    });
+
+    return {
+      success: true,
+      message: 'Welcome email sent',
+      ...(result.wasGenerated && { generatedPassword: result.password }),
+    };
+  }
+
+  private buildWelcomeEmail(
+    firstName: string,
+    email: string,
+    companyName: string,
+    password: string,
+    roleName: string,
+  ): string {
+    return `
+<!DOCTYPE html>
+<html lang="bg">
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background-color:#f4f4f5;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:36px 40px;text-align:center;">
+              <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;letter-spacing:-0.5px;">Добре дошли в CortanaSoft</h1>
+              <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:14px;">ERP &bull; CRM &bull; HR &bull; Управление на проекти</p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:40px;">
+              <h2 style="margin:0 0 20px;color:#18181b;font-size:22px;font-weight:600;">Здравейте, ${firstName}!</h2>
+
+              <p style="margin:0 0 24px;color:#3f3f46;font-size:15px;line-height:1.7;">
+                Вашият акаунт в <strong>${companyName}</strong> е готов за използване. По-долу ще намерите данните за вход в платформата.
+              </p>
+
+              <!-- Credentials Box -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#f8f7ff;border:1px solid #e0e0ff;border-radius:10px;">
+                <tr>
+                  <td style="padding:24px 28px;">
+                    <p style="margin:0 0 4px;color:#71717a;font-size:12px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Данни за вход</p>
+                    <table cellpadding="0" cellspacing="0" style="margin-top:12px;">
+                      <tr>
+                        <td style="padding:6px 0;color:#71717a;font-size:14px;font-weight:600;width:80px;">URL:</td>
+                        <td style="padding:6px 0;color:#18181b;font-size:14px;"><a href="https://cortanasoft.com/login" style="color:#4f46e5;text-decoration:none;font-weight:500;">https://cortanasoft.com/login</a></td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;color:#71717a;font-size:14px;font-weight:600;width:80px;">Email:</td>
+                        <td style="padding:6px 0;color:#18181b;font-size:14px;">${email}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;color:#71717a;font-size:14px;font-weight:600;width:80px;">Парола:</td>
+                        <td style="padding:6px 0;color:#18181b;font-size:15px;font-weight:700;font-family:'Courier New',monospace;letter-spacing:0.5px;">${password}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;color:#71717a;font-size:14px;font-weight:600;width:80px;">Роля:</td>
+                        <td style="padding:6px 0;color:#18181b;font-size:14px;">${roleName}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Security Note -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;background-color:#fef9c3;border:1px solid #fde68a;border-radius:8px;">
+                <tr>
+                  <td style="padding:14px 20px;">
+                    <p style="margin:0;color:#92400e;font-size:13px;line-height:1.6;">
+                      &#128274; <strong>Препоръчваме Ви да смените паролата си при първо влизане.</strong>
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- What you can do -->
+              <p style="margin:0 0 12px;color:#3f3f46;font-size:15px;line-height:1.7;font-weight:600;">
+                Какво можете да правите?
+              </p>
+
+              <table cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
+                <tr>
+                  <td style="padding:8px 0;color:#3f3f46;font-size:15px;line-height:1.6;">
+                    <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;color:#ffffff;background:#4f46e5;border-radius:50%;font-size:13px;font-weight:700;vertical-align:middle;margin-right:8px;">1</span>
+                    Управлявайте клиенти, поръчки и фактури
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 0;color:#3f3f46;font-size:15px;line-height:1.6;">
+                    <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;color:#ffffff;background:#4f46e5;border-radius:50%;font-size:13px;font-weight:700;vertical-align:middle;margin-right:8px;">2</span>
+                    Следете складови наличности в реално време
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:8px 0;color:#3f3f46;font-size:15px;line-height:1.6;">
+                    <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;color:#ffffff;background:#4f46e5;border-radius:50%;font-size:13px;font-weight:700;vertical-align:middle;margin-right:8px;">3</span>
+                    Координирайте екипа си с вградения чат
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA -->
+              <table cellpadding="0" cellspacing="0" style="margin:0 auto;">
+                <tr>
+                  <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);border-radius:10px;">
+                    <a href="https://cortanasoft.com/login" target="_blank" style="display:inline-block;padding:14px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">
+                      Вход в платформата &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#fafafa;padding:24px 40px;border-top:1px solid #e4e4e7;">
+              <p style="margin:0 0 4px;color:#71717a;font-size:13px;text-align:center;">
+                CortanaSoft &mdash; Вашият бизнес, една платформа.
+              </p>
+              <p style="margin:0;color:#a1a1aa;font-size:12px;text-align:center;">
+                &copy; ${new Date().getFullYear()} CortanaSoft. Всички права запазени.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
   }
 }

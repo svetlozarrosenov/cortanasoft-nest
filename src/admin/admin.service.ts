@@ -935,4 +935,61 @@ export class AdminService {
 
     await this.prisma.apiKey.delete({ where: { id: apiKeyId } });
   }
+
+  // ==================== Welcome Email ====================
+
+  async prepareWelcomeEmail(
+    companyId: string,
+    userId: string,
+    providedPassword?: string,
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+    });
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
+    // Get the user's role in this company
+    const userCompany = await this.prisma.userCompany.findUnique({
+      where: {
+        userId_companyId: {
+          userId,
+          companyId,
+        },
+      },
+      include: {
+        role: true,
+      },
+    });
+
+    const roleName = userCompany?.role?.name || 'Потребител';
+
+    // Generate or use provided password
+    const password =
+      providedPassword || crypto.randomBytes(9).toString('base64').slice(0, 12);
+    const wasGenerated = !providedPassword;
+
+    // Hash and update the user's password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+
+    return {
+      user,
+      company,
+      roleName,
+      password,
+      wasGenerated,
+    };
+  }
 }
