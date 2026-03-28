@@ -1,21 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import * as nodemailer from 'nodemailer';
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private readonly ses: SESClient;
+  private readonly transporter: nodemailer.Transporter;
   private readonly from: string;
 
   constructor() {
-    this.ses = new SESClient({
-      region: process.env.SES_REGION || 'eu-central-1',
-      credentials: {
-        accessKeyId: process.env.SES_ACCESS_KEY_ID!,
-        secretAccessKey: process.env.SES_SECRET_ACCESS_KEY!,
+    this.transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST || 'email-smtp.eu-central-1.amazonaws.com',
+      port: Number(process.env.SMTP_PORT) || 465,
+      secure: true,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
       },
     });
-    this.from = process.env.SES_FROM || 'info@cortanasoft.com';
+    this.from = process.env.SMTP_FROM || process.env.SES_FROM || 'info@cortanasoft.com';
   }
 
   async send(options: {
@@ -27,21 +29,13 @@ export class MailService {
     const toAddresses = Array.isArray(options.to) ? options.to : [options.to];
 
     try {
-      await this.ses.send(
-        new SendEmailCommand({
-          Source: options.from || this.from,
-          Destination: {
-            ToAddresses: toAddresses,
-          },
-          Message: {
-            Subject: { Data: options.subject, Charset: 'UTF-8' },
-            Body: {
-              Html: { Data: options.html, Charset: 'UTF-8' },
-            },
-          },
-        }),
-      );
-      this.logger.log(`Email sent to ${toAddresses.join(', ')}`);
+      const info = await this.transporter.sendMail({
+        from: options.from || this.from,
+        to: toAddresses.join(', '),
+        subject: options.subject,
+        html: options.html,
+      });
+      this.logger.log(`Email sent to ${toAddresses.join(', ')} (messageId: ${info.messageId})`);
     } catch (error) {
       this.logger.error(`Failed to send email to ${toAddresses.join(', ')}`, error);
       throw error;

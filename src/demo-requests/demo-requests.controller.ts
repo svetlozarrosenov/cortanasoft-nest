@@ -74,7 +74,7 @@ export class DemoRequestsController {
     };
 
     await this.mailService.send({
-      to: process.env.SES_FROM || 'info@cortanasoft.com',
+      to: process.env.SMTP_FROM || process.env.SES_FROM || 'info@cortanasoft.com',
       subject: `Контактна форма: ${subjectLabels[dto.subject] || dto.subject} — ${dto.name}`,
       html: `
         <h2>Ново запитване от контактната форма</h2>
