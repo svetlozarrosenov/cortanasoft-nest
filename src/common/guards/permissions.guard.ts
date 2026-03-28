@@ -12,6 +12,7 @@ import { ErrorMessages } from '../constants/error-messages';
 
 // Metadata key for permissions
 export const PERMISSIONS_KEY = 'permissions';
+export const PERMISSIONS_ANY_KEY = 'permissions_any';
 
 // Permission requirement interface
 export interface PermissionRequirement {
@@ -20,9 +21,13 @@ export interface PermissionRequirement {
   action: 'view' | 'create' | 'edit' | 'delete';
 }
 
-// Decorator to set required permissions on a route
+// Decorator to set required permissions on a route (ALL must pass)
 export const RequirePermissions = (...permissions: PermissionRequirement[]) =>
   SetMetadata(PERMISSIONS_KEY, permissions);
+
+// Decorator: at least ONE of the listed permissions must pass
+export const RequireAnyPermission = (...permissions: PermissionRequirement[]) =>
+  SetMetadata(PERMISSIONS_ANY_KEY, permissions);
 
 // Shorthand decorators for common operations
 export const RequireView = (module: string, page: string) =>
@@ -50,8 +55,15 @@ export class PermissionsGuard implements CanActivate {
       PermissionRequirement[]
     >(PERMISSIONS_KEY, [context.getHandler(), context.getClass()]);
 
+    const anyPermissions = this.reflector.getAllAndOverride<
+      PermissionRequirement[]
+    >(PERMISSIONS_ANY_KEY, [context.getHandler(), context.getClass()]);
+
     // If no permissions required, allow access
-    if (!requiredPermissions || requiredPermissions.length === 0) {
+    if (
+      (!requiredPermissions || requiredPermissions.length === 0) &&
+      (!anyPermissions || anyPermissions.length === 0)
+    ) {
       return true;
     }
 
@@ -93,12 +105,30 @@ export class PermissionsGuard implements CanActivate {
     const permissions = userCompany.role
       .permissions as unknown as RolePermissions;
 
-    // Check all required permissions
-    for (const required of requiredPermissions) {
-      if (!this.hasPermission(permissions, required)) {
+    // Check all required permissions (AND logic)
+    if (requiredPermissions) {
+      for (const required of requiredPermissions) {
+        if (!this.hasPermission(permissions, required)) {
+          throw new ForbiddenException(
+            ErrorMessages.common.missingPermission(
+              `${required.module}.${required.page}.${required.action}`,
+            ),
+          );
+        }
+      }
+    }
+
+    // Check any permissions (OR logic) — at least one must pass
+    if (anyPermissions && anyPermissions.length > 0) {
+      const hasAny = anyPermissions.some((req) =>
+        this.hasPermission(permissions, req),
+      );
+      if (!hasAny) {
         throw new ForbiddenException(
           ErrorMessages.common.missingPermission(
-            `${required.module}.${required.page}.${required.action}`,
+            anyPermissions
+              .map((r) => `${r.module}.${r.page}.${r.action}`)
+              .join(' | '),
           ),
         );
       }

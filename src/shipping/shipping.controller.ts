@@ -16,6 +16,7 @@ import {
   PermissionsGuard,
   RequireView,
   RequireEdit,
+  RequireAnyPermission,
 } from '../common/guards/permissions.guard';
 
 @Controller('companies/:companyId/shipping')
@@ -47,7 +48,10 @@ export class ShippingController {
   }
 
   @Get('offices')
-  @RequireView('settings', 'shipping')
+  @RequireAnyPermission(
+    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'erp', page: 'orders', action: 'view' },
+  )
   getOffices(@Param('companyId') companyId: string) {
     return this.shippingService.getOffices(companyId);
   }
