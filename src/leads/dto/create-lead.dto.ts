@@ -5,7 +5,7 @@ import {
   MaxLength,
 } from 'class-validator';
 
-export class CreateContactDto {
+export class CreateLeadDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)

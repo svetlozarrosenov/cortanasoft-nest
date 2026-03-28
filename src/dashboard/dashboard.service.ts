@@ -65,9 +65,9 @@ export class DashboardService {
     // Get CRM stats
     const [totalContacts, totalDeals, newContactsThisMonth] = await Promise.all(
       [
-        this.prisma.contact.count({ where: { companyId } }),
+        this.prisma.lead.count({ where: { companyId } }),
         this.prisma.deal.count({ where: { companyId } }),
-        this.prisma.contact.count({
+        this.prisma.lead.count({
           where: { companyId, createdAt: { gte: startOfMonth } },
         }),
       ],
@@ -239,7 +239,7 @@ export class DashboardService {
     // Get recent activities from various sources
     const [recentContacts, recentOrders, recentTickets] = await Promise.all([
       // Recent contacts
-      this.prisma.contact.findMany({
+      this.prisma.lead.findMany({
         where: { companyId },
         orderBy: { createdAt: 'desc' },
         take: 5,

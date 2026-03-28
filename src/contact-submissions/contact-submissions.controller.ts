@@ -34,7 +34,7 @@ export class ContactSubmissionsController {
 
     return {
       success: true,
-      message: 'Съобщението е изпратено успешно! Ще се свържем с Вас скоро.',
+      message: 'Съобщението е изпратено успешно!',
       submission: {
         id: submission.id,
         name: submission.name,
@@ -220,7 +220,7 @@ export class ContactSubmissionsController {
               <h2 style="margin:0 0 20px;color:#18181b;font-size:22px;font-weight:600;">Здравейте, ${firstName}!</h2>
 
               <p style="margin:0 0 16px;color:#3f3f46;font-size:15px;line-height:1.7;">
-                Получихме Вашето запитване относно <strong>${subjectLabel}</strong>. Ще прегледаме съобщението Ви и ще се свържем с Вас възможно най-скоро.
+                Получихме Вашето запитване относно <strong>${subjectLabel}</strong>. Ще прегледаме съобщението Ви.
               </p>
 
               <p style="margin:0 0 12px;color:#3f3f46;font-size:15px;line-height:1.7;font-weight:600;">
@@ -237,7 +237,7 @@ export class ContactSubmissionsController {
                 <tr>
                   <td style="padding:8px 0;color:#3f3f46;font-size:15px;line-height:1.6;">
                     <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;color:#ffffff;background:#4f46e5;border-radius:50%;font-size:13px;font-weight:700;vertical-align:middle;margin-right:8px;">2</span>
-                    Ще се свържем с Вас в рамките на 24 часа
+                    Ще се свържем с Вас
                   </td>
                 </tr>
                 <tr>

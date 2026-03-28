@@ -91,12 +91,6 @@ export class AuthController {
     };
   }
 
-  @Get('ws-token')
-  @UseGuards(JwtAuthGuard)
-  async getWsToken(@CurrentUser() user: any) {
-    return { token: this.authService.createWsToken(user.id) };
-  }
-
   @Post('change-password')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)

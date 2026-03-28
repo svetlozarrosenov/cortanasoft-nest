@@ -8,7 +8,7 @@ import {
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
-export class QueryContactsDto {
+export class QueryLeadsDto {
   @IsOptional()
   @IsString()
   search?: string;

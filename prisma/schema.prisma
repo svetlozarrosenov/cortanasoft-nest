@@ -170,7 +170,7 @@ model Company {
   orders             Order[]
   customers          Customer[]
   invoices           Invoice[]
-  contacts           Contact[]
+  leads              Lead[]
   deals              Deal[]
   dealTasks          DealTask[]
   departments        Department[]
@@ -1113,7 +1113,7 @@ model Customer {
 
   orders             Order[]
   invoices           Invoice[]
-  contacts           Contact[]
+  leads              Lead[]
   deals              Deal[]
   stockDocuments     StockDocument[]
   issuedWarranties   IssuedWarranty[]
@@ -1129,7 +1129,7 @@ model Customer {
 // ==================== КОНТАКТИ (CRM) ====================
 
 // Контактно лице (свързано с клиент/фирма)
-model Contact {
+model Lead {
   id String @id @default(cuid())
 
   // Имена
@@ -1174,7 +1174,7 @@ model Contact {
   @@index([customerId])
   @@index([companyId, lastName])
   @@index([companyId, email])
-  @@map("contacts")
+  @@map("leads")
 }
 
 // Размер на компанията
@@ -1241,9 +1241,9 @@ model Deal {
   customerId String?
   customer   Customer? @relation(fields: [customerId], references: [id])
 
-  // Свързано контактно лице
-  contactId String?
-  contact   Contact? @relation(fields: [contactId], references: [id])
+  // Свързан лийд
+  leadId    String?
+  lead      Lead? @relation(fields: [leadId], references: [id])
 
   // Отговорник
   assignedToId String?

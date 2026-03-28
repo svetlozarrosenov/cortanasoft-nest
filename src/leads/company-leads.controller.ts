@@ -12,8 +12,8 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import type { Response } from 'express';
-import { ContactsService } from './contacts.service';
-import { CreateContactDto, UpdateContactDto, QueryContactsDto } from './dto';
+import { LeadsService } from './leads.service';
+import { CreateLeadDto, UpdateLeadDto, QueryLeadsDto } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import {
@@ -26,38 +26,38 @@ import {
 import { ExportService } from '../common/export/export.service';
 import type { ExportFormat } from '../common/export/export.service';
 
-@Controller('companies/:companyId/contacts')
+@Controller('companies/:companyId/leads')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)
-export class CompanyContactsController {
+export class CompanyLeadsController {
   constructor(
-    private readonly contactsService: ContactsService,
+    private readonly leadsService: LeadsService,
     private readonly exportService: ExportService,
   ) {}
 
   @Post()
   @RequireCreate('crm', 'contacts')
-  create(@Param('companyId') companyId: string, @Body() dto: CreateContactDto) {
-    return this.contactsService.create(companyId, dto);
+  create(@Param('companyId') companyId: string, @Body() dto: CreateLeadDto) {
+    return this.leadsService.create(companyId, dto);
   }
 
   @Get()
   @RequireView('crm', 'contacts')
   findAll(
     @Param('companyId') companyId: string,
-    @Query() query: QueryContactsDto,
+    @Query() query: QueryLeadsDto,
   ) {
-    return this.contactsService.findAll(companyId, query);
+    return this.leadsService.findAll(companyId, query);
   }
 
   @Get('export')
   @RequireView('crm', 'contacts')
   async export(
     @Param('companyId') companyId: string,
-    @Query() query: QueryContactsDto,
+    @Query() query: QueryLeadsDto,
     @Query('format') format: ExportFormat = 'xlsx',
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { data } = await this.contactsService.findAll(companyId, { ...query, page: 1, limit: 100000 } as any);
+    const { data } = await this.leadsService.findAll(companyId, { ...query, page: 1, limit: 100000 } as any);
 
     const columns = [
       { header: 'First Name', key: 'firstName', width: 20 },
@@ -66,11 +66,11 @@ export class CompanyContactsController {
       { header: 'Phone', key: 'phone', width: 15 },
       { header: 'Company', key: 'customer.companyName', width: 25 },
     ];
-    const buffer = await this.exportService.generateFile(columns, data, format, 'Contacts');
+    const buffer = await this.exportService.generateFile(columns, data, format, 'Leads');
     const ext = format === 'csv' ? 'csv' : 'xlsx';
     res.set({
       'Content-Type': format === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': `attachment; filename="contacts-${new Date().toISOString().slice(0, 10)}.${ext}"`,
+      'Content-Disposition': `attachment; filename="leads-${new Date().toISOString().slice(0, 10)}.${ext}"`,
     });
     return new StreamableFile(buffer);
   }
@@ -81,13 +81,13 @@ export class CompanyContactsController {
     @Param('companyId') companyId: string,
     @Param('customerId') customerId: string,
   ) {
-    return this.contactsService.findByCustomer(companyId, customerId);
+    return this.leadsService.findByCustomer(companyId, customerId);
   }
 
   @Get(':id')
   @RequireView('crm', 'contacts')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.contactsService.findOne(companyId, id);
+    return this.leadsService.findOne(companyId, id);
   }
 
   @Patch(':id')
@@ -95,20 +95,20 @@ export class CompanyContactsController {
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
-    @Body() dto: UpdateContactDto,
+    @Body() dto: UpdateLeadDto,
   ) {
-    return this.contactsService.update(companyId, id, dto);
+    return this.leadsService.update(companyId, id, dto);
   }
 
   @Delete(':id')
   @RequireDelete('crm', 'contacts')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.contactsService.remove(companyId, id);
+    return this.leadsService.remove(companyId, id);
   }
 
   @Post(':id/set-primary')
   @RequireEdit('crm', 'contacts')
   setAsPrimary(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.contactsService.setAsPrimary(companyId, id);
+    return this.leadsService.setAsPrimary(companyId, id);
   }
 }

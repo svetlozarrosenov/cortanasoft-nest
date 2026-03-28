@@ -1,3 +1,12 @@
+import { config } from 'dotenv';
+import { existsSync } from 'fs';
+
+// Load .env.local first (if exists), then .env as fallback
+// Must run before any module imports that read process.env
+if (existsSync('.env.local')) {
+  config({ path: '.env.local', override: true });
+}
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import cookieParser from 'cookie-parser';

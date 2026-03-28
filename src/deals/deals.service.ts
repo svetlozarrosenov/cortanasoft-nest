@@ -19,7 +19,7 @@ const DEAL_INCLUDE = {
       lastName: true,
     },
   },
-  contact: {
+  lead: {
     select: {
       id: true,
       firstName: true,
@@ -164,21 +164,41 @@ export class DealsService {
           select: {
             id: true,
             type: true,
+            stage: true,
             companyName: true,
             firstName: true,
             lastName: true,
             email: true,
             phone: true,
+            mobile: true,
+            address: true,
+            city: true,
+            industry: true,
+            website: true,
+            eik: true,
+            vatNumber: true,
+            molName: true,
           },
         },
-        contact: {
+        lead: {
           select: {
             id: true,
             firstName: true,
             lastName: true,
             email: true,
             phone: true,
+            mobile: true,
             jobTitle: true,
+            department: true,
+            linkedIn: true,
+            customer: {
+              select: {
+                id: true,
+                companyName: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
           },
         },
         currency: true,

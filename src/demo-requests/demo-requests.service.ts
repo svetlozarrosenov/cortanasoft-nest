@@ -324,7 +324,7 @@ export class DemoRequestsService {
               <h2 style="margin:0 0 20px;color:#18181b;font-size:22px;font-weight:600;">Здравейте, ${firstName}!</h2>
 
               <p style="margin:0 0 16px;color:#3f3f46;font-size:15px;line-height:1.7;">
-                Получихме заявката Ви за демонстрация${companyName ? ` на <strong>${companyName}</strong>` : ''}. Ще се свържем с Вас, за да уговорим удобно за Вас време.
+                Получихме заявката Ви за демонстрация${companyName ? ` на <strong>${companyName}</strong>` : ''}.
               </p>
 
               <p style="margin:0 0 12px;color:#3f3f46;font-size:15px;line-height:1.7;font-weight:600;">

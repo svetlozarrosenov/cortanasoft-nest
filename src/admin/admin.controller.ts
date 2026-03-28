@@ -478,7 +478,7 @@ export class AdminController {
               <h2 style="margin:0 0 20px;color:#18181b;font-size:22px;font-weight:600;">Здравейте, ${firstName}!</h2>
 
               <p style="margin:0 0 24px;color:#3f3f46;font-size:15px;line-height:1.7;">
-                Вашият акаунт в <strong>${companyName}</strong> е готов за използване. По-долу ще намерите данните за вход в платформата.
+                Вашият акаунт в <strong>cortanasoft.com</strong> е готов за използване. По-долу ще намерите данните за вход в платформата.
               </p>
 
               <!-- Credentials Box -->
@@ -515,32 +515,6 @@ export class AdminController {
                     <p style="margin:0;color:#92400e;font-size:13px;line-height:1.6;">
                       &#128274; <strong>Препоръчваме Ви да смените паролата си при първо влизане.</strong>
                     </p>
-                  </td>
-                </tr>
-              </table>
-
-              <!-- What you can do -->
-              <p style="margin:0 0 12px;color:#3f3f46;font-size:15px;line-height:1.7;font-weight:600;">
-                Какво можете да правите?
-              </p>
-
-              <table cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
-                <tr>
-                  <td style="padding:8px 0;color:#3f3f46;font-size:15px;line-height:1.6;">
-                    <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;color:#ffffff;background:#4f46e5;border-radius:50%;font-size:13px;font-weight:700;vertical-align:middle;margin-right:8px;">1</span>
-                    Управлявайте клиенти, поръчки и фактури
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding:8px 0;color:#3f3f46;font-size:15px;line-height:1.6;">
-                    <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;color:#ffffff;background:#4f46e5;border-radius:50%;font-size:13px;font-weight:700;vertical-align:middle;margin-right:8px;">2</span>
-                    Следете складови наличности в реално време
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding:8px 0;color:#3f3f46;font-size:15px;line-height:1.6;">
-                    <span style="display:inline-block;width:28px;height:28px;line-height:28px;text-align:center;color:#ffffff;background:#4f46e5;border-radius:50%;font-size:13px;font-weight:700;vertical-align:middle;margin-right:8px;">3</span>
-                    Координирайте екипа си с вградения чат
                   </td>
                 </tr>
               </table>

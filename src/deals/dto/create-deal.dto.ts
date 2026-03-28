@@ -45,7 +45,7 @@ export class CreateDealDto {
 
   @IsOptional()
   @IsString()
-  contactId?: string;
+  leadId?: string;
 
   @IsOptional()
   @IsString()

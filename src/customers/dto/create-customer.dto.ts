@@ -145,8 +145,8 @@ export class CreateCustomerDto {
   @IsOptional()
   assignedToId?: string;
 
-  // Link to a lead (contact) when converting
+  // Link to a lead when converting
   @IsString()
   @IsOptional()
-  contactId?: string;
+  leadId?: string;
 }

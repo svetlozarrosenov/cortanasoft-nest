@@ -18,7 +18,7 @@ export class DemoRequestsController {
     const demoRequest = await this.demoRequestsService.create(dto);
     return {
       success: true,
-      message: 'Заявката е изпратена успешно. Ще се свържем с вас скоро!',
+      message: 'Заявката е изпратена успешно!',
       demoRequest: {
         id: demoRequest.id,
         name: demoRequest.name,

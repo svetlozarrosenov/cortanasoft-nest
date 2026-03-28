@@ -84,10 +84,10 @@ export class CustomersService {
       },
     });
 
-    // Link the contact (lead) to the new customer
-    if (dto.contactId) {
-      await this.prisma.contact.updateMany({
-        where: { id: dto.contactId, companyId, customerId: null },
+    // Link the lead to the new customer
+    if (dto.leadId) {
+      await this.prisma.lead.updateMany({
+        where: { id: dto.leadId, companyId, customerId: null },
         data: { customerId: customer.id },
       });
     }

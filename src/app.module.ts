@@ -15,7 +15,7 @@ import { CurrenciesModule } from './currencies/currencies.module';
 import { CountriesModule } from './countries/countries.module';
 import { SettlementsModule } from './settlements/settlements.module';
 import { CustomersModule } from './customers/customers.module';
-import { ContactsModule } from './contacts/contacts.module';
+import { LeadsModule } from './leads/leads.module';
 import { DealsModule } from './deals/deals.module';
 import { EmployeesModule } from './employees/employees.module';
 import { DepartmentsModule } from './departments/departments.module';
@@ -66,7 +66,7 @@ import { ContactSubmissionsModule } from './contact-submissions/contact-submissi
     CountriesModule,
     SettlementsModule,
     CustomersModule,
-    ContactsModule,
+    LeadsModule,
     DealsModule,
     EmployeesModule,
     DepartmentsModule,
