@@ -386,7 +386,6 @@ export class InventoryService {
     // Build product filter
     const productWhere: Prisma.ProductWhereInput = {
       companyId,
-      trackInventory: true,
       ...(categoryId && { categoryId }),
       ...(search && {
         OR: [
