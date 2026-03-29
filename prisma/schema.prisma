@@ -135,6 +135,9 @@ model Company {
   // МОЛ (Материално отговорно лице) / Управител
   molName String? // Име на МОЛ/Управител
 
+  // Лого
+  logoUrl String? // URL към логото на компанията (Cloudflare R2)
+
   // Контакти
   phone   String? // Телефон
   email   String? // Имейл на фирмата

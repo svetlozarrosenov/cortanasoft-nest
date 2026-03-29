@@ -20,6 +20,10 @@ async function bootstrap() {
 
   app.use(cookieParser());
 
+  // Trust proxy headers (X-Forwarded-For) so rate limiting uses real client IPs
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.set('trust proxy', 1);
+
   app.enableCors({
     origin: (origin, callback) => {
       const allowedOrigins = [

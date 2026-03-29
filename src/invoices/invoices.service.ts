@@ -21,27 +21,32 @@ export class InvoicesService {
   private async generateInvoiceNumber(
     companyId: string,
     typePrefix: string = 'INV',
+    tx?: any,
   ): Promise<string> {
-    const year = new Date().getFullYear();
-    const prefix = `${typePrefix}-${year}-`;
+    const db = tx || this.prisma;
 
-    const lastInvoice = await this.prisma.invoice.findFirst({
-      where: {
-        companyId,
-        invoiceNumber: { startsWith: prefix },
-      },
-      orderBy: { invoiceNumber: 'desc' },
-    });
-
-    let nextNumber = 1;
-    if (lastInvoice) {
-      const lastNumber = parseInt(
-        lastInvoice.invoiceNumber.split('-').pop() || '0',
-      );
-      nextNumber = lastNumber + 1;
+    if (typePrefix !== 'INV') {
+      // Proforma invoices: PRO-0000000001, PRO-0000000002, ...
+      const prefix = `${typePrefix}-`;
+      const count = await db.invoice.count({
+        where: {
+          companyId,
+          invoiceNumber: { startsWith: prefix },
+        },
+      });
+      return `${prefix}${(count + 1).toString().padStart(10, '0')}`;
     }
 
-    return `${prefix}${nextNumber.toString().padStart(5, '0')}`;
+    // Regular invoices: 0000000001, 0000000002, ...
+    // Count all non-proforma invoices for this company
+    const count = await db.invoice.count({
+      where: {
+        companyId,
+        NOT: { invoiceNumber: { startsWith: 'PRO-' } },
+      },
+    });
+
+    return (count + 1).toString().padStart(10, '0');
   }
 
   private readonly invoiceInclude = {
@@ -100,9 +105,6 @@ export class InvoicesService {
       throw new BadRequestException(ErrorMessages.invoices.canOnlyCreateFromConfirmed);
     }
 
-    // Generate invoice number
-    const invoiceNumber = await this.generateInvoiceNumber(companyId);
-
     // Get customer EIK and VAT from customer record if available
     let customerEik: string | null = null;
     let customerVatNumber: string | null = null;
@@ -118,44 +120,48 @@ export class InvoicesService {
       customerPostalCode = customerPostalCode || order.customer.postalCode;
     }
 
-    // Create invoice with items
-    return this.prisma.invoice.create({
-      data: {
-        invoiceNumber,
-        invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(),
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
-        type: 'REGULAR',
-        status: 'ISSUED',
-        orderId: order.id,
-        customerId: order.customerId,
-        customerName: order.customerName,
-        customerEik,
-        customerVatNumber,
-        customerAddress,
-        customerCity,
-        customerPostalCode,
-        subtotal: order.subtotal,
-        vatAmount: order.vatAmount,
-        discount: order.discount,
-        total: order.total,
-        paymentMethod: order.paymentMethod,
-        notes: dto.notes,
-        companyId,
-        createdById: userId,
-        items: {
-          create: order.items.map((item) => ({
-            productId: item.productId,
-            description: item.product?.name || 'Артикул',
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            vatRate: item.vatRate,
-            discount: item.discount,
-            total: item.subtotal,
-            orderItemId: item.id,
-          })),
+    // Generate number + create in a transaction to prevent duplicates
+    return this.prisma.$transaction(async (tx) => {
+      const invoiceNumber = await this.generateInvoiceNumber(companyId, 'INV', tx);
+
+      return tx.invoice.create({
+        data: {
+          invoiceNumber,
+          invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(),
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+          type: 'REGULAR',
+          status: 'ISSUED',
+          orderId: order.id,
+          customerId: order.customerId,
+          customerName: order.customerName,
+          customerEik,
+          customerVatNumber,
+          customerAddress,
+          customerCity,
+          customerPostalCode,
+          subtotal: order.subtotal,
+          vatAmount: order.vatAmount,
+          discount: order.discount,
+          total: order.total,
+          paymentMethod: order.paymentMethod,
+          notes: dto.notes,
+          companyId,
+          createdById: userId,
+          items: {
+            create: order.items.map((item) => ({
+              productId: item.productId,
+              description: item.product?.name || 'Артикул',
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              vatRate: item.vatRate,
+              discount: item.discount,
+              total: item.subtotal,
+              orderItemId: item.id,
+            })),
+          },
         },
-      },
-      include: this.invoiceInclude,
+        include: this.invoiceInclude,
+      });
     });
   }
 
@@ -194,9 +200,6 @@ export class InvoicesService {
       }
     }
 
-    // Generate proforma number
-    const invoiceNumber = await this.generateInvoiceNumber(companyId, 'PRO');
-
     // Use company currency as default
     const currencyId = dto.currencyId || company.currencyId;
 
@@ -232,34 +235,39 @@ export class InvoicesService {
     const invoiceDiscount = dto.discount ?? 0;
     const total = subtotal + vatAmount - invoiceDiscount;
 
-    return this.prisma.invoice.create({
-      data: {
-        invoiceNumber,
-        invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(),
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
-        type: 'PROFORMA',
-        status: 'DRAFT',
-        customerId: dto.customerId || null,
-        customerName: dto.customerName,
-        customerEik: dto.customerEik || null,
-        customerVatNumber: dto.customerVatNumber || null,
-        customerAddress: dto.customerAddress || null,
-        customerCity: dto.customerCity || null,
-        customerPostalCode: dto.customerPostalCode || null,
-        subtotal,
-        vatAmount,
-        discount: invoiceDiscount,
-        total,
-        paymentMethod: dto.paymentMethod || null,
-        notes: dto.notes || null,
-        currencyId,
-        companyId,
-        createdById: userId,
-        items: {
-          create: itemsData,
+    // Generate number + create in a transaction to prevent duplicates
+    return this.prisma.$transaction(async (tx) => {
+      const invoiceNumber = await this.generateInvoiceNumber(companyId, 'PRO', tx);
+
+      return tx.invoice.create({
+        data: {
+          invoiceNumber,
+          invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(),
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+          type: 'PROFORMA',
+          status: 'DRAFT',
+          customerId: dto.customerId || null,
+          customerName: dto.customerName,
+          customerEik: dto.customerEik || null,
+          customerVatNumber: dto.customerVatNumber || null,
+          customerAddress: dto.customerAddress || null,
+          customerCity: dto.customerCity || null,
+          customerPostalCode: dto.customerPostalCode || null,
+          subtotal,
+          vatAmount,
+          discount: invoiceDiscount,
+          total,
+          paymentMethod: dto.paymentMethod || null,
+          notes: dto.notes || null,
+          currencyId,
+          companyId,
+          createdById: userId,
+          items: {
+            create: itemsData,
+          },
         },
-      },
-      include: this.invoiceInclude,
+        include: this.invoiceInclude,
+      });
     });
   }
 

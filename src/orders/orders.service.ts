@@ -29,7 +29,7 @@ const ORDER_INCLUDE = {
       location: true,
     },
   },
-  _count: { select: { items: true } },
+  _count: { select: { items: true, invoices: true } },
 } as const;
 
 @Injectable()

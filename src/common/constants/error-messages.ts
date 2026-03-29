@@ -314,6 +314,11 @@ export function getPrismaErrorMessage(error: any): string {
     return `Липсва задължителна стойност за ${field}`;
   }
 
-  // Return code for debugging unknown errors
-  return `Грешка в базата данни (код: ${error.code}). Моля, проверете въведените данни.`;
+  // P2024 - Connection pool timeout
+  if (error.code === 'P2024') {
+    return 'Сървърът е временно претоварен. Моля, опитайте отново след малко.';
+  }
+
+  // Generic fallback - don't expose internal error codes to users
+  return 'Възникна неочаквана грешка. Моля, опитайте отново.';
 }
