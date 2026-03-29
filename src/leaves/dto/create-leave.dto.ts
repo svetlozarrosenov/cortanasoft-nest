@@ -13,8 +13,6 @@ export enum LeaveType {
   UNPAID = 'UNPAID',
   MATERNITY = 'MATERNITY',
   PATERNITY = 'PATERNITY',
-  BEREAVEMENT = 'BEREAVEMENT',
-  STUDY = 'STUDY',
   OTHER = 'OTHER',
 }
 
