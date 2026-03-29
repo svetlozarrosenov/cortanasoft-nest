@@ -165,7 +165,7 @@ export class OrdersService {
         data: {
           orderNumber,
           orderDate: dto.orderDate ? new Date(dto.orderDate) : new Date(),
-          status: 'PENDING',
+          status: 'DRAFT',
           paymentStatus: (dto.paymentStatus as 'PENDING' | 'PARTIAL' | 'PAID') || 'PENDING',
           customerId: dto.customerId,
           customerName: dto.customerName,
@@ -287,10 +287,10 @@ export class OrdersService {
 
   // Valid status transitions
   private readonly validTransitions: Record<OrderStatus, OrderStatus[]> = {
-    DRAFT: ['PENDING', 'CANCELLED'],
-    PENDING: ['CONFIRMED', 'CANCELLED'],
+    DRAFT: ['CONFIRMED', 'CANCELLED'],
+    PENDING: ['CONFIRMED', 'CANCELLED'], // legacy
     CONFIRMED: ['PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'],
-    PROCESSING: ['CONFIRMED', 'SHIPPED', 'DELIVERED', 'CANCELLED'],
+    PROCESSING: ['SHIPPED', 'DELIVERED', 'CANCELLED'],
     SHIPPED: ['DELIVERED', 'CANCELLED'],
     DELIVERED: [],
     CANCELLED: [],
@@ -307,7 +307,7 @@ export class OrdersService {
       }
 
       // Route to confirm/cancel for transitions with inventory side effects
-      if (dto.status === 'CONFIRMED' && (order.status === 'PENDING' || order.status === 'PROCESSING')) {
+      if (dto.status === 'CONFIRMED' && (order.status === 'DRAFT' || order.status === 'PENDING' || order.status === 'PROCESSING')) {
         return this.confirm(companyId, id);
       }
       if (dto.status === 'CANCELLED') {
@@ -323,7 +323,7 @@ export class OrdersService {
     }
 
     // Allow payment status updates for confirmed+ orders
-    if (order.status !== 'PENDING' && order.status !== 'PROCESSING') {
+    if (order.status !== 'DRAFT' && order.status !== 'PENDING' && order.status !== 'PROCESSING') {
       if (dto.paymentStatus) {
         return this.prisma.order.update({
           where: { id },
@@ -440,7 +440,7 @@ export class OrdersService {
   async confirm(companyId: string, id: string) {
     const order = await this.findOne(companyId, id);
 
-    if (order.status !== 'PENDING' && order.status !== 'PROCESSING') {
+    if (order.status !== 'DRAFT' && order.status !== 'PENDING' && order.status !== 'PROCESSING') {
       throw new BadRequestException(ErrorMessages.orders.canOnlyConfirmPending);
     }
 
@@ -654,7 +654,7 @@ export class OrdersService {
   async remove(companyId: string, id: string) {
     const order = await this.findOne(companyId, id);
 
-    if (order.status !== 'PENDING') {
+    if (order.status !== 'DRAFT' && order.status !== 'PENDING') {
       throw new BadRequestException(ErrorMessages.orders.canOnlyDeletePending);
     }
 
