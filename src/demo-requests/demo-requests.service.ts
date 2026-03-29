@@ -70,7 +70,7 @@ export class DemoRequestsService {
     // Email notification to admin
     try {
       await this.mailService.send({
-        to: process.env.SMTP_FROM || process.env.SES_FROM || 'info@cortanasoft.com',
+        to: process.env.ADMIN_EMAIL || 'svetlozarrosenov@gmail.com',
         subject: `Нова заявка за демо от ${dto.companyName || dto.name}`,
         html: this.buildAdminNotificationEmail(dto),
       });

@@ -80,7 +80,7 @@ export class ContactSubmissionsController {
     // Email notification to admin
     try {
       await this.mailService.send({
-        to: process.env.SMTP_FROM || process.env.SES_FROM || 'info@cortanasoft.com',
+        to: process.env.ADMIN_EMAIL || 'svetlozarrosenov@gmail.com',
         subject: `Контактна форма: ${subjectLabel} — ${dto.name}`,
         html: this.buildAdminNotificationEmail(dto, subjectLabel),
       });
