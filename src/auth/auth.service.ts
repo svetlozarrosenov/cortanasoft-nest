@@ -254,29 +254,78 @@ export class AuthService {
       await this.mailService.send({
         to: user.email,
         subject: 'Възстановяване на парола — CortanaSoft',
-        html: `
-          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
-            <div style="text-align: center; margin-bottom: 32px;">
-              <h1 style="color: #ffffff; font-size: 24px; margin: 0;">CortanaSoft</h1>
-            </div>
-            <div style="background: #18181b; border: 1px solid #27272a; border-radius: 16px; padding: 32px;">
-              <h2 style="color: #ffffff; font-size: 18px; margin: 0 0 16px;">Забравена парола</h2>
-              <p style="color: #a1a1aa; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">
-                Здравейте, ${user.firstName}. Получихме заявка за промяна на паролата ви.
-                Натиснете бутона по-долу, за да зададете нова парола.
+        html: `<!DOCTYPE html>
+<html lang="bg">
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background-color:#f4f4f5;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f5;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:36px 40px;text-align:center;">
+              <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;letter-spacing:-0.5px;">CortanaSoft</h1>
+              <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:14px;">Възстановяване на парола</p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:40px;">
+              <h2 style="margin:0 0 20px;color:#18181b;font-size:22px;font-weight:600;">Здравейте, ${user.firstName}!</h2>
+
+              <p style="margin:0 0 24px;color:#3f3f46;font-size:15px;line-height:1.7;">
+                Получихме заявка за промяна на паролата Ви. Натиснете бутона по-долу, за да зададете нова парола.
               </p>
-              <div style="text-align: center; margin: 24px 0;">
-                <a href="${resetUrl}"
-                   style="display: inline-block; background: linear-gradient(to right, #6366f1, #8b5cf6); color: #ffffff; text-decoration: none; padding: 12px 32px; border-radius: 12px; font-weight: 600; font-size: 14px;">
-                  Задай нова парола
-                </a>
-              </div>
-              <p style="color: #71717a; font-size: 12px; line-height: 1.6; margin: 24px 0 0;">
-                Линкът е валиден 1 час. Ако не сте заявили промяна на паролата, игнорирайте този имейл.
+
+              <!-- CTA Button -->
+              <table cellpadding="0" cellspacing="0" style="margin:0 auto 28px;">
+                <tr>
+                  <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);border-radius:10px;">
+                    <a href="${resetUrl}" target="_blank" style="display:inline-block;padding:14px 40px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">
+                      Задай нова парола &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Security Note -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background-color:#fef9c3;border:1px solid #fde68a;border-radius:8px;">
+                <tr>
+                  <td style="padding:14px 20px;">
+                    <p style="margin:0;color:#92400e;font-size:13px;line-height:1.6;">
+                      &#128274; <strong>Линкът е валиден 1 час.</strong> Ако не сте заявили промяна на паролата, игнорирайте този имейл — паролата Ви няма да бъде променена.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0;color:#a1a1aa;font-size:12px;line-height:1.6;text-align:center;">
+                Ако бутонът не работи, копирайте този линк в браузъра:<br>
+                <a href="${resetUrl}" style="color:#4f46e5;text-decoration:none;word-break:break-all;font-size:11px;">${resetUrl}</a>
               </p>
-            </div>
-          </div>
-        `,
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#fafafa;padding:24px 40px;border-top:1px solid #e4e4e7;">
+              <p style="margin:0 0 4px;color:#71717a;font-size:13px;text-align:center;">
+                CortanaSoft &mdash; Вашият бизнес, една платформа.
+              </p>
+              <p style="margin:0;color:#a1a1aa;font-size:12px;text-align:center;">
+                &copy; ${new Date().getFullYear()} CortanaSoft. Всички права запазени.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`,
       });
     } catch (error) {
       this.logger.error(`Failed to send password reset email to ${email}`, error);

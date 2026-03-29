@@ -287,7 +287,7 @@ export class LeavesService {
           userId: leave.userId,
           companyId,
           year,
-          annualTotal: 20,
+          annualTotal: await this.resolveAnnualLeaveDays(companyId, leave.userId),
           annualUsed: leave.days,
         },
       });
@@ -524,6 +524,21 @@ export class LeavesService {
     return { success: true };
   }
 
+  // Resolve annual leave days: employee override > company default > 20
+  private async resolveAnnualLeaveDays(companyId: string, userId: string): Promise<number> {
+    const userCompany = await this.prisma.userCompany.findUnique({
+      where: { userId_companyId: { userId, companyId } },
+      select: { maxVacationDays: true },
+    });
+    if (userCompany?.maxVacationDays != null) return userCompany.maxVacationDays;
+
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { defaultAnnualLeaveDays: true },
+    });
+    return company?.defaultAnnualLeaveDays ?? 20;
+  }
+
   // Get leave balance for a user
   async getBalance(companyId: string, userId: string, year?: number) {
     const targetYear = year || new Date().getFullYear();
@@ -540,12 +555,13 @@ export class LeavesService {
 
     // Create default balance if not exists
     if (!balance) {
+      const annualTotal = await this.resolveAnnualLeaveDays(companyId, userId);
       balance = await this.prisma.leaveBalance.create({
         data: {
           userId,
           companyId,
           year: targetYear,
-          annualTotal: 20,
+          annualTotal,
           annualUsed: 0,
           annualCarried: 0,
           sickTotal: 0,

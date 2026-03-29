@@ -152,6 +152,9 @@ model Company {
   // Настройки за функционалност
   pushNotificationsEnabled Boolean @default(false) // Разрешаване на push нотификации за компанията
 
+  // HR настройки
+  defaultAnnualLeaveDays Int @default(20) // Дни платен отпуск по подразбиране за нови служители
+
   // Системни полета
   role      CompanyRole @default(CLIENT)
   isActive  Boolean     @default(true)
@@ -2077,8 +2080,6 @@ enum LeaveType {
   UNPAID // Неплатен отпуск
   MATERNITY // Майчинство
   PATERNITY // Бащинство
-  BEREAVEMENT // Траурен отпуск
-  STUDY // Учебен отпуск
   OTHER // Друг
 }
 
