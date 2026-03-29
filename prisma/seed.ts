@@ -185,21 +185,20 @@ async function main() {
   }
   console.log('✅ Settlements created:', Object.keys(createdSettlements).length, 'settlements');
 
-  // Създаване на компанията собственик - Електрик експрес ЕООД
+  // Създаване на компанията собственик - Кортана софт ЕООД
   const ownerCompany = await prisma.company.upsert({
-    where: { eik: '123456789' },
+    where: { eik: '207510146' },
     update: {},
     create: {
-      name: 'Електрик експрес ЕООД',
-      eik: '123456789',
-      vatNumber: 'BG123456789',
-      address: 'бул. Витоша 100',
+      name: 'Кортана софт ЕООД',
+      eik: '207510146',
+      address: 'ул. Тинтява 15-17',
       city: 'София',
-      postalCode: '1000',
+      postalCode: '1113',
       countryId: createdCountries['BG'],
       molName: 'Светлозар Росенов',
-      phone: '+359 888 123 456',
-      email: 'office@elektrik-ekspres.bg',
+      phone: '0876 649 967',
+      email: 'info@cortanasoft.com',
       role: CompanyRole.OWNER,
       isActive: true,
     },

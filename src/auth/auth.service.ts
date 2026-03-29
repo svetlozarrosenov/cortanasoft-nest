@@ -252,6 +252,7 @@ export class AuthService {
 
     try {
       await this.mailService.send({
+        from: 'noreply@cortanasoft.com',
         to: user.email,
         subject: 'Възстановяване на парола — CortanaSoft',
         html: `
