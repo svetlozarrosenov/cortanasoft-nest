@@ -258,8 +258,10 @@ export class PushNotificationsService implements OnModuleInit {
         notification: {
           icon: payload.icon || '/icons/icon-192x192.png',
           badge: '/icons/icon-72x72.png',
-          tag: payload.tag,
+          tag: payload.tag || 'cortanasoft',
           requireInteraction: true,
+          silent: false,
+          vibrate: [100, 50, 100, 50, 100],
         },
         fcmOptions: {
           link: payload.url || '/',
@@ -267,6 +269,7 @@ export class PushNotificationsService implements OnModuleInit {
       },
       data: {
         url: payload.url || '/',
+        tag: payload.tag || 'cortanasoft',
         ...payload.data,
       },
     };

@@ -58,9 +58,10 @@ export class DemoRequestsService {
 
       if (adminUserIds.length > 0) {
         await this.pushNotificationsService.sendToUsers(adminUserIds, {
-          title: 'Нова заявка за демо',
-          body: `${dto.companyName} - ${dto.name}`,
+          title: '🚀 Нова заявка за демо',
+          body: `${dto.companyName} — ${dto.name}\n📧 ${dto.email} · 📞 ${dto.phone}`,
           url: '/dashboard/admin/demo-requests',
+          tag: 'demo-request',
         });
       }
     } catch (error) {
