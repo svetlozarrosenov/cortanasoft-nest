@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
+import { parse } from 'csv-parse/sync';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
@@ -990,6 +991,176 @@ export class AdminService {
       roleName,
       password,
       wasGenerated,
+    };
+  }
+
+  // ==================== WooCommerce Import ====================
+
+  async importWooCommerceProducts(
+    companyId: string,
+    fileBuffer: Buffer,
+    userId: string,
+  ) {
+    // Verify company exists
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true, vatNumber: true, currencyId: true },
+    });
+    if (!company) {
+      throw new NotFoundException('Компанията не е намерена');
+    }
+
+    // Parse CSV
+    let records: Record<string, string>[];
+    try {
+      records = parse(fileBuffer, {
+        columns: true,
+        skip_empty_lines: true,
+        bom: true,
+        relax_column_count: true,
+      });
+    } catch {
+      throw new BadRequestException('Невалиден CSV файл');
+    }
+
+    if (records.length === 0) {
+      throw new BadRequestException('CSV файлът е празен');
+    }
+
+    // Get existing SKUs for this company
+    const existingProducts = await this.prisma.product.findMany({
+      where: { companyId },
+      select: { sku: true },
+    });
+    const existingSkus = new Set(existingProducts.map((p) => p.sku));
+
+    // Get existing categories for this company
+    const existingCategories = await this.prisma.productCategory.findMany({
+      where: { companyId },
+      select: { id: true, name: true },
+    });
+    const categoryMap = new Map(existingCategories.map((c) => [c.name.toLowerCase(), c.id]));
+
+    // Default VAT rate
+    const defaultVatRate = company.vatNumber ? 20 : 0;
+
+    // Process in chunks
+    const CHUNK_SIZE = 50;
+    let created = 0;
+    let skipped = 0;
+    let errors: string[] = [];
+
+    for (let i = 0; i < records.length; i += CHUNK_SIZE) {
+      const chunk = records.slice(i, i + CHUNK_SIZE);
+      const productsToCreate: Prisma.ProductCreateManyInput[] = [];
+
+      for (const row of chunk) {
+        // WooCommerce CSV columns mapping
+        const sku = (row['SKU'] || '').trim();
+        const name = (row['Name'] || '').trim();
+        const regularPrice = row['Regular price'] || row['Sale price'] || '';
+        const description = (row['Description'] || row['Short description'] || '').trim();
+        const weight = row['Weight (kg)'] || row['Weight (lbs)'] || '';
+        const length = row['Length (cm)'] || row['Length (in)'] || '';
+        const width = row['Width (cm)'] || row['Width (in)'] || '';
+        const height = row['Height (cm)'] || row['Height (in)'] || '';
+        const stock = row['Stock'] || '';
+        const lowStock = row['Low stock amount'] || '';
+        const manageStock = row['Manage stock?'] || '';
+        const published = row['Published'] || '';
+        const categories = (row['Categories'] || '').trim();
+        const type = (row['Type'] || '').trim().toLowerCase();
+
+        // Skip variable product parent rows and variations without SKU
+        if (!name && !sku) {
+          skipped++;
+          continue;
+        }
+
+        // Generate SKU if missing
+        const finalSku = sku || `WC-${i + chunk.indexOf(row) + 1}-${Date.now()}`;
+
+        if (existingSkus.has(finalSku)) {
+          skipped++;
+          continue;
+        }
+
+        // Parse price
+        const salePrice = parseFloat(regularPrice) || 0;
+
+        if (!name) {
+          errors.push(`Ред ${i + chunk.indexOf(row) + 2}: Липсва име на продукт`);
+          continue;
+        }
+
+        // Resolve category - take the first one from WooCommerce's "Cat1 > SubCat" format
+        let categoryId: string | null = null;
+        if (categories) {
+          const firstCategory = categories.split(',')[0].trim();
+          // Take the deepest subcategory
+          const catName = firstCategory.includes('>')
+            ? firstCategory.split('>').pop()!.trim()
+            : firstCategory;
+
+          const catKey = catName.toLowerCase();
+          if (categoryMap.has(catKey)) {
+            categoryId = categoryMap.get(catKey)!;
+          } else {
+            // Create the category
+            const newCat = await this.prisma.productCategory.create({
+              data: { name: catName, companyId },
+            });
+            categoryMap.set(catKey, newCat.id);
+            categoryId = newCat.id;
+          }
+        }
+
+        // Skip WooCommerce "variable" parent rows (they have no price usually)
+        if (type === 'variable') {
+          skipped++;
+          continue;
+        }
+
+        productsToCreate.push({
+          sku: finalSku,
+          name,
+          description: description || null,
+          salePrice: salePrice,
+          purchasePrice: null,
+          vatRate: defaultVatRate,
+          weight: parseFloat(weight) || null,
+          dimensionsL: parseFloat(length) || null,
+          dimensionsW: parseFloat(width) || null,
+          dimensionsH: parseFloat(height) || null,
+          minStock: parseFloat(lowStock) || null,
+          trackInventory: manageStock === '1' || manageStock.toLowerCase() === 'yes',
+          isActive: published !== '0' && published.toLowerCase() !== 'no',
+          type: 'PRODUCT',
+          unit: 'PIECE',
+          companyId,
+          createdById: userId,
+          categoryId,
+          purchaseCurrencyId: company.currencyId,
+          saleCurrencyId: company.currencyId,
+        });
+
+        existingSkus.add(finalSku);
+      }
+
+      if (productsToCreate.length > 0) {
+        const result = await this.prisma.product.createMany({
+          data: productsToCreate,
+          skipDuplicates: true,
+        });
+        created += result.count;
+      }
+    }
+
+    return {
+      total: records.length,
+      created,
+      skipped,
+      errors: errors.slice(0, 20), // Limit error messages
     };
   }
 }

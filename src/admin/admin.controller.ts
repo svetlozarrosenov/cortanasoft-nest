@@ -8,7 +8,11 @@ import {
   Param,
   UseGuards,
   Request,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { SuperAdminGuard } from '../common/guards/super-admin.guard';
@@ -444,6 +448,34 @@ export class AdminController {
       success: true,
       message: 'Welcome email sent',
       ...(result.wasGenerated && { generatedPassword: result.password }),
+    };
+  }
+
+  // ==================== WooCommerce Import ====================
+
+  @Post('companies/:companyId/import-woocommerce')
+  @UseInterceptors(FileInterceptor('file'))
+  async importWooCommerceProducts(
+    @Param('companyId') companyId: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Request() req: any,
+  ) {
+    if (!file) {
+      throw new BadRequestException('CSV файлът е задължителен');
+    }
+    if (!file.originalname.endsWith('.csv')) {
+      throw new BadRequestException('Файлът трябва да бъде CSV формат');
+    }
+
+    const result = await this.adminService.importWooCommerceProducts(
+      companyId,
+      file.buffer,
+      req.user.id,
+    );
+
+    return {
+      success: true,
+      ...result,
     };
   }
 
