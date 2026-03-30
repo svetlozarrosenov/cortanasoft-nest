@@ -179,9 +179,10 @@ export class AuthService {
       return {
         httpOnly: true,
         secure: true,
-        sameSite: 'strict' as const,
+        sameSite: 'none' as const,
         maxAge,
         path: '/',
+        domain: '.cortanasoft.com',
       };
     }
 
