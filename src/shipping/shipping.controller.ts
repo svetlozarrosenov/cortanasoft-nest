@@ -5,6 +5,7 @@ import {
   Body,
   Patch,
   Param,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ShippingService } from './shipping.service';
@@ -24,12 +25,12 @@ import {
 export class ShippingController {
   constructor(private readonly shippingService: ShippingService) {}
 
-  // ==================== Config ====================
+  // ==================== Econt Config ====================
 
   @Get('config')
   @RequireView('settings', 'shipping')
   getConfig(@Param('companyId') companyId: string) {
-    return this.shippingService.getConfig(companyId);
+    return this.shippingService.getConfig(companyId, 'econt');
   }
 
   @Patch('config')
@@ -38,13 +39,13 @@ export class ShippingController {
     @Param('companyId') companyId: string,
     @Body() dto: UpdateShippingConfigDto,
   ) {
-    return this.shippingService.updateConfig(companyId, dto);
+    return this.shippingService.updateConfig(companyId, 'econt', dto);
   }
 
   @Post('test-connection')
   @RequireEdit('settings', 'shipping')
   testConnection(@Param('companyId') companyId: string) {
-    return this.shippingService.testConnection(companyId);
+    return this.shippingService.testConnection(companyId, 'econt');
   }
 
   @Get('offices')
@@ -53,16 +54,99 @@ export class ShippingController {
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getOffices(@Param('companyId') companyId: string) {
-    return this.shippingService.getOffices(companyId);
+    return this.shippingService.getEcontOffices(companyId);
   }
 
   @Get('client-profiles')
   @RequireView('settings', 'shipping')
   getClientProfiles(@Param('companyId') companyId: string) {
-    return this.shippingService.getClientProfiles(companyId);
+    return this.shippingService.getEcontClientProfiles(companyId);
   }
 
-  // ==================== Shipments ====================
+  // ==================== Speedy Config ====================
+
+  @Get('speedy/config')
+  @RequireView('settings', 'shipping')
+  getSpeedyConfig(@Param('companyId') companyId: string) {
+    return this.shippingService.getConfig(companyId, 'speedy');
+  }
+
+  @Patch('speedy/config')
+  @RequireEdit('settings', 'shipping')
+  updateSpeedyConfig(
+    @Param('companyId') companyId: string,
+    @Body() dto: UpdateShippingConfigDto,
+  ) {
+    return this.shippingService.updateConfig(companyId, 'speedy', dto);
+  }
+
+  @Post('speedy/test-connection')
+  @RequireEdit('settings', 'shipping')
+  testSpeedyConnection(@Param('companyId') companyId: string) {
+    return this.shippingService.testConnection(companyId, 'speedy');
+  }
+
+  @Get('speedy/offices')
+  @RequireAnyPermission(
+    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'erp', page: 'orders', action: 'view' },
+  )
+  getSpeedyOffices(
+    @Param('companyId') companyId: string,
+    @Query('siteId') siteId?: string,
+    @Query('name') name?: string,
+  ) {
+    return this.shippingService.getSpeedyOffices(
+      companyId,
+      siteId ? parseInt(siteId) : undefined,
+      name,
+    );
+  }
+
+  @Get('speedy/sites')
+  @RequireAnyPermission(
+    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'erp', page: 'orders', action: 'view' },
+  )
+  getSpeedySites(
+    @Param('companyId') companyId: string,
+    @Query('name') name?: string,
+    @Query('postCode') postCode?: string,
+  ) {
+    return this.shippingService.getSpeedySites(companyId, name, postCode);
+  }
+
+  @Get('speedy/services')
+  @RequireView('settings', 'shipping')
+  getSpeedyServices(@Param('companyId') companyId: string) {
+    return this.shippingService.getSpeedyServices(companyId);
+  }
+
+  @Get('speedy/client-info')
+  @RequireView('settings', 'shipping')
+  getSpeedyClientInfo(@Param('companyId') companyId: string) {
+    return this.shippingService.getSpeedyClientInfo(companyId);
+  }
+
+  @Post('speedy/calculate')
+  @RequireView('erp', 'orders')
+  calculateSpeedy(
+    @Param('companyId') companyId: string,
+    @Body() dto: CalculateShippingDto,
+  ) {
+    return this.shippingService.calculateShipping(companyId, 'speedy', dto);
+  }
+
+  @Get('speedy/shipments/:shipmentId/label')
+  @RequireView('erp', 'orders')
+  getSpeedyLabel(
+    @Param('companyId') companyId: string,
+    @Param('shipmentId') shipmentId: string,
+  ) {
+    return this.shippingService.getSpeedyLabel(companyId, shipmentId);
+  }
+
+  // ==================== Common Shipments ====================
 
   @Post('calculate')
   @RequireView('erp', 'orders')
@@ -70,7 +154,7 @@ export class ShippingController {
     @Param('companyId') companyId: string,
     @Body() dto: CalculateShippingDto,
   ) {
-    return this.shippingService.calculateShipping(companyId, dto);
+    return this.shippingService.calculateShipping(companyId, 'econt', dto);
   }
 
   @Post('shipments')

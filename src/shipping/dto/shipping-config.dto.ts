@@ -11,7 +11,7 @@ import {
 export class UpdateShippingConfigDto {
   @IsString()
   @IsOptional()
-  @IsIn(['econt'])
+  @IsIn(['econt', 'speedy'])
   provider?: string;
 
   @IsBoolean()
@@ -90,7 +90,7 @@ export class UpdateShippingConfigDto {
   @IsOptional()
   declaredValueEnabled?: boolean;
 
-  // Handling
+  // Handling (Econt)
   @IsBoolean()
   @IsOptional()
   sizeUnder60cm?: boolean;
@@ -138,4 +138,41 @@ export class UpdateShippingConfigDto {
   @IsBoolean()
   @IsOptional()
   paymentSharePercent?: boolean;
+
+  // === Speedy-specific ===
+
+  @IsInt()
+  @IsOptional()
+  speedyServiceId?: number;
+
+  @IsInt()
+  @IsOptional()
+  speedySenderClientId?: number;
+
+  @IsInt()
+  @IsOptional()
+  speedySenderSiteId?: number;
+
+  @IsInt()
+  @IsOptional()
+  speedySenderOfficeId?: number;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['CASH', 'POSTAL_MONEY_TRANSFER'])
+  speedyCodProcessingType?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  speedySaturdayDelivery?: boolean;
+
+  @IsInt()
+  @IsOptional()
+  @IsIn([0, 1, 2])
+  speedyDeferredDays?: number;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['SENDER', 'RECIPIENT', 'THIRD_PARTY'])
+  speedyPayerType?: string;
 }

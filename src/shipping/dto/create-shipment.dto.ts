@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsInt,
   IsEnum,
+  IsIn,
   Min,
 } from 'class-validator';
 import { DeliveryType } from '@prisma/client';
@@ -11,6 +12,11 @@ import { DeliveryType } from '@prisma/client';
 export class CreateShipmentDto {
   @IsString()
   orderId: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['econt', 'speedy'])
+  provider?: string;
 
   @IsEnum(DeliveryType)
   deliveryType: DeliveryType;
@@ -22,7 +28,7 @@ export class CreateShipmentDto {
   @IsString()
   receiverPhone: string;
 
-  // Офис
+  // Офис (Econt)
   @IsString()
   @IsOptional()
   officeCode?: string;
@@ -30,6 +36,15 @@ export class CreateShipmentDto {
   @IsString()
   @IsOptional()
   officeName?: string;
+
+  // Офис (Speedy)
+  @IsInt()
+  @IsOptional()
+  speedyOfficeId?: number;
+
+  @IsInt()
+  @IsOptional()
+  speedySiteId?: number;
 
   // Адрес
   @IsString()
@@ -93,10 +108,21 @@ export class CalculateShippingDto {
   @IsEnum(DeliveryType)
   deliveryType: DeliveryType;
 
+  // Econt office
   @IsString()
   @IsOptional()
   officeCode?: string;
 
+  // Speedy office/site
+  @IsInt()
+  @IsOptional()
+  speedyOfficeId?: number;
+
+  @IsInt()
+  @IsOptional()
+  speedySiteId?: number;
+
+  // Address
   @IsString()
   @IsOptional()
   addressCity?: string;

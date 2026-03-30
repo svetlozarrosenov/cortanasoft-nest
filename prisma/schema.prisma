@@ -2632,7 +2632,7 @@ model ShippingConfig {
   provider  String  @default("econt") // econt, speedy, etc.
   isActive  Boolean @default(true)
 
-  // Econt credentials
+  // Общи данни за достъп
   username String? // API потребител
   password String? // API парола
   mode     String  @default("test") // test | live
@@ -2640,7 +2640,7 @@ model ShippingConfig {
   // Подател по подразбиране
   senderName       String? // Име на подателя
   senderPhone      String? // Телефон на подателя
-  senderOfficeCode String? // Код на офис подател
+  senderOfficeCode String? // Код на офис подател (Econt)
 
   // Тип пратка по подразбиране
   shipmentType String @default("PACK") // PACK, document, pallet...
@@ -2660,7 +2660,7 @@ model ShippingConfig {
   deliveryReceipt      Boolean @default(false)
   declaredValueEnabled Boolean @default(false)
 
-  // Инструкции за обработка
+  // Инструкции за обработка (Econt)
   sizeUnder60cm    Boolean @default(false)
   keepUpright      Boolean @default(false)
   payAfterAccept   Boolean @default(false)
@@ -2676,6 +2676,16 @@ model ShippingConfig {
   // Споделяне на плащане
   paymentShareAmount  Decimal? @db.Decimal(10, 2) // Сума/процент за получателя
   paymentSharePercent Boolean  @default(false) // Дали е процент
+
+  // === Speedy-specific ===
+  speedyServiceId        Int?    // ID на услугата (напр. 505 = стандартна)
+  speedySenderClientId   Int?    // Speedy client ID на подателя
+  speedySenderSiteId     Int?    // Speedy site ID на подателя
+  speedySenderOfficeId   Int?    // Speedy office ID на подателя
+  speedyCodProcessingType String? // CASH | POSTAL_MONEY_TRANSFER
+  speedySaturdayDelivery  Boolean @default(false)
+  speedyDeferredDays      Int?    @default(0) // 0, 1 или 2
+  speedyPayerType         String? @default("SENDER") // SENDER | RECIPIENT | THIRD_PARTY
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
