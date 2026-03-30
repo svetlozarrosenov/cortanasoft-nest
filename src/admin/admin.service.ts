@@ -1034,12 +1034,16 @@ export class AdminService {
     });
     const existingSkus = new Set(existingProducts.map((p) => p.sku));
 
-    // Get existing categories for this company
+    // Get existing categories for this company (with parentId for hierarchy)
     const existingCategories = await this.prisma.productCategory.findMany({
       where: { companyId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, parentId: true },
     });
-    const categoryMap = new Map(existingCategories.map((c) => [c.name.toLowerCase(), c.id]));
+    // Map: "parentId|lowercaseName" → id (for hierarchy lookup)
+    const categoryMap = new Map<string, string>();
+    for (const c of existingCategories) {
+      categoryMap.set(`${c.parentId || ''}|${c.name.toLowerCase()}`, c.id);
+    }
 
     // Default VAT rate
     const defaultVatRate = company.vatNumber ? 20 : 0;
@@ -1093,26 +1097,32 @@ export class AdminService {
           continue;
         }
 
-        // Resolve category - take the first one from WooCommerce's "Cat1 > SubCat" format
+        // Resolve category hierarchy from WooCommerce "Parent > Child > Grandchild, OtherCat" format
         let categoryId: string | null = null;
         if (categories) {
-          const firstCategory = categories.split(',')[0].trim();
-          // Take the deepest subcategory
-          const catName = firstCategory.includes('>')
-            ? firstCategory.split('>').pop()!.trim()
-            : firstCategory;
+          // Take the first category path (before comma)
+          const firstCategoryPath = categories.split(',')[0].trim();
+          const parts = firstCategoryPath.split('>').map((p) => p.trim()).filter(Boolean);
 
-          const catKey = catName.toLowerCase();
-          if (categoryMap.has(catKey)) {
-            categoryId = categoryMap.get(catKey)!;
-          } else {
-            // Create the category
-            const newCat = await this.prisma.productCategory.create({
-              data: { name: catName, companyId },
-            });
-            categoryMap.set(catKey, newCat.id);
-            categoryId = newCat.id;
+          let parentId: string | null = null;
+          for (const catName of parts) {
+            const key = `${parentId || ''}|${catName.toLowerCase()}`;
+            if (categoryMap.has(key)) {
+              parentId = categoryMap.get(key)!;
+            } else {
+              // Create the category with parent
+              const newCat = await this.prisma.productCategory.create({
+                data: {
+                  name: catName,
+                  companyId,
+                  parentId,
+                },
+              });
+              categoryMap.set(key, newCat.id);
+              parentId = newCat.id;
+            }
           }
+          categoryId = parentId;
         }
 
         // Skip WooCommerce "variable" parent rows (they have no price usually)

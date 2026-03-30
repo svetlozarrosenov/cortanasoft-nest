@@ -252,7 +252,7 @@ export class ProductsService {
         parent: true,
         children: true,
         _count: {
-          select: { products: true },
+          select: { products: true, children: true },
         },
       },
       orderBy: { name: 'asc' },
@@ -263,18 +263,17 @@ export class ProductsService {
     companyId: string,
     data: { name: string; description?: string; parentId?: string },
   ) {
-    // Проверка за дублирано име
-    const existing = await this.prisma.productCategory.findUnique({
+    // Проверка за дублирано име на същото ниво (същия parent)
+    const existing = await this.prisma.productCategory.findFirst({
       where: {
-        companyId_name: {
-          companyId,
-          name: data.name,
-        },
+        companyId,
+        name: data.name,
+        parentId: data.parentId || null,
       },
     });
 
     if (existing) {
-      throw new ConflictException(`Категория "${data.name}" вече съществува`);
+      throw new ConflictException(`Категория "${data.name}" вече съществува на това ниво`);
     }
 
     return this.prisma.productCategory.create({
@@ -304,17 +303,21 @@ export class ProductsService {
       throw new NotFoundException('Категорията не е намерена');
     }
 
-    if (data.name && data.name !== category.name) {
+    const newName = data.name ?? category.name;
+    const newParentId = data.parentId !== undefined ? (data.parentId || null) : category.parentId;
+
+    if (newName !== category.name || newParentId !== category.parentId) {
       const existing = await this.prisma.productCategory.findFirst({
         where: {
           companyId,
-          name: data.name,
+          name: newName,
+          parentId: newParentId,
           NOT: { id },
         },
       });
 
       if (existing) {
-        throw new ConflictException(`Категория "${data.name}" вече съществува`);
+        throw new ConflictException(`Категория "${newName}" вече съществува на това ниво`);
       }
     }
 

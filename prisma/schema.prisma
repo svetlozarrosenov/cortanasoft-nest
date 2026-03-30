@@ -772,7 +772,7 @@ model ProductCategory {
 
   products Product[]
 
-  @@unique([companyId, name])
+  @@unique([companyId, name, parentId])
   @@map("product_categories")
 }
 
