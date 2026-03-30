@@ -19,7 +19,7 @@ import {
 
 interface AuthenticatedRequest {
   user: {
-    userId: string;
+    id: string;
   };
 }
 
@@ -76,7 +76,7 @@ export class PushNotificationsController {
     };
 
     const subscription = await this.pushService.subscribe(
-      req.user.userId,
+      req.user.id,
       subscriptionData,
     );
 
@@ -104,7 +104,7 @@ export class PushNotificationsController {
   @UseGuards(JwtAuthGuard)
   async getSubscriptions(@Req() req: AuthenticatedRequest) {
     const subscriptions = await this.pushService.getUserSubscriptions(
-      req.user.userId,
+      req.user.id,
     );
 
     return subscriptions.map((sub) => ({
