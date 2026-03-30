@@ -458,6 +458,15 @@ export class ChatService {
     return room?.companyId || null;
   }
 
+  // Get company name by ID
+  async getCompanyName(companyId: string): Promise<string | null> {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { name: true },
+    });
+    return company?.name || null;
+  }
+
   // Cron job to clean up expired messages (runs daily at 3 AM)
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async cleanupExpiredMessages() {

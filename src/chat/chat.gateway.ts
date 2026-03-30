@@ -101,8 +101,14 @@ export class ChatGateway
     if (offlineUserIds.length === 0) return;
 
     try {
+      // Get company name for the notification
+      const company = await this.chatService.getCompanyName(companyId);
+      const title = company
+        ? `${senderName} · ${company}`
+        : senderName;
+
       await this.pushNotificationsService.sendToUsers(offlineUserIds, {
-        title: senderName,
+        title,
         body: content.length > 100 ? content.substring(0, 100) + '...' : content,
         url: `/dashboard/${companyId}`,
         tag: `chat-${companyId}`,
@@ -318,7 +324,7 @@ export class ChatGateway
         this.logger.log(`Message sent to channel: ${userChannel}`);
       }
 
-      // Send push notification to offline participants
+      // Send push notification to offline participants (with company name)
       const senderName = `${message.sender.firstName} ${message.sender.lastName}`;
       this.notifyOfflineParticipants(
         client.companyId,
@@ -326,7 +332,7 @@ export class ChatGateway
         senderName,
         trimmedContent,
         participantIds,
-      );
+      ).catch((err) => this.logger.error('Push notify error', err));
 
       return { success: true, message };
     } catch (error) {

@@ -248,26 +248,16 @@ export class PushNotificationsService implements OnModuleInit {
       return { success: 0, failed: 0 };
     }
 
+    // Only use data payload (no notification) to prevent duplicate notifications.
+    // Firebase auto-shows a notification from the `notification` field,
+    // and our SW shows another via onBackgroundMessage — causing duplicates.
+    // With data-only, only our SW handles display.
     const message: admin.messaging.MulticastMessage = {
       tokens,
-      notification: {
+      data: {
         title: payload.title,
         body: payload.body,
-      },
-      webpush: {
-        notification: {
-          icon: payload.icon || '/icons/icon-192x192.png',
-          badge: '/icons/icon-72x72.png',
-          tag: payload.tag || 'cortanasoft',
-          requireInteraction: true,
-          silent: false,
-          vibrate: [100, 50, 100, 50, 100],
-        },
-        fcmOptions: {
-          link: payload.url || '/',
-        },
-      },
-      data: {
+        icon: payload.icon || '/icons/icon-192x192.png',
         url: payload.url || '/',
         tag: payload.tag || 'cortanasoft',
         ...payload.data,
