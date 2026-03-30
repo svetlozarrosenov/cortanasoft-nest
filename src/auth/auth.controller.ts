@@ -48,10 +48,9 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   async logout(@Res({ passthrough: true }) response: Response) {
-    response.clearCookie('access_token', {
-      httpOnly: true,
-      path: '/',
-    });
+    response.clearCookie('access_token',
+      this.authService.getCookieOptions(),
+    );
 
     return {
       success: true,

@@ -467,6 +467,14 @@ export class AdminService {
       throw new ForbiddenException('Cannot delete a platform owner user');
     }
 
+    // Не позволяваме изтриване на потребител, който е асоцииран с компания
+    if (user.userCompanies.length > 0) {
+      const companyNames = user.userCompanies.map((uc) => uc.company.name).join(', ');
+      throw new ForbiddenException(
+        `Потребителят е асоцииран с компании: ${companyNames}. Първо го премахнете от всички компании.`,
+      );
+    }
+
     return this.prisma.user.delete({
       where: { id },
     });
