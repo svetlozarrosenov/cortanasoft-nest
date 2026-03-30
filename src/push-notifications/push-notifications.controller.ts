@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import {
   PushNotificationsService,
@@ -23,13 +24,26 @@ interface AuthenticatedRequest {
 }
 
 class SubscribeDto {
+  @IsString()
+  @IsNotEmpty()
   fcmToken: string;
+
+  @IsString()
+  @IsOptional()
   userAgent?: string;
+
+  @IsString()
+  @IsOptional()
   deviceName?: string;
+
+  @IsString()
+  @IsOptional()
   platform?: string; // 'web', 'android', 'ios'
 }
 
 class UnsubscribeDto {
+  @IsString()
+  @IsNotEmpty()
   fcmToken: string;
 }
 
