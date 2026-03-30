@@ -434,7 +434,7 @@ export class AdminController {
 
     await this.mailService.send({
       to: result.user.email,
-      subject: `Добре дошли в ${result.company.name} — CortanaSoft`,
+      subject: 'Добре дошли в CortanaSoft',
       html: this.buildWelcomeEmail(
         result.user.firstName,
         result.user.email,
