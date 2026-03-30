@@ -152,6 +152,10 @@ model Company {
   currencyId String?
   currency   Currency? @relation(fields: [currencyId], references: [id])
 
+  // WooCommerce интеграция
+  woocommerceDomain String? // Домейн на WordPress/WooCommerce магазин (напр. shop.example.com)
+  woocommerceApiKey  String? // API ключ за изходящи webhook-ове към WP плъгина
+
   // Настройки за функционалност
   pushNotificationsEnabled Boolean @default(false) // Разрешаване на push нотификации за компанията
 

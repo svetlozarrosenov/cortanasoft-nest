@@ -92,6 +92,15 @@ export class CreateCompanyDto {
   @IsOptional()
   currencyId?: string;
 
+  // WooCommerce интеграция
+  @IsString()
+  @IsOptional()
+  woocommerceDomain?: string;
+
+  @IsString()
+  @IsOptional()
+  woocommerceApiKey?: string;
+
   // Настройки за функционалност
   @IsBoolean()
   @IsOptional()

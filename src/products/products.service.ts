@@ -4,12 +4,16 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { WooCommerceWebhookService } from '../integrations/woocommerce-webhook.service';
 import { CreateProductDto, UpdateProductDto, QueryProductsDto } from './dto';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class ProductsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private wooCommerceWebhook: WooCommerceWebhookService,
+  ) {}
 
   async create(companyId: string, userId: string, dto: CreateProductDto) {
     // Проверка за дублиран SKU в компанията
@@ -216,7 +220,7 @@ export class ProductsService {
       }
     }
 
-    return this.prisma.product.update({
+    const updatedProduct = await this.prisma.product.update({
       where: { id },
       data: dto,
       include: {
@@ -233,6 +237,13 @@ export class ProductsService {
         },
       },
     });
+
+    // Sync to WooCommerce (fire-and-forget)
+    this.wooCommerceWebhook
+      .syncProductToWooCommerce(companyId, id)
+      .catch(() => {});
+
+    return updatedProduct;
   }
 
   async remove(companyId: string, id: string) {
