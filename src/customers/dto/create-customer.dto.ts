@@ -96,15 +96,15 @@ export class CreateCustomerDto {
   @IsOptional()
   notes?: string;
 
-  @IsNumber()
+  @IsNumber({}, { message: 'Кредитният лимит трябва да бъде число.' })
   @IsOptional()
-  @Min(0)
+  @Min(0, { message: 'Кредитният лимит не може да бъде отрицателен.' })
   creditLimit?: number;
 
-  @IsNumber()
+  @IsNumber({}, { message: 'Отстъпката трябва да бъде число.' })
   @IsOptional()
-  @Min(0)
-  @Max(100)
+  @Min(0, { message: 'Отстъпката не може да бъде отрицателна.' })
+  @Max(100, { message: 'Отстъпката не може да бъде повече от 100%.' })
   discount?: number;
 
   @IsBoolean()
