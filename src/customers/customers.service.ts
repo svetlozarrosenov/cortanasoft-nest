@@ -24,6 +24,16 @@ export class CustomersService {
       throw new BadRequestException(ErrorMessages.customers.personalNameRequired);
     }
 
+    // Check for duplicate email within the same company
+    if (dto.email) {
+      const existingByEmail = await this.prisma.customer.findFirst({
+        where: { companyId, email: dto.email },
+      });
+      if (existingByEmail) {
+        throw new BadRequestException('Клиент с този имейл вече съществува в тази компания.');
+      }
+    }
+
     // Check for duplicate EIK if provided
     if (dto.eik) {
       const existing = await this.prisma.customer.findFirst({
@@ -192,6 +202,16 @@ export class CustomersService {
 
   async update(companyId: string, id: string, dto: UpdateCustomerDto) {
     await this.findOne(companyId, id);
+
+    // Check for duplicate email if changing
+    if (dto.email) {
+      const existingByEmail = await this.prisma.customer.findFirst({
+        where: { companyId, email: dto.email, NOT: { id } },
+      });
+      if (existingByEmail) {
+        throw new BadRequestException('Клиент с този имейл вече съществува в тази компания.');
+      }
+    }
 
     // Check for duplicate EIK if changing
     if (dto.eik) {
