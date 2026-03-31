@@ -28,7 +28,10 @@ export class ShippingController {
   // ==================== Econt Config ====================
 
   @Get('config')
-  @RequireView('settings', 'shipping')
+  @RequireAnyPermission(
+    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'erp', page: 'orders', action: 'view' },
+  )
   getConfig(@Param('companyId') companyId: string) {
     return this.shippingService.getConfig(companyId, 'econt');
   }
@@ -58,7 +61,10 @@ export class ShippingController {
   }
 
   @Get('client-profiles')
-  @RequireView('settings', 'shipping')
+  @RequireAnyPermission(
+    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'erp', page: 'orders', action: 'view' },
+  )
   getClientProfiles(@Param('companyId') companyId: string) {
     return this.shippingService.getEcontClientProfiles(companyId);
   }
@@ -66,7 +72,10 @@ export class ShippingController {
   // ==================== Speedy Config ====================
 
   @Get('speedy/config')
-  @RequireView('settings', 'shipping')
+  @RequireAnyPermission(
+    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'erp', page: 'orders', action: 'view' },
+  )
   getSpeedyConfig(@Param('companyId') companyId: string) {
     return this.shippingService.getConfig(companyId, 'speedy');
   }
@@ -117,13 +126,19 @@ export class ShippingController {
   }
 
   @Get('speedy/services')
-  @RequireView('settings', 'shipping')
+  @RequireAnyPermission(
+    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'erp', page: 'orders', action: 'view' },
+  )
   getSpeedyServices(@Param('companyId') companyId: string) {
     return this.shippingService.getSpeedyServices(companyId);
   }
 
   @Get('speedy/client-info')
-  @RequireView('settings', 'shipping')
+  @RequireAnyPermission(
+    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'erp', page: 'orders', action: 'view' },
+  )
   getSpeedyClientInfo(@Param('companyId') companyId: string) {
     return this.shippingService.getSpeedyClientInfo(companyId);
   }
