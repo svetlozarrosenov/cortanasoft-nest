@@ -206,6 +206,7 @@ model Company {
   shipments          Shipment[]
   warrantyTemplates  WarrantyTemplate[]
   issuedWarranties   IssuedWarranty[]
+  integrations       Integration[]
 
   @@map("companies")
 }
@@ -226,6 +227,33 @@ model ApiKey {
 
   @@index([companyId])
   @@map("api_keys")
+}
+
+// Интеграции с външни системи (CloudCart, WooCommerce и др.)
+model Integration {
+  id       String @id @default(cuid())
+  provider String // "cloudcart", "woocommerce", и др.
+  isActive Boolean @default(true)
+
+  // Общи полета
+  domain     String? // Домейн на външната система (напр. myshop.cloudcart.com)
+  apiKey     String? // API ключ (plain text — нужен за outbound заявки)
+  apiKeyHint String? // Маскирана версия за показване (напр. "PQ20...ZOUQ")
+  username   String? // Потребителско име (ако е нужно)
+  password   String? // Парола (маскирана при четене)
+
+  // Допълнителни настройки, специфични за всеки provider
+  settings Json? // Гъвкав JSON за provider-specific конфигурация
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, provider])
+  @@index([companyId])
+  @@map("integrations")
 }
 
 // Абонаментен план / Договор за компания

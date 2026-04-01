@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WooCommerceWebhookService } from '../integrations/woocommerce-webhook.service';
+import { CloudCartService } from '../cloudcart/cloudcart.service';
 import { CreateProductDto, UpdateProductDto, QueryProductsDto } from './dto';
 import { Prisma } from '@prisma/client';
 
@@ -13,6 +14,7 @@ export class ProductsService {
   constructor(
     private prisma: PrismaService,
     private wooCommerceWebhook: WooCommerceWebhookService,
+    private cloudCartService: CloudCartService,
   ) {}
 
   async create(companyId: string, userId: string, dto: CreateProductDto) {
@@ -238,9 +240,12 @@ export class ProductsService {
       },
     });
 
-    // Sync to WooCommerce (fire-and-forget)
+    // Sync to external integrations (fire-and-forget)
     this.wooCommerceWebhook
       .syncProductToWooCommerce(companyId, id)
+      .catch(() => {});
+    this.cloudCartService
+      .syncProductToCloudCart(companyId, id)
       .catch(() => {});
 
     return updatedProduct;

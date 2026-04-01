@@ -45,6 +45,7 @@ import { MailModule } from './mail/mail.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { WarrantiesModule } from './warranties/warranties.module';
 import { ContactSubmissionsModule } from './contact-submissions/contact-submissions.module';
+import { CloudCartModule } from './cloudcart/cloudcart.module';
 
 @Module({
   imports: [
@@ -108,6 +109,7 @@ import { ContactSubmissionsModule } from './contact-submissions/contact-submissi
     ShippingModule,
     WarrantiesModule,
     ContactSubmissionsModule,
+    CloudCartModule,
   ],
   controllers: [],
   providers: [],
