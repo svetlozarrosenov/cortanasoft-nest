@@ -325,10 +325,27 @@ export class OrdersService {
     // Allow payment status updates for confirmed+ orders
     if (order.status !== 'DRAFT' && order.status !== 'PENDING' && order.status !== 'PROCESSING') {
       if (dto.paymentStatus) {
-        return this.prisma.order.update({
-          where: { id },
-          data: { paymentStatus: dto.paymentStatus },
-          include: ORDER_INCLUDE,
+        return this.prisma.$transaction(async (tx) => {
+          const updatedOrder = await tx.order.update({
+            where: { id },
+            data: { paymentStatus: dto.paymentStatus },
+            include: ORDER_INCLUDE,
+          });
+
+          // Sync linked invoice payment status
+          if (dto.paymentStatus === 'PAID') {
+            await tx.invoice.updateMany({
+              where: { orderId: id, companyId, status: { not: 'CANCELLED' } },
+              data: { paidAmount: updatedOrder.total, status: 'PAID' },
+            });
+          } else if (dto.paymentStatus === 'PENDING') {
+            await tx.invoice.updateMany({
+              where: { orderId: id, companyId, status: { not: 'CANCELLED' } },
+              data: { paidAmount: 0, status: 'ISSUED' },
+            });
+          }
+
+          return updatedOrder;
         });
       }
       throw new BadRequestException(ErrorMessages.orders.canOnlyUpdatePending);
