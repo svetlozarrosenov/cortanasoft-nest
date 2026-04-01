@@ -7,7 +7,7 @@ import {
   IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { InvoiceStatus } from '@prisma/client';
+import { InvoiceStatus, InvoiceType } from '@prisma/client';
 
 export class QueryInvoicesDto {
   @IsOptional()
@@ -17,6 +17,10 @@ export class QueryInvoicesDto {
   @IsOptional()
   @IsIn(['DRAFT', 'ISSUED', 'PAID', 'PARTIALLY_PAID', 'CANCELLED'])
   status?: InvoiceStatus;
+
+  @IsOptional()
+  @IsIn(['REGULAR', 'PROFORMA', 'CREDIT_NOTE'])
+  type?: InvoiceType;
 
   @IsOptional()
   @IsString()

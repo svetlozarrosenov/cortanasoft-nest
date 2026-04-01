@@ -130,7 +130,8 @@ export class InvoicesService {
           invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(),
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
           type: 'REGULAR',
-          status: 'ISSUED',
+          status: order.paymentStatus === 'PAID' ? 'PAID' : 'ISSUED',
+          paidAmount: order.paymentStatus === 'PAID' ? order.total : 0,
           orderId: order.id,
           customerId: order.customerId,
           customerName: order.customerName,
@@ -275,6 +276,7 @@ export class InvoicesService {
     const {
       search,
       status,
+      type,
       orderId,
       customerId,
       dateFrom,
@@ -288,6 +290,7 @@ export class InvoicesService {
     const where: Prisma.InvoiceWhereInput = {
       companyId,
       ...(status && { status }),
+      ...(type && { type }),
       ...(orderId && { orderId }),
       ...(customerId && { customerId }),
       ...(dateFrom || dateTo
@@ -351,7 +354,22 @@ export class InvoicesService {
   async update(companyId: string, id: string, dto: UpdateInvoiceDto) {
     const invoice = await this.findOne(companyId, id);
 
-    // Only allow updating DRAFT invoices
+    // Proformas can have their status changed freely
+    if (invoice.type === 'PROFORMA' && dto.status) {
+      return this.prisma.invoice.update({
+        where: { id },
+        data: {
+          status: dto.status,
+          ...(dto.dueDate !== undefined && {
+            dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+          }),
+          ...(dto.notes !== undefined && { notes: dto.notes }),
+        },
+        include: this.invoiceInclude,
+      });
+    }
+
+    // Regular invoices: only allow updating DRAFT
     if (invoice.status !== 'DRAFT') {
       throw new BadRequestException(ErrorMessages.invoices.canOnlyUpdateDraft);
     }

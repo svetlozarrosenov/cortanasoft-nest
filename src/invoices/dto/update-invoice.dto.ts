@@ -1,4 +1,5 @@
-import { IsString, IsOptional, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsIn } from 'class-validator';
+import { InvoiceStatus } from '@prisma/client';
 
 export class UpdateInvoiceDto {
   @IsOptional()
@@ -8,4 +9,8 @@ export class UpdateInvoiceDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsIn(['DRAFT', 'ISSUED', 'PAID', 'PARTIALLY_PAID', 'CANCELLED'])
+  status?: InvoiceStatus;
 }

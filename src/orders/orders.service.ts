@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto, UpdateOrderDto, QueryOrdersDto } from './dto';
-import { Prisma, OrderStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
 import { WarrantiesService } from '../warranties/warranties.service';
 
@@ -285,35 +285,11 @@ export class OrdersService {
     return order;
   }
 
-  // Valid status transitions
-  private readonly validTransitions: Record<OrderStatus, OrderStatus[]> = {
-    DRAFT: ['CONFIRMED', 'CANCELLED'],
-    PENDING: ['CONFIRMED', 'CANCELLED'], // legacy
-    CONFIRMED: ['PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'],
-    PROCESSING: ['SHIPPED', 'DELIVERED', 'CANCELLED'],
-    SHIPPED: ['DELIVERED', 'CANCELLED'],
-    DELIVERED: [],
-    CANCELLED: [],
-  };
-
   async update(companyId: string, id: string, dto: UpdateOrderDto) {
     const order = await this.findOne(companyId, id);
 
-    // If status change is requested, handle it through the state machine
+    // Status change
     if (dto.status && dto.status !== order.status) {
-      const allowedTargets = this.validTransitions[order.status] || [];
-      if (!allowedTargets.includes(dto.status)) {
-        throw new BadRequestException(ErrorMessages.orders.invalidStatusTransition);
-      }
-
-      // Route to confirm/cancel for transitions with inventory side effects
-      if (dto.status === 'CONFIRMED' && (order.status === 'DRAFT' || order.status === 'PENDING' || order.status === 'PROCESSING')) {
-        return this.confirm(companyId, id);
-      }
-      if (dto.status === 'CANCELLED') {
-        return this.cancel(companyId, id);
-      }
-
       // Simple status transitions (CONFIRMED→PROCESSING, PROCESSING→SHIPPED, SHIPPED→DELIVERED)
       return this.prisma.order.update({
         where: { id },
@@ -323,7 +299,7 @@ export class OrdersService {
     }
 
     // Allow payment status updates for confirmed+ orders
-    if (order.status !== 'DRAFT' && order.status !== 'PENDING' && order.status !== 'PROCESSING') {
+    if (order.status === 'DELIVERED') {
       if (dto.paymentStatus) {
         return this.prisma.$transaction(async (tx) => {
           const updatedOrder = await tx.order.update({
