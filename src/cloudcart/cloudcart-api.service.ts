@@ -120,7 +120,11 @@ export interface CloudCartSingleResponse<T> {
 export class CloudCartApiService {
   private readonly logger = new Logger(CloudCartApiService.name);
 
-  private buildUrl(domain: string, path: string, params?: Record<string, string>): string {
+  private buildUrl(
+    domain: string,
+    path: string,
+    params?: Record<string, string>,
+  ): string {
     const baseUrl = `https://${domain}/api/v2${path}`;
     if (!params) return baseUrl;
     const searchParams = new URLSearchParams(params);
@@ -147,8 +151,12 @@ export class CloudCartApiService {
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      this.logger.warn(`CloudCart API ${response.status}: ${path} — ${body.slice(0, 200)}`);
-      throw new Error(`CloudCart API error: ${response.status} ${response.statusText}`);
+      this.logger.warn(
+        `CloudCart API ${response.status}: ${path} — ${body.slice(0, 200)}`,
+      );
+      throw new Error(
+        `CloudCart API error: ${response.status} ${response.statusText}`,
+      );
     }
 
     return response.json();
@@ -178,7 +186,9 @@ export class CloudCartApiService {
     });
   }
 
-  async getAllCategories(options: CloudCartRequestOptions): Promise<CloudCartCategory[]> {
+  async getAllCategories(
+    options: CloudCartRequestOptions,
+  ): Promise<CloudCartCategory[]> {
     const all: CloudCartCategory[] = [];
     let page = 1;
 
@@ -217,7 +227,12 @@ export class CloudCartApiService {
     let page = 1;
 
     while (true) {
-      const res = await this.listProducts(options, page, 50, 'variant,image,category');
+      const res = await this.listProducts(
+        options,
+        page,
+        50,
+        'variant,image,category',
+      );
       products.push(...res.data);
       if (res.included) included.push(...res.included);
 
@@ -248,7 +263,9 @@ export class CloudCartApiService {
     });
   }
 
-  async getAllStoreQuantities(options: CloudCartRequestOptions): Promise<CloudCartStoreQuantity[]> {
+  async getAllStoreQuantities(
+    options: CloudCartRequestOptions,
+  ): Promise<CloudCartStoreQuantity[]> {
     const all: CloudCartStoreQuantity[] = [];
     let page = 1;
 
@@ -264,20 +281,21 @@ export class CloudCartApiService {
   }
 
   /**
-   * Търси продукт в CloudCart по SKU.
-   * Връща първия намерен или null.
+   * Търси продукт в CloudCart по SKU (SKU живее на variant-а).
+   * Връща продукта с included variants.
    */
   async findProductBySku(
     options: CloudCartRequestOptions,
     sku: string,
-  ): Promise<CloudCartProduct | null> {
+  ): Promise<{ product: CloudCartProduct; included: any[] } | null> {
     try {
       const res = await this.request<CloudCartListResponse<CloudCartProduct>>(
         options,
         '/products',
-        { 'filter[sku]': sku, 'page[size]': '1' },
+        { 'filter[sku]': sku, 'page[size]': '1', include: 'variants' },
       );
-      return res.data.length > 0 ? res.data[0] : null;
+      if (res.data.length === 0) return null;
+      return { product: res.data[0], included: res.included || [] };
     } catch {
       return null;
     }
@@ -285,7 +303,7 @@ export class CloudCartApiService {
 
   /**
    * Обновява продукт в CloudCart (PATCH /products/:id).
-   * JSON:API формат.
+   * JSON:API формат. price_from/price_to са read-only — не ги пращаме тук.
    */
   async updateProduct(
     options: CloudCartRequestOptions,
@@ -300,11 +318,32 @@ export class CloudCartApiService {
       },
     });
 
-    return this.request(
-      options,
-      `/products/${productId}`,
-      undefined,
-      { method: 'PATCH', body },
-    );
+    return this.request(options, `/products/${productId}`, undefined, {
+      method: 'PATCH',
+      body,
+    });
+  }
+
+  /**
+   * Обновява variant в CloudCart (PATCH /variants/:id).
+   * Цената е в центове (2999 = 29.99 лв).
+   */
+  async updateVariant(
+    options: CloudCartRequestOptions,
+    variantId: string,
+    attributes: Record<string, unknown>,
+  ): Promise<any> {
+    const body = JSON.stringify({
+      data: {
+        type: 'variants',
+        id: variantId,
+        attributes,
+      },
+    });
+
+    return this.request(options, `/variants/${variantId}`, undefined, {
+      method: 'PATCH',
+      body,
+    });
   }
 }

@@ -284,6 +284,9 @@ export class CloudCartService {
   /**
    * Синхронизира продукт към CloudCart при промяна на цена/данни.
    * Fire-and-forget — грешките не спират основния flow.
+   *
+   * В CloudCart: цената и SKU живеят на variant-а, не на продукта.
+   * price е в центове (2999 = 29.99 лв).
    */
   async syncProductToCloudCart(companyId: string, productId: string) {
     // Проверяваме дали има активна CloudCart интеграция
@@ -304,7 +307,6 @@ export class CloudCartService {
       select: {
         sku: true,
         name: true,
-        description: true,
         salePrice: true,
         isActive: true,
       },
@@ -312,22 +314,36 @@ export class CloudCartService {
 
     if (!product || !product.sku) return;
 
-    // Търсим продукта в CloudCart по SKU
-    const ccProduct = await this.cloudCartApi.findProductBySku(options, product.sku);
-    if (!ccProduct) {
+    // Търсим продукта в CloudCart по SKU (SKU е на variant-а)
+    const result = await this.cloudCartApi.findProductBySku(options, product.sku);
+    if (!result) {
       this.logger.log(
         `Product SKU ${product.sku} not found in CloudCart, skipping sync`,
       );
       return;
     }
 
-    // Обновяваме цената и данните
+    const { product: ccProduct, included } = result;
+
     try {
+      // 1. Update product name и active status
       await this.cloudCartApi.updateProduct(options, ccProduct.id, {
         name: product.name,
-        price_from: Number(product.salePrice),
         active: product.isActive ? 'yes' : 'no',
       });
+
+      // 2. Update variant price (цената е в центове)
+      const variant = included.find(
+        (item: any) =>
+          item.type === 'variants' && item.attributes?.sku === product.sku,
+      );
+
+      if (variant) {
+        const priceInCents = Math.round(Number(product.salePrice) * 100);
+        await this.cloudCartApi.updateVariant(options, variant.id, {
+          price: priceInCents,
+        });
+      }
 
       this.logger.log(
         `Product synced to CloudCart: SKU ${product.sku} → ${integration.domain}`,

@@ -47,17 +47,18 @@ export class DemoRequestsService {
    * Send all notifications for a new demo request (runs in background)
    */
   private async sendNotifications(dto: CreateDemoRequestDto) {
-    // Push notification to super admins
+    // Push notification — само на svetlozarrosenov@gmail.com и само ако е член на OWNER компания
     try {
-      const ownerCompanyUsers = await this.prisma.userCompany.findMany({
-        where: { company: { role: 'OWNER' } },
+      const ownerUser = await this.prisma.userCompany.findFirst({
+        where: {
+          company: { role: 'OWNER' },
+          user: { email: 'svetlozarrosenov@gmail.com' },
+        },
         select: { userId: true },
       });
 
-      const adminUserIds = [...new Set(ownerCompanyUsers.map((uc) => uc.userId))];
-
-      if (adminUserIds.length > 0) {
-        await this.pushNotificationsService.sendToUsers(adminUserIds, {
+      if (ownerUser) {
+        await this.pushNotificationsService.sendToUsers([ownerUser.userId], {
           title: '🚀 Нова заявка за демо',
           body: `${dto.companyName} — ${dto.name}\n📧 ${dto.email} · 📞 ${dto.phone}`,
           url: '/dashboard/admin/demo-requests',
