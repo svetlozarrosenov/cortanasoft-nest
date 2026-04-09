@@ -175,4 +175,8 @@ export class UpdateShippingConfigDto {
   @IsOptional()
   @IsIn(['SENDER', 'RECIPIENT', 'THIRD_PARTY'])
   speedyPayerType?: string;
+
+  // Country (общо за всички providers)
+  @IsOptional()
+  senderCountryId?: number | string;
 }

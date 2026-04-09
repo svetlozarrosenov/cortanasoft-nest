@@ -59,9 +59,13 @@ export interface EcontSettings {
   paymentSharePercent?: boolean;
 }
 
+/**
+ * Pure HTTP клиент към Econt API. Не знае за Prisma, не зависи от DB.
+ * Само прави заявки и парсва отговори.
+ */
 @Injectable()
-export class EcontProvider {
-  private readonly logger = new Logger(EcontProvider.name);
+export class EcontApiClient {
+  private readonly logger = new Logger(EcontApiClient.name);
 
   async fetch(
     creds: EcontCredentials,
@@ -187,7 +191,6 @@ export class EcontProvider {
         params.description || `Поръчка ${params.orderNumber}`,
     };
 
-    // Size & handling flags
     if (sm.sizeUnder60cm) label.sizeUnder60cm = '1';
     if (sm.keepUpright) label.keepUpright = true;
     if (sm.payAfterAccept) label.payAfterAccept = true;
@@ -195,19 +198,16 @@ export class EcontProvider {
     if (sm.partialDelivery) label.partialDelivery = true;
     if (sm.emailOnDelivery) label['e-mailOnDelivery'] = true;
 
-    // Dimensions
     if (params.dimensionsL) label.shipmentDimensionsL = params.dimensionsL;
     if (params.dimensionsW) label.shipmentDimensionsW = params.dimensionsW;
     if (params.dimensionsH) label.shipmentDimensionsH = params.dimensionsH;
 
-    // Receiver: office or address
     if (params.receiverOfficeCode) {
       label.receiverOfficeCode = params.receiverOfficeCode;
     } else if (params.receiverAddress) {
       label.receiverAddress = params.receiverAddress;
     }
 
-    // Payment for shipping
     if (sm.paymentBy === 'receiver') {
       label.paymentReceiverMethod = 'cash';
     } else {
@@ -220,10 +220,8 @@ export class EcontProvider {
       }
     }
 
-    // Services
     const services: Record<string, any> = {};
 
-    // COD
     if (params.codAmount && params.codAmount > 0 && sm.codEnabled) {
       services.cdAmount = params.codAmount;
       services.cdType = 'get';
@@ -244,7 +242,6 @@ export class EcontProvider {
       }
     }
 
-    // Insurance
     if (
       sm.declaredValueEnabled &&
       params.codAmount &&
@@ -261,7 +258,6 @@ export class EcontProvider {
       label.services = services;
     }
 
-    // Instructions
     const instructions: Record<string, any>[] = [];
     if (sm.instructionsDefault) {
       instructions.push({

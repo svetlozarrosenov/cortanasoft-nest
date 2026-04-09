@@ -202,7 +202,8 @@ model Company {
   productionOrders   ProductionOrder[]
   apiKeys            ApiKey[]
   stockTransfers     StockTransfer[]
-  shippingConfigs    ShippingConfig[]
+  econtConfig        EcontConfig?
+  speedyConfig       SpeedyConfig?
   shipments          Shipment[]
   warrantyTemplates  WarrantyTemplate[]
   issuedWarranties   IssuedWarranty[]
@@ -2655,22 +2656,24 @@ enum DeliveryType {
 }
 
 // Конфигурация на доставчик за компания
-model ShippingConfig {
-  id        String  @id @default(cuid())
-  provider  String  @default("econt") // econt, speedy, etc.
-  isActive  Boolean @default(true)
+// ==================== ECONT КОНФИГУРАЦИЯ ====================
 
-  // Общи данни за достъп
-  username String? // API потребител
-  password String? // API парола
+model EcontConfig {
+  id       String  @id @default(cuid())
+  isActive Boolean @default(true)
+
+  // Достъп
+  username String?
+  password String?
   mode     String  @default("test") // test | live
 
-  // Подател по подразбиране
-  senderName       String? // Име на подателя
-  senderPhone      String? // Телефон на подателя
-  senderOfficeCode String? // Код на офис подател (Econt)
+  // Подател
+  senderName       String?
+  senderPhone      String?
+  senderCountryId  String? // ISO country id (например "BGR")
+  senderOfficeCode String? // Код на офис подател
 
-  // Тип пратка по подразбиране
+  // Тип пратка
   shipmentType String @default("PACK") // PACK, document, pallet...
 
   // Кой плаща доставката
@@ -2678,55 +2681,76 @@ model ShippingConfig {
 
   // Наложен платеж (COD)
   codEnabled     Boolean @default(false)
-  cdAgreementNum String? // Номер на договор за НП
+  cdAgreementNum String?
   cdPayMethod    String? // bank | office | door
-  cdIban         String? // IBAN за получаване
-  cdBic          String? // BIC код
+  cdIban         String?
+  cdBic          String?
 
   // Услуги
   smsNotification      Boolean @default(false)
   deliveryReceipt      Boolean @default(false)
   declaredValueEnabled Boolean @default(false)
 
-  // Инструкции за обработка (Econt)
-  sizeUnder60cm    Boolean @default(false)
-  keepUpright      Boolean @default(false)
-  payAfterAccept   Boolean @default(false)
-  payAfterTest     Boolean @default(false)
-  partialDelivery  Boolean @default(false)
-  emailOnDelivery  Boolean @default(false)
+  // Handling flags
+  sizeUnder60cm   Boolean @default(false)
+  keepUpright     Boolean @default(false)
+  payAfterAccept  Boolean @default(false)
+  payAfterTest    Boolean @default(false)
+  partialDelivery Boolean @default(false)
+  emailOnDelivery Boolean @default(false)
 
-  // Инструкции за връщане
-  returnDaysUntilReturn Int?    // Дни до автоматично връщане
-  returnFailAction      String? // Действие при неуспешна доставка
-  instructionsDefault   String? // Инструкции по подразбиране
+  // Връщане
+  returnDaysUntilReturn Int?
+  returnFailAction      String?
+  instructionsDefault   String?
 
   // Споделяне на плащане
-  paymentShareAmount  Decimal? @db.Decimal(10, 2) // Сума/процент за получателя
-  paymentSharePercent Boolean  @default(false) // Дали е процент
-
-  // === Speedy-specific ===
-  speedyServiceId        Int?    // ID на услугата (напр. 505 = стандартна)
-  speedySenderClientId   Int?    // Speedy client ID на подателя
-  speedySenderSiteId     Int?    // Speedy site ID на подателя
-  speedySenderOfficeId   Int?    // Speedy office ID на подателя
-  speedyCodProcessingType String? // CASH | POSTAL_MONEY_TRANSFER
-  speedySaturdayDelivery  Boolean @default(false)
-  speedyDeferredDays      Int?    @default(0) // 0, 1 или 2
-  speedyPayerType         String? @default("SENDER") // SENDER | RECIPIENT | THIRD_PARTY
+  paymentShareAmount  Decimal? @db.Decimal(10, 2)
+  paymentSharePercent Boolean  @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Релации
-  companyId String
+  companyId String  @unique
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  shipments Shipment[]
+  @@map("econt_configs")
+}
 
-  @@unique([companyId, provider])
-  @@index([companyId])
-  @@map("shipping_configs")
+// ==================== SPEEDY КОНФИГУРАЦИЯ ====================
+
+model SpeedyConfig {
+  id       String  @id @default(cuid())
+  isActive Boolean @default(true)
+
+  // Достъп
+  username String?
+  password String?
+
+  // Подател
+  senderName      String?
+  senderPhone     String?
+  senderCountryId Int?    @default(100) // 100 = България
+  senderSiteId    BigInt? // Speedy site ID (може да е голямо число)
+  senderOfficeId  BigInt? // Speedy office ID
+  senderClientId  BigInt? // Speedy client ID (от test connection — може да е > INT32)
+
+  // Услуги
+  serviceId        Int? // Service ID (505 = стандартна)
+  codEnabled       Boolean @default(false)
+  codProcessingType String? // CASH | POSTAL_MONEY_TRANSFER
+  declaredValueEnabled Boolean @default(false)
+  saturdayDelivery Boolean @default(false)
+  deferredDays     Int?    @default(0) // 0, 1 или 2
+  payerType        String? @default("SENDER") // SENDER | RECIPIENT | THIRD_PARTY
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("speedy_configs")
 }
 
 // Пратка
@@ -2775,15 +2799,15 @@ model Shipment {
   expectedDeliveryDate DateTime? // Очаквана дата на доставка
   trackingData         Json? // Пълни данни от куриера
 
+  // Carrier — Econt | Speedy | DHL...
+  provider String
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Релации
   orderId String
   order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
-
-  shippingConfigId String
-  shippingConfig   ShippingConfig @relation(fields: [shippingConfigId], references: [id])
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)

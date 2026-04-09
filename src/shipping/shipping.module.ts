@@ -1,14 +1,14 @@
 import { Module } from '@nestjs/common';
 import { ShippingService } from './shipping.service';
 import { ShippingController } from './shipping.controller';
-import { EcontProvider } from './econt.provider';
-import { SpeedyProvider } from './speedy.provider';
 import { PrismaModule } from '../prisma/prisma.module';
+import { EcontModule } from '../econt/econt.module';
+import { SpeedyModule } from '../speedy/speedy.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, EcontModule, SpeedyModule],
   controllers: [ShippingController],
-  providers: [ShippingService, EcontProvider, SpeedyProvider],
+  providers: [ShippingService],
   exports: [ShippingService],
 })
 export class ShippingModule {}

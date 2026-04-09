@@ -33,7 +33,7 @@ export class ShippingController {
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getConfig(@Param('companyId') companyId: string) {
-    return this.shippingService.getConfig(companyId, 'econt');
+    return this.shippingService.getEcontConfig(companyId);
   }
 
   @Patch('config')
@@ -42,7 +42,7 @@ export class ShippingController {
     @Param('companyId') companyId: string,
     @Body() dto: UpdateShippingConfigDto,
   ) {
-    return this.shippingService.updateConfig(companyId, 'econt', dto);
+    return this.shippingService.updateEcontConfig(companyId, dto);
   }
 
   @Post('test-connection')
@@ -77,7 +77,7 @@ export class ShippingController {
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getSpeedyConfig(@Param('companyId') companyId: string) {
-    return this.shippingService.getConfig(companyId, 'speedy');
+    return this.shippingService.getSpeedyConfig(companyId);
   }
 
   @Patch('speedy/config')
@@ -86,7 +86,7 @@ export class ShippingController {
     @Param('companyId') companyId: string,
     @Body() dto: UpdateShippingConfigDto,
   ) {
-    return this.shippingService.updateConfig(companyId, 'speedy', dto);
+    return this.shippingService.updateSpeedyConfig(companyId, dto);
   }
 
   @Post('speedy/test-connection')
@@ -123,6 +123,42 @@ export class ShippingController {
     @Query('postCode') postCode?: string,
   ) {
     return this.shippingService.getSpeedySites(companyId, name, postCode);
+  }
+
+  @Get('speedy/sites/:siteId')
+  @RequireAnyPermission(
+    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'erp', page: 'orders', action: 'view' },
+  )
+  getSpeedySiteById(
+    @Param('companyId') companyId: string,
+    @Param('siteId') siteId: string,
+  ) {
+    return this.shippingService.getSpeedySiteById(companyId, parseInt(siteId));
+  }
+
+  @Get('speedy/offices/:officeId')
+  @RequireAnyPermission(
+    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'erp', page: 'orders', action: 'view' },
+  )
+  getSpeedyOfficeById(
+    @Param('companyId') companyId: string,
+    @Param('officeId') officeId: string,
+  ) {
+    return this.shippingService.getSpeedyOfficeById(
+      companyId,
+      parseInt(officeId),
+    );
+  }
+
+  @Get('speedy/countries')
+  @RequireAnyPermission(
+    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'erp', page: 'orders', action: 'view' },
+  )
+  getSpeedyCountries(@Param('companyId') companyId: string) {
+    return this.shippingService.getSpeedyCountries(companyId);
   }
 
   @Get('speedy/services')
