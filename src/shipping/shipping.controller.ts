@@ -30,7 +30,7 @@ export class ShippingController {
 
   @Get('config')
   @RequireAnyPermission(
-    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'settings', page: 'econt', action: 'view' },
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getConfig(@Param('companyId') companyId: string) {
@@ -38,7 +38,7 @@ export class ShippingController {
   }
 
   @Patch('config')
-  @RequireEdit('settings', 'shipping')
+  @RequireEdit('settings', 'econt')
   updateConfig(
     @Param('companyId') companyId: string,
     @Body() dto: UpdateEcontConfigDto,
@@ -47,14 +47,14 @@ export class ShippingController {
   }
 
   @Post('test-connection')
-  @RequireEdit('settings', 'shipping')
+  @RequireEdit('settings', 'econt')
   testConnection(@Param('companyId') companyId: string) {
     return this.shippingService.testConnection(companyId, 'econt');
   }
 
   @Get('offices')
   @RequireAnyPermission(
-    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'settings', page: 'econt', action: 'view' },
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getOffices(@Param('companyId') companyId: string) {
@@ -63,7 +63,7 @@ export class ShippingController {
 
   @Get('client-profiles')
   @RequireAnyPermission(
-    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'settings', page: 'econt', action: 'view' },
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getClientProfiles(@Param('companyId') companyId: string) {
@@ -74,7 +74,7 @@ export class ShippingController {
 
   @Get('speedy/config')
   @RequireAnyPermission(
-    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'settings', page: 'speedy', action: 'view' },
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getSpeedyConfig(@Param('companyId') companyId: string) {
@@ -82,7 +82,7 @@ export class ShippingController {
   }
 
   @Patch('speedy/config')
-  @RequireEdit('settings', 'shipping')
+  @RequireEdit('settings', 'speedy')
   updateSpeedyConfig(
     @Param('companyId') companyId: string,
     @Body() dto: UpdateSpeedyConfigDto,
@@ -91,14 +91,14 @@ export class ShippingController {
   }
 
   @Post('speedy/test-connection')
-  @RequireEdit('settings', 'shipping')
+  @RequireEdit('settings', 'speedy')
   testSpeedyConnection(@Param('companyId') companyId: string) {
     return this.shippingService.testConnection(companyId, 'speedy');
   }
 
   @Get('speedy/offices')
   @RequireAnyPermission(
-    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'settings', page: 'speedy', action: 'view' },
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getSpeedyOffices(
@@ -115,7 +115,7 @@ export class ShippingController {
 
   @Get('speedy/sites')
   @RequireAnyPermission(
-    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'settings', page: 'speedy', action: 'view' },
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getSpeedySites(
@@ -128,7 +128,7 @@ export class ShippingController {
 
   @Get('speedy/sites/:siteId')
   @RequireAnyPermission(
-    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'settings', page: 'speedy', action: 'view' },
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getSpeedySiteById(
@@ -140,7 +140,7 @@ export class ShippingController {
 
   @Get('speedy/offices/:officeId')
   @RequireAnyPermission(
-    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'settings', page: 'speedy', action: 'view' },
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getSpeedyOfficeById(
@@ -155,7 +155,7 @@ export class ShippingController {
 
   @Get('speedy/countries')
   @RequireAnyPermission(
-    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'settings', page: 'speedy', action: 'view' },
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getSpeedyCountries(@Param('companyId') companyId: string) {
@@ -164,7 +164,7 @@ export class ShippingController {
 
   @Get('speedy/services')
   @RequireAnyPermission(
-    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'settings', page: 'speedy', action: 'view' },
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getSpeedyServices(@Param('companyId') companyId: string) {
@@ -173,7 +173,7 @@ export class ShippingController {
 
   @Get('speedy/client-info')
   @RequireAnyPermission(
-    { module: 'settings', page: 'shipping', action: 'view' },
+    { module: 'settings', page: 'speedy', action: 'view' },
     { module: 'erp', page: 'orders', action: 'view' },
   )
   getSpeedyClientInfo(@Param('companyId') companyId: string) {

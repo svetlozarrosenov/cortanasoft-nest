@@ -699,8 +699,13 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         actions: ['view', 'create', 'edit', 'delete'],
       },
       {
-        key: 'shipping',
+        key: 'econt',
         labelKey: 'modules.settings.shipping',
+        actions: ['view', 'edit'],
+      },
+      {
+        key: 'speedy',
+        labelKey: 'modules.settings.speedy',
         actions: ['view', 'edit'],
       },
     ],
