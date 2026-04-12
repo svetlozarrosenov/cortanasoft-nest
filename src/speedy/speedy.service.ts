@@ -10,6 +10,7 @@ import {
   CreateShipmentDto,
   CalculateShippingDto,
 } from '../shipping/dto/create-shipment.dto';
+import { UpdateSpeedyConfigDto } from './dto/update-speedy-config.dto';
 
 const PROVIDER = 'speedy';
 
@@ -31,7 +32,22 @@ export class SpeedyService implements ShippingProvider {
 
   async calculateShipping(companyId: string, dto: CalculateShippingDto) {
     const creds = await this.getCredentials(companyId);
-    const settings = await this.getSettings(companyId);
+    const dbSettings = await this.getSettings(companyId);
+
+    // Frontend подава override-и per-order; fallback от DB config
+    const settings: SpeedySettings = {
+      ...dbSettings,
+      serviceId: dto.serviceId ?? dbSettings.serviceId,
+      payerType: dto.payerType ?? dbSettings.payerType,
+      senderName: dto.senderName ?? dbSettings.senderName,
+      senderPhone: dto.senderPhone ?? dbSettings.senderPhone,
+      senderSiteId: dto.senderSiteId ?? dbSettings.senderSiteId,
+      senderOfficeId: dto.senderOfficeId ?? dbSettings.senderOfficeId,
+      saturdayDelivery: dto.saturdayDelivery ?? dbSettings.saturdayDelivery,
+      codEnabled: dto.codEnabled ?? dbSettings.codEnabled,
+      codProcessingType: dto.codProcessingType ?? dbSettings.codProcessingType,
+      declaredValueEnabled: dto.declaredValueEnabled ?? dbSettings.declaredValueEnabled,
+    };
 
     return this.api.calculateShipping(creds, settings, {
       orderNumber: 'CALC',
@@ -72,7 +88,22 @@ export class SpeedyService implements ShippingProvider {
     }
 
     const creds = this.configToCredentials(config);
-    const settings = this.configToSettings(config);
+    const dbSettings = this.configToSettings(config);
+
+    // Frontend подава override-и per-order
+    const settings: SpeedySettings = {
+      ...dbSettings,
+      serviceId: dto.serviceId ?? dbSettings.serviceId,
+      payerType: dto.payerType ?? dbSettings.payerType,
+      senderName: dto.senderName ?? dbSettings.senderName,
+      senderPhone: dto.senderPhone ?? dbSettings.senderPhone,
+      senderSiteId: dto.senderSiteId ?? dbSettings.senderSiteId,
+      senderOfficeId: dto.senderOfficeId ?? dbSettings.senderOfficeId,
+      saturdayDelivery: dto.saturdayDelivery ?? dbSettings.saturdayDelivery,
+      codEnabled: dto.codEnabled ?? dbSettings.codEnabled,
+      codProcessingType: dto.codProcessingType ?? dbSettings.codProcessingType,
+      declaredValueEnabled: dto.declaredValueEnabled ?? dbSettings.declaredValueEnabled,
+    };
 
     const result = await this.api.createShipment(creds, settings, {
       orderNumber: order.orderNumber,
@@ -96,6 +127,7 @@ export class SpeedyService implements ShippingProvider {
       height: dto.dimensionsH,
       depth: dto.dimensionsL,
       description: dto.description,
+      packageType: dto.packageType || 'BOX',
       codAmount: dto.codAmount,
       currency: dto.currency,
     });
@@ -216,12 +248,14 @@ export class SpeedyService implements ShippingProvider {
 
   async getLabel(companyId: string, shipment: any) {
     const trackingInfo = shipment.trackingData as any;
-    const parcelId = trackingInfo?.parcels?.[0]?.id;
-    if (!parcelId || !shipment.shipmentNumber) {
+    const parcelIds: string[] = (trackingInfo?.parcels || [])
+      .map((p: any) => p?.id)
+      .filter(Boolean);
+    if (parcelIds.length === 0) {
       throw new BadRequestException('Няма данни за печат');
     }
     const creds = await this.getCredentials(companyId);
-    return this.api.printLabels(creds, shipment.shipmentNumber, parcelId);
+    return this.api.printLabels(creds, parcelIds);
   }
 
   // ==================== Config CRUD ====================
@@ -234,8 +268,10 @@ export class SpeedyService implements ShippingProvider {
     return this.toResponseShape(config);
   }
 
-  async updateConfig(companyId: string, dto: any) {
-    // Map от стария "speedy*"-prefixed namespace към новите имена в SpeedyConfig модела
+  async updateConfig(companyId: string, dto: UpdateSpeedyConfigDto) {
+    const toBigInt = (v: any) =>
+      v === null || v === undefined ? null : BigInt(v);
+
     const data: any = {};
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
     if (dto.username !== undefined) data.username = dto.username;
@@ -244,27 +280,17 @@ export class SpeedyService implements ShippingProvider {
     }
     if (dto.senderName !== undefined) data.senderName = dto.senderName;
     if (dto.senderPhone !== undefined) data.senderPhone = dto.senderPhone;
-
-    // Speedy-specific (mapping старите prefixed имена към новата схема)
-    // BigInt полетата изискват конверсия от number → bigint за Prisma
-    const toBigInt = (v: any) =>
-      v === null || v === undefined ? null : BigInt(v);
-    if (dto.speedySenderClientId !== undefined)
-      data.senderClientId = toBigInt(dto.speedySenderClientId);
-    if (dto.speedySenderSiteId !== undefined)
-      data.senderSiteId = toBigInt(dto.speedySenderSiteId);
-    if (dto.speedySenderOfficeId !== undefined)
-      data.senderOfficeId = toBigInt(dto.speedySenderOfficeId);
-    if (dto.speedyServiceId !== undefined) data.serviceId = dto.speedyServiceId;
-    if (dto.speedyCodProcessingType !== undefined) data.codProcessingType = dto.speedyCodProcessingType;
-    if (dto.speedySaturdayDelivery !== undefined) data.saturdayDelivery = dto.speedySaturdayDelivery;
-    if (dto.speedyDeferredDays !== undefined) data.deferredDays = dto.speedyDeferredDays;
-    if (dto.speedyPayerType !== undefined) data.payerType = dto.speedyPayerType;
+    if (dto.senderCountryId !== undefined) data.senderCountryId = dto.senderCountryId;
+    if (dto.senderClientId !== undefined) data.senderClientId = toBigInt(dto.senderClientId);
+    if (dto.senderSiteId !== undefined) data.senderSiteId = toBigInt(dto.senderSiteId);
+    if (dto.senderOfficeId !== undefined) data.senderOfficeId = toBigInt(dto.senderOfficeId);
+    if (dto.serviceId !== undefined) data.serviceId = dto.serviceId;
+    if (dto.codProcessingType !== undefined) data.codProcessingType = dto.codProcessingType;
+    if (dto.saturdayDelivery !== undefined) data.saturdayDelivery = dto.saturdayDelivery;
+    if (dto.deferredDays !== undefined) data.deferredDays = dto.deferredDays;
+    if (dto.payerType !== undefined) data.payerType = dto.payerType;
     if (dto.codEnabled !== undefined) data.codEnabled = dto.codEnabled;
     if (dto.declaredValueEnabled !== undefined) data.declaredValueEnabled = dto.declaredValueEnabled;
-
-    // Country (нов)
-    if (dto.senderCountryId !== undefined) data.senderCountryId = dto.senderCountryId;
 
     const existing = await this.prisma.speedyConfig.findUnique({
       where: { companyId },
@@ -288,31 +314,20 @@ export class SpeedyService implements ShippingProvider {
    * Mapping от DB модела (без префикс) обратно към "speedy*"-prefixed схема,
    * която frontend-ът очаква. BigInt полетата се конвертират към number за JSON.
    */
+  /**
+   * Конвертира DB record към JSON-safe response.
+   * BigInt полетата се конвертират към number.
+   */
   private toResponseShape(config: any) {
     const bigIntToNumber = (v: bigint | null | undefined) =>
       v === null || v === undefined ? null : Number(v);
 
     return {
-      id: config.id,
-      isActive: config.isActive,
-      username: config.username,
+      ...config,
       password: config.password ? '••••••••' : null,
-      senderName: config.senderName,
-      senderPhone: config.senderPhone,
-      senderCountryId: config.senderCountryId,
-      speedySenderClientId: bigIntToNumber(config.senderClientId),
-      speedySenderSiteId: bigIntToNumber(config.senderSiteId),
-      speedySenderOfficeId: bigIntToNumber(config.senderOfficeId),
-      speedyServiceId: config.serviceId,
-      speedyCodProcessingType: config.codProcessingType,
-      speedySaturdayDelivery: config.saturdayDelivery,
-      speedyDeferredDays: config.deferredDays,
-      speedyPayerType: config.payerType,
-      codEnabled: config.codEnabled,
-      declaredValueEnabled: config.declaredValueEnabled,
-      createdAt: config.createdAt,
-      updatedAt: config.updatedAt,
-      companyId: config.companyId,
+      senderClientId: bigIntToNumber(config.senderClientId),
+      senderSiteId: bigIntToNumber(config.senderSiteId),
+      senderOfficeId: bigIntToNumber(config.senderOfficeId),
     };
   }
 

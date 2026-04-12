@@ -10,6 +10,7 @@ import {
   CreateShipmentDto,
   CalculateShippingDto,
 } from '../shipping/dto/create-shipment.dto';
+import { UpdateEcontConfigDto } from './dto/update-econt-config.dto';
 
 const PROVIDER = 'econt';
 
@@ -31,7 +32,19 @@ export class EcontService implements ShippingProvider {
 
   async calculateShipping(companyId: string, dto: CalculateShippingDto) {
     const creds = await this.getCredentials(companyId);
-    const settings = await this.getSettings(companyId);
+    const dbSettings = await this.getSettings(companyId);
+
+    // Frontend подава override-и per-order; fallback от DB config
+    const settings: EcontSettings = {
+      ...dbSettings,
+      senderName: dto.senderName ?? dbSettings.senderName,
+      senderPhone: dto.senderPhone ?? dbSettings.senderPhone,
+      senderOfficeCode: dto.senderOfficeCode ?? dbSettings.senderOfficeCode,
+      shipmentType: dto.shipmentType ?? dbSettings.shipmentType,
+      paymentBy: dto.paymentBy ?? dbSettings.paymentBy,
+      codEnabled: dto.codEnabled ?? dbSettings.codEnabled,
+      declaredValueEnabled: dto.declaredValueEnabled ?? dbSettings.declaredValueEnabled,
+    };
 
     return this.api.calculateShipping(creds, settings, {
       orderNumber: 'CALC',
@@ -186,15 +199,12 @@ export class EcontService implements ShippingProvider {
     return { ...config, password: config.password ? '••••••••' : null };
   }
 
-  async updateConfig(companyId: string, dto: any) {
-    const data: any = { ...dto };
+  async updateConfig(companyId: string, dto: UpdateEcontConfigDto) {
+    const data = { ...dto } as any;
+
     if (data.password === '••••••••' || data.password === '') {
       delete data.password;
     }
-    delete data.id;
-    delete data.companyId;
-    delete data.createdAt;
-    delete data.updatedAt;
 
     const existing = await this.prisma.econtConfig.findUnique({
       where: { companyId },

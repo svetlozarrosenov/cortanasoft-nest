@@ -9,7 +9,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ShippingService } from './shipping.service';
-import { UpdateShippingConfigDto } from './dto/shipping-config.dto';
+import { UpdateEcontConfigDto } from '../econt/dto/update-econt-config.dto';
+import { UpdateSpeedyConfigDto } from '../speedy/dto/update-speedy-config.dto';
 import { CreateShipmentDto, CalculateShippingDto } from './dto/create-shipment.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -40,7 +41,7 @@ export class ShippingController {
   @RequireEdit('settings', 'shipping')
   updateConfig(
     @Param('companyId') companyId: string,
-    @Body() dto: UpdateShippingConfigDto,
+    @Body() dto: UpdateEcontConfigDto,
   ) {
     return this.shippingService.updateEcontConfig(companyId, dto);
   }
@@ -84,7 +85,7 @@ export class ShippingController {
   @RequireEdit('settings', 'shipping')
   updateSpeedyConfig(
     @Param('companyId') companyId: string,
-    @Body() dto: UpdateShippingConfigDto,
+    @Body() dto: UpdateSpeedyConfigDto,
   ) {
     return this.shippingService.updateSpeedyConfig(companyId, dto);
   }
@@ -179,15 +180,6 @@ export class ShippingController {
     return this.shippingService.getSpeedyClientInfo(companyId);
   }
 
-  @Post('speedy/calculate')
-  @RequireView('erp', 'orders')
-  calculateSpeedy(
-    @Param('companyId') companyId: string,
-    @Body() dto: CalculateShippingDto,
-  ) {
-    return this.shippingService.calculateShipping(companyId, 'speedy', dto);
-  }
-
   @Get('speedy/shipments/:shipmentId/label')
   @RequireView('erp', 'orders')
   getSpeedyLabel(
@@ -205,7 +197,7 @@ export class ShippingController {
     @Param('companyId') companyId: string,
     @Body() dto: CalculateShippingDto,
   ) {
-    return this.shippingService.calculateShipping(companyId, 'econt', dto);
+    return this.shippingService.calculateShipping(companyId, dto.provider, dto);
   }
 
   @Post('shipments')

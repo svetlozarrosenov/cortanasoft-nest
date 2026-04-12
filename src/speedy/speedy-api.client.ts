@@ -68,6 +68,7 @@ export interface SpeedyShipmentParams {
   height?: number;
   depth?: number;
   description?: string;
+  packageType?: string; // BOX | ENVELOPE | BAG | PALLET
   codAmount?: number;
   currency?: string;
 }
@@ -90,13 +91,20 @@ export class SpeedyApiClient {
       ...body,
     };
 
-    const res = await fetch(`${SPEEDY_BASE}${path}`, {
+    const url = `${SPEEDY_BASE}${path}`;
+    const bodyJson = JSON.stringify(payload);
+    this.logger.debug(`→ POST ${url}`);
+    this.logger.debug(`→ Body: ${bodyJson.replace(/"password":"[^"]*"/, '"password":"***"')}`);
+
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(payload),
+      body: bodyJson,
     });
 
     const data: Record<string, any> = await res.json();
+    this.logger.debug(`← ${res.status} ${JSON.stringify(data).slice(0, 1000)}`);
+
     if (data && data.error) {
       const errMsg =
         (data.error as { message?: string })?.message ||
@@ -300,8 +308,15 @@ export class SpeedyApiClient {
     params: SpeedyShipmentParams,
   ) {
     const body = this.buildCalculationBody(settings, params);
+    this.logger.log(`Speedy calculate body: ${JSON.stringify(body)}`);
     const result = await this.fetch(creds, '/calculate', body);
     const calc = result.calculations?.[0];
+
+    // Speedy връща 200 OK, но грешката е вътре в calculations[0].error
+    if (calc?.error) {
+      throw new Error(calc.error.message || JSON.stringify(calc.error));
+    }
+
     return {
       serviceId: calc?.serviceId,
       totalPrice: calc?.price?.total || 0,
@@ -345,13 +360,13 @@ export class SpeedyApiClient {
 
   async printLabels(
     creds: SpeedyCredentials,
-    shipmentId: string,
-    parcelId: string,
+    parcelIds: string[],
     paperSize: 'A4' | 'A6' | 'A4_4xA6' = 'A6',
   ) {
-    const result = await this.fetch(creds, '/print/extended', {
+    const result = await this.fetch(creds, '/print', {
       paperSize,
-      parcels: [{ parcelId, shipmentId }],
+      parcels: parcelIds.map((id) => ({ parcel: { id } })),
+      additionalWaybillSenderCopy: 'NONE',
     });
     return {
       data: result.data || null,
@@ -382,10 +397,16 @@ export class SpeedyApiClient {
     };
 
     if (params.receiverOfficeId) {
-      // Office pickup — officeId влиза в address
-      address.officeId = params.receiverOfficeId;
-      if (params.receiverSiteId) address.siteId = params.receiverSiteId;
-    } else if (params.receiverAddress) {
+      // Office pickup — pickupOfficeId на recipient ниво, НЕ в address
+      return {
+        pickupOfficeId: params.receiverOfficeId,
+        phone1: { number: params.receiverPhone },
+        clientName: params.receiverName,
+        privatePerson: true,
+      };
+    }
+
+    if (params.receiverAddress) {
       address.siteId = params.receiverAddress.siteId;
       if (params.receiverAddress.streetName) {
         address.addressText = [
@@ -410,7 +431,8 @@ export class SpeedyApiClient {
     return {
       address,
       phone1: { number: params.receiverPhone },
-      contactName: params.receiverName,
+      clientName: params.receiverName,
+      privatePerson: true,
     };
   }
 
@@ -447,25 +469,40 @@ export class SpeedyApiClient {
    * НЕ е същата като /shipment recipient. Изисква parcelsCount + totalWeight.
    * Документация: https://api.speedy.bg/api/docs/#href-calculate
    */
+  /**
+   * Per https://services.speedy.bg/api/#CalculationRequest
+   *
+   * Key differences from our old code:
+   * - recipient.addressLocation.siteId (NOT recipient.siteId)
+   * - service.serviceIds: [505] (array, NOT serviceId)
+   * - payment.courierServicePayer (NOT payerType)
+   * - sender.clientId for authenticated sender
+   */
   private buildCalculationBody(
     settings: SpeedySettings,
     params: SpeedyShipmentParams,
   ): Record<string, any> {
-    const recipient: Record<string, any> = { countryId: 100 };
+    const recipient: Record<string, any> = {
+      privatePerson: true,
+    };
 
     if (params.receiverOfficeId) {
-      recipient.siteId =
-        params.receiverSiteId || settings.senderSiteId || 68134;
+      recipient.pickupOfficeId = params.receiverOfficeId;
     } else if (params.receiverAddress) {
-      recipient.siteId = params.receiverAddress.siteId;
+      recipient.addressLocation = {
+        siteId: params.receiverAddress.siteId,
+      };
+    } else if (params.receiverSiteId) {
+      recipient.addressLocation = {
+        siteId: params.receiverSiteId,
+      };
     }
 
-    return {
+    const body: Record<string, any> = {
       recipient,
       service: {
-        serviceId: settings.serviceId || 505,
         autoAdjustPickupDate: true,
-        saturdayDelivery: settings.saturdayDelivery || false,
+        serviceIds: [settings.serviceId || 505],
         additionalServices: this.buildAdditionalServices(settings, params),
       },
       content: {
@@ -473,9 +510,19 @@ export class SpeedyApiClient {
         totalWeight: params.weight,
       },
       payment: {
-        payerType: settings.payerType || 'SENDER',
+        courierServicePayer: settings.payerType || 'SENDER',
       },
     };
+
+    // Sender
+    if (settings.senderClientId) {
+      body.sender = { clientId: settings.senderClientId };
+      if (settings.senderOfficeId) {
+        body.sender.dropoffOfficeId = settings.senderOfficeId;
+      }
+    }
+
+    return body;
   }
 
   /**
@@ -488,16 +535,28 @@ export class SpeedyApiClient {
    * - sender ползва phone1: { number }, НЕ phoneNumber
    * - service.pickupDate е препоръчителен
    */
+  /**
+   * /shipment body per official Speedy API spec:
+   * https://services.speedy.bg/api/#CreateShipmentRequest
+   *
+   * Ключови разлики от /calculate:
+   * - service.serviceId (единично), НЕ serviceIds (масив)
+   * - content.parcels (масив с seqNo) + parcelsCount + totalWeight
+   * - payment.courierServicePayer (НЕ payerType)
+   * - recipient.pickupOfficeId за офис, recipient.address за адрес
+   */
   private buildShipmentBody(
     settings: SpeedySettings,
     params: SpeedyShipmentParams,
   ): Record<string, any> {
     const recipient = this.buildRecipient(settings, params);
 
+    const parcelsCount = params.parcelsCount || 1;
     const parcels: Record<string, any>[] = [];
-    for (let i = 0; i < (params.parcelsCount || 1); i++) {
+    for (let i = 0; i < parcelsCount; i++) {
       const parcel: Record<string, any> = {
-        weight: params.weight / (params.parcelsCount || 1),
+        seqNo: i + 1,
+        weight: params.weight / parcelsCount,
       };
       const size: Record<string, number> = {};
       if (params.width) size.width = params.width;
@@ -507,34 +566,44 @@ export class SpeedyApiClient {
       parcels.push(parcel);
     }
 
-    // pickupDate = today (yyyy-MM-dd)
-    const pickupDate = new Date().toISOString().split('T')[0];
-
     const body: Record<string, any> = {
       recipient,
       service: {
         serviceId: settings.serviceId || 505,
-        pickupDate,
         autoAdjustPickupDate: true,
         saturdayDelivery: settings.saturdayDelivery || false,
         additionalServices: this.buildAdditionalServices(settings, params),
       },
       content: {
+        parcelsCount,
+        totalWeight: params.weight,
+        contents: params.description || undefined,
+        package: params.packageType || 'BOX',
         parcels,
       },
       payment: {
-        payerType: settings.payerType || 'SENDER',
+        courierServicePayer: settings.payerType || 'SENDER',
       },
       ref1: params.orderNumber,
       shipmentNote: params.description || `Поръчка ${params.orderNumber}`,
     };
 
-    // Sender — ползва phone1: { number }, не phoneNumber
-    if (settings.senderPhone || settings.senderClientId) {
+    // Sender
+    if (settings.senderClientId || settings.senderPhone) {
       const sender: Record<string, any> = {};
-      if (settings.senderClientId) sender.clientId = settings.senderClientId;
+      if (settings.senderClientId) {
+        sender.clientId = settings.senderClientId;
+      } else {
+        sender.privatePerson = false;
+      }
       if (settings.senderPhone) {
         sender.phone1 = { number: settings.senderPhone };
+      }
+      if (settings.senderName) {
+        sender.contactName = settings.senderName;
+      }
+      if (settings.senderOfficeId) {
+        sender.dropoffOfficeId = settings.senderOfficeId;
       }
       body.sender = sender;
     }

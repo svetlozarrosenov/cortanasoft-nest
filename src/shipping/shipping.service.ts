@@ -8,6 +8,8 @@ import { EcontService } from '../econt/econt.service';
 import { SpeedyService } from '../speedy/speedy.service';
 import { ShippingProvider } from './shipping-provider.interface';
 import { CreateShipmentDto, CalculateShippingDto } from './dto/create-shipment.dto';
+import { UpdateEcontConfigDto } from '../econt/dto/update-econt-config.dto';
+import { UpdateSpeedyConfigDto } from '../speedy/dto/update-speedy-config.dto';
 
 const SHIPMENT_INCLUDE = {
   order: {
@@ -69,8 +71,7 @@ export class ShippingService {
       throw new NotFoundException('Поръчката не е намерена');
     }
 
-    const providerName = dto.provider || 'econt';
-    return this.getProvider(providerName).createShipment(companyId, dto, order);
+    return this.getProvider(dto.provider).createShipment(companyId, dto, order);
   }
 
   async getOrderShipments(companyId: string, orderId: string) {
@@ -125,7 +126,7 @@ export class ShippingService {
   getEcontConfig(companyId: string) {
     return this.econtService.getConfig(companyId);
   }
-  updateEcontConfig(companyId: string, dto: any) {
+  updateEcontConfig(companyId: string, dto: UpdateEcontConfigDto) {
     return this.econtService.updateConfig(companyId, dto);
   }
   getEcontOffices(companyId: string) {
@@ -139,7 +140,7 @@ export class ShippingService {
   getSpeedyConfig(companyId: string) {
     return this.speedyService.getConfig(companyId);
   }
-  updateSpeedyConfig(companyId: string, dto: any) {
+  updateSpeedyConfig(companyId: string, dto: UpdateSpeedyConfigDto) {
     return this.speedyService.updateConfig(companyId, dto);
   }
   getSpeedyOffices(companyId: string, siteId?: number, name?: string) {

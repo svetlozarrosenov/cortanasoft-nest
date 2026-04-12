@@ -14,9 +14,8 @@ export class CreateShipmentDto {
   orderId: string;
 
   @IsString()
-  @IsOptional()
   @IsIn(['econt', 'speedy'])
-  provider?: string;
+  provider: string;
 
   @IsEnum(DeliveryType)
   deliveryType: DeliveryType;
@@ -93,6 +92,11 @@ export class CreateShipmentDto {
   @IsOptional()
   description?: string;
 
+  @IsString()
+  @IsOptional()
+  @IsIn(['BOX', 'ENVELOPE', 'BAG', 'PALLET'])
+  packageType?: string;
+
   // COD
   @IsNumber()
   @IsOptional()
@@ -102,9 +106,63 @@ export class CreateShipmentDto {
   @IsString()
   @IsOptional()
   currency?: string;
+
+  // Sender config overrides (per-order)
+  @IsInt()
+  @IsOptional()
+  serviceId?: number;
+
+  @IsString()
+  @IsOptional()
+  payerType?: string;
+
+  @IsString()
+  @IsOptional()
+  senderName?: string;
+
+  @IsString()
+  @IsOptional()
+  senderPhone?: string;
+
+  @IsString()
+  @IsOptional()
+  senderOfficeCode?: string;
+
+  @IsInt()
+  @IsOptional()
+  senderSiteId?: number;
+
+  @IsInt()
+  @IsOptional()
+  senderOfficeId?: number;
+
+  @IsOptional()
+  saturdayDelivery?: boolean;
+
+  @IsOptional()
+  codEnabled?: boolean;
+
+  @IsString()
+  @IsOptional()
+  codProcessingType?: string;
+
+  @IsOptional()
+  declaredValueEnabled?: boolean;
+
+  @IsString()
+  @IsOptional()
+  shipmentType?: string;
+
+  @IsString()
+  @IsOptional()
+  paymentBy?: string;
 }
 
 export class CalculateShippingDto {
+  @IsString()
+  @IsIn(['econt', 'speedy'])
+  provider: string;
+
   @IsEnum(DeliveryType)
   deliveryType: DeliveryType;
 
@@ -168,4 +226,55 @@ export class CalculateShippingDto {
   @IsString()
   @IsOptional()
   currency?: string;
+
+  // === Sender config overrides (per-order, frontend попълва defaults от config) ===
+
+  @IsInt()
+  @IsOptional()
+  serviceId?: number;
+
+  @IsString()
+  @IsOptional()
+  payerType?: string;
+
+  @IsString()
+  @IsOptional()
+  senderName?: string;
+
+  @IsString()
+  @IsOptional()
+  senderPhone?: string;
+
+  @IsString()
+  @IsOptional()
+  senderOfficeCode?: string;
+
+  @IsInt()
+  @IsOptional()
+  senderSiteId?: number;
+
+  @IsInt()
+  @IsOptional()
+  senderOfficeId?: number;
+
+  @IsOptional()
+  saturdayDelivery?: boolean;
+
+  @IsOptional()
+  codEnabled?: boolean;
+
+  @IsString()
+  @IsOptional()
+  codProcessingType?: string;
+
+  @IsOptional()
+  declaredValueEnabled?: boolean;
+
+  @IsString()
+  @IsOptional()
+  shipmentType?: string;
+
+  @IsString()
+  @IsOptional()
+  paymentBy?: string;
 }
