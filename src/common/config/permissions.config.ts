@@ -213,6 +213,11 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
+        key: 'offers',
+        labelKey: 'modules.erp.offers',
+        actions: ['view', 'create', 'edit', 'delete'],
+      },
+      {
         key: 'invoices',
         labelKey: 'modules.erp.invoices',
         actions: ['view', 'create', 'edit', 'delete'],

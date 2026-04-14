@@ -43,6 +43,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { StockTransfersModule } from './stock-transfers/stock-transfers.module';
 import { MailModule } from './mail/mail.module';
 import { ShippingModule } from './shipping/shipping.module';
+import { OffersModule } from './offers/offers.module';
 import { WarrantiesModule } from './warranties/warranties.module';
 import { ContactSubmissionsModule } from './contact-submissions/contact-submissions.module';
 import { CloudCartModule } from './cloudcart/cloudcart.module';
@@ -108,6 +109,7 @@ import { WordPressModule } from './wordpress/wordpress.module';
     StockTransfersModule,
     MailModule,
     ShippingModule,
+    OffersModule,
     WarrantiesModule,
     ContactSubmissionsModule,
     CloudCartModule,
