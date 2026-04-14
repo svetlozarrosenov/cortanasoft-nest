@@ -1,120 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-
-export interface CloudCartRequestOptions {
-  domain: string;
-  apiKey: string;
-}
-
-export interface CloudCartPaginationMeta {
-  'current-page': number;
-  'per-page': number;
-  from: number;
-  to: number;
-  total: number;
-  'last-page': number;
-}
-
-export interface CloudCartProduct {
-  type: 'products';
-  id: string;
-  attributes: {
-    url_handle: string;
-    name: string;
-    description: string | null;
-    short_description: string | null;
-    seo_title: string | null;
-    seo_description: string | null;
-    category_id: number | null;
-    vendor_id: number | null;
-    image_id: number | null;
-    price_from: number | null;
-    price_to: number | null;
-    active: string;
-    draft: string;
-    tracking: string;
-    shipping: string;
-    digital: string;
-    sale: string;
-    new: string;
-    featured: number;
-    continue_selling: string;
-    product_type: string;
-    date_added: string;
-    date_modified: string;
-    default_variant_id: number | null;
-    p1: string | null;
-    p2: string | null;
-    p3: string | null;
-  };
-  relationships?: Record<string, any>;
-}
-
-export interface CloudCartCategory {
-  type: 'categories';
-  id: string;
-  attributes: {
-    name: string;
-    order: number;
-    description: string | null;
-    parent_id: number | null;
-    seo_title: string | null;
-    seo_description: string | null;
-    url_handle: string;
-    date_modified: string;
-    image: string | null;
-    image_url: string | null;
-  };
-}
-
-export interface CloudCartVariant {
-  type: 'variants';
-  id: string;
-  attributes: {
-    sku: string | null;
-    barcode: string | null;
-    price: number;
-    price_compare: number | null;
-    weight: number | null;
-    option1_id: number | null;
-    option2_id: number | null;
-    option3_id: number | null;
-    active: string;
-    position: number;
-    image_id: number | null;
-  };
-}
-
-export interface CloudCartStoreQuantity {
-  type: 'store-quantity';
-  id: string;
-  attributes: {
-    shop_id: number;
-    qty: number;
-    product_id: number;
-    variant_id: number;
-  };
-}
-
-export interface CloudCartImage {
-  type: 'images';
-  id: string;
-  attributes: {
-    position: number;
-    thumbs: Record<string, string>;
-  };
-}
-
-export interface CloudCartListResponse<T> {
-  meta: { page: CloudCartPaginationMeta };
-  links: { first?: string; next?: string; last?: string };
-  data: T[];
-  included?: any[];
-}
-
-export interface CloudCartSingleResponse<T> {
-  data: T;
-  included?: any[];
-}
+import {
+  CloudCartRequestOptions,
+  CloudCartCategory,
+  CloudCartProduct,
+  CloudCartStoreQuantity,
+  CloudCartListResponse,
+  CloudCartSingleResponse,
+} from './interfaces';
 
 @Injectable()
 export class CloudCartApiService {

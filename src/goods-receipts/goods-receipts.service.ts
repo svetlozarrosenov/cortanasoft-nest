@@ -5,6 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { WordPressService } from '../wordpress/wordpress.service';
 import {
   CreateGoodsReceiptDto,
   UpdateGoodsReceiptDto,
@@ -50,6 +51,7 @@ export class GoodsReceiptsService {
 
   constructor(
     private prisma: PrismaService,
+    private wordPressService: WordPressService,
   ) {}
 
   private async generateReceiptNumber(
@@ -474,7 +476,7 @@ export class GoodsReceiptsService {
       }
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // === Create inventory when delivering ===
       if (isDelivering) {
         const serialsMap = new Map<string, string[]>();
@@ -610,6 +612,16 @@ export class GoodsReceiptsService {
         include: RECEIPT_INCLUDE,
       });
     });
+
+    // Sync inventory to WordPress (fire-and-forget)
+    if (isDelivering || isCancellingDelivered) {
+      const productIds = [...new Set(receipt.items.map((item) => item.productId))];
+      for (const productId of productIds) {
+        this.wordPressService.syncProduct(companyId, productId).catch(() => {});
+      }
+    }
+
+    return result;
   }
 
   async cancel(companyId: string, id: string) {

@@ -1,11 +1,8 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  EcontApiClient,
-  EcontCredentials,
-  EcontSettings,
-} from './econt-api.client';
-import { ShippingProvider } from '../shipping/shipping-provider.interface';
+import { EcontApiService } from './econt-api.service';
+import { EcontCredentials, EcontSettings } from './interfaces';
+import { ShippingProvider } from '../shipping/interfaces';
 import {
   CreateShipmentDto,
   CalculateShippingDto,
@@ -20,7 +17,7 @@ export class EcontService implements ShippingProvider {
 
   constructor(
     private prisma: PrismaService,
-    private api: EcontApiClient,
+    private api: EcontApiService,
   ) {}
 
   // ==================== ShippingProvider implementation ====================

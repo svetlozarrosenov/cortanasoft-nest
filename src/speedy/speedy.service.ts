@@ -1,11 +1,12 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
 import {
-  SpeedyApiClient,
-  SpeedyCredentials,
-  SpeedySettings,
-} from './speedy-api.client';
-import { ShippingProvider } from '../shipping/shipping-provider.interface';
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { SpeedyApiService } from './speedy-api.service';
+import { SpeedyCredentials, SpeedySettings } from './interfaces';
+import { ShippingProvider } from '../shipping/interfaces';
 import {
   CreateShipmentDto,
   CalculateShippingDto,
@@ -20,7 +21,7 @@ export class SpeedyService implements ShippingProvider {
 
   constructor(
     private prisma: PrismaService,
-    private api: SpeedyApiClient,
+    private api: SpeedyApiService,
   ) {}
 
   // ==================== ShippingProvider implementation ====================
@@ -244,6 +245,16 @@ export class SpeedyService implements ShippingProvider {
   async getClientInfo(companyId: string) {
     const creds = await this.getCredentials(companyId);
     return this.api.getClientInfo(creds);
+  }
+
+  async getLabelByShipmentId(companyId: string, shipmentId: string) {
+    const shipment = await this.prisma.shipment.findFirst({
+      where: { id: shipmentId, companyId },
+    });
+    if (!shipment || shipment.provider !== 'speedy') {
+      throw new NotFoundException('Speedy пратка не е намерена');
+    }
+    return this.getLabel(companyId, shipment);
   }
 
   async getLabel(companyId: string, shipment: any) {

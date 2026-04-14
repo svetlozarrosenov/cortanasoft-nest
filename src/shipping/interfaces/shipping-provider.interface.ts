@@ -1,4 +1,4 @@
-import { CreateShipmentDto, CalculateShippingDto } from './dto/create-shipment.dto';
+import { CreateShipmentDto, CalculateShippingDto } from '../dto/create-shipment.dto';
 
 /**
  * Унифициран контракт, който всеки carrier модул (Econt, Speedy, DHL...)

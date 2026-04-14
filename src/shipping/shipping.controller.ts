@@ -1,195 +1,21 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Patch,
-  Param,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
 import { ShippingService } from './shipping.service';
-import { UpdateEcontConfigDto } from '../econt/dto/update-econt-config.dto';
-import { UpdateSpeedyConfigDto } from '../speedy/dto/update-speedy-config.dto';
-import { CreateShipmentDto, CalculateShippingDto } from './dto/create-shipment.dto';
+import {
+  CreateShipmentDto,
+  CalculateShippingDto,
+} from './dto/create-shipment.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import {
   PermissionsGuard,
   RequireView,
   RequireEdit,
-  RequireAnyPermission,
 } from '../common/guards/permissions.guard';
 
 @Controller('companies/:companyId/shipping')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)
 export class ShippingController {
   constructor(private readonly shippingService: ShippingService) {}
-
-  // ==================== Econt Config ====================
-
-  @Get('config')
-  @RequireAnyPermission(
-    { module: 'settings', page: 'econt', action: 'view' },
-    { module: 'erp', page: 'orders', action: 'view' },
-  )
-  getConfig(@Param('companyId') companyId: string) {
-    return this.shippingService.getEcontConfig(companyId);
-  }
-
-  @Patch('config')
-  @RequireEdit('settings', 'econt')
-  updateConfig(
-    @Param('companyId') companyId: string,
-    @Body() dto: UpdateEcontConfigDto,
-  ) {
-    return this.shippingService.updateEcontConfig(companyId, dto);
-  }
-
-  @Post('test-connection')
-  @RequireEdit('settings', 'econt')
-  testConnection(@Param('companyId') companyId: string) {
-    return this.shippingService.testConnection(companyId, 'econt');
-  }
-
-  @Get('offices')
-  @RequireAnyPermission(
-    { module: 'settings', page: 'econt', action: 'view' },
-    { module: 'erp', page: 'orders', action: 'view' },
-  )
-  getOffices(@Param('companyId') companyId: string) {
-    return this.shippingService.getEcontOffices(companyId);
-  }
-
-  @Get('client-profiles')
-  @RequireAnyPermission(
-    { module: 'settings', page: 'econt', action: 'view' },
-    { module: 'erp', page: 'orders', action: 'view' },
-  )
-  getClientProfiles(@Param('companyId') companyId: string) {
-    return this.shippingService.getEcontClientProfiles(companyId);
-  }
-
-  // ==================== Speedy Config ====================
-
-  @Get('speedy/config')
-  @RequireAnyPermission(
-    { module: 'settings', page: 'speedy', action: 'view' },
-    { module: 'erp', page: 'orders', action: 'view' },
-  )
-  getSpeedyConfig(@Param('companyId') companyId: string) {
-    return this.shippingService.getSpeedyConfig(companyId);
-  }
-
-  @Patch('speedy/config')
-  @RequireEdit('settings', 'speedy')
-  updateSpeedyConfig(
-    @Param('companyId') companyId: string,
-    @Body() dto: UpdateSpeedyConfigDto,
-  ) {
-    return this.shippingService.updateSpeedyConfig(companyId, dto);
-  }
-
-  @Post('speedy/test-connection')
-  @RequireEdit('settings', 'speedy')
-  testSpeedyConnection(@Param('companyId') companyId: string) {
-    return this.shippingService.testConnection(companyId, 'speedy');
-  }
-
-  @Get('speedy/offices')
-  @RequireAnyPermission(
-    { module: 'settings', page: 'speedy', action: 'view' },
-    { module: 'erp', page: 'orders', action: 'view' },
-  )
-  getSpeedyOffices(
-    @Param('companyId') companyId: string,
-    @Query('siteId') siteId?: string,
-    @Query('name') name?: string,
-  ) {
-    return this.shippingService.getSpeedyOffices(
-      companyId,
-      siteId ? parseInt(siteId) : undefined,
-      name,
-    );
-  }
-
-  @Get('speedy/sites')
-  @RequireAnyPermission(
-    { module: 'settings', page: 'speedy', action: 'view' },
-    { module: 'erp', page: 'orders', action: 'view' },
-  )
-  getSpeedySites(
-    @Param('companyId') companyId: string,
-    @Query('name') name?: string,
-    @Query('postCode') postCode?: string,
-  ) {
-    return this.shippingService.getSpeedySites(companyId, name, postCode);
-  }
-
-  @Get('speedy/sites/:siteId')
-  @RequireAnyPermission(
-    { module: 'settings', page: 'speedy', action: 'view' },
-    { module: 'erp', page: 'orders', action: 'view' },
-  )
-  getSpeedySiteById(
-    @Param('companyId') companyId: string,
-    @Param('siteId') siteId: string,
-  ) {
-    return this.shippingService.getSpeedySiteById(companyId, parseInt(siteId));
-  }
-
-  @Get('speedy/offices/:officeId')
-  @RequireAnyPermission(
-    { module: 'settings', page: 'speedy', action: 'view' },
-    { module: 'erp', page: 'orders', action: 'view' },
-  )
-  getSpeedyOfficeById(
-    @Param('companyId') companyId: string,
-    @Param('officeId') officeId: string,
-  ) {
-    return this.shippingService.getSpeedyOfficeById(
-      companyId,
-      parseInt(officeId),
-    );
-  }
-
-  @Get('speedy/countries')
-  @RequireAnyPermission(
-    { module: 'settings', page: 'speedy', action: 'view' },
-    { module: 'erp', page: 'orders', action: 'view' },
-  )
-  getSpeedyCountries(@Param('companyId') companyId: string) {
-    return this.shippingService.getSpeedyCountries(companyId);
-  }
-
-  @Get('speedy/services')
-  @RequireAnyPermission(
-    { module: 'settings', page: 'speedy', action: 'view' },
-    { module: 'erp', page: 'orders', action: 'view' },
-  )
-  getSpeedyServices(@Param('companyId') companyId: string) {
-    return this.shippingService.getSpeedyServices(companyId);
-  }
-
-  @Get('speedy/client-info')
-  @RequireAnyPermission(
-    { module: 'settings', page: 'speedy', action: 'view' },
-    { module: 'erp', page: 'orders', action: 'view' },
-  )
-  getSpeedyClientInfo(@Param('companyId') companyId: string) {
-    return this.shippingService.getSpeedyClientInfo(companyId);
-  }
-
-  @Get('speedy/shipments/:shipmentId/label')
-  @RequireView('erp', 'orders')
-  getSpeedyLabel(
-    @Param('companyId') companyId: string,
-    @Param('shipmentId') shipmentId: string,
-  ) {
-    return this.shippingService.getSpeedyLabel(companyId, shipmentId);
-  }
-
-  // ==================== Common Shipments ====================
 
   @Post('calculate')
   @RequireView('erp', 'orders')

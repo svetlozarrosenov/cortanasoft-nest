@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 import { SpeedyService } from './speedy.service';
-import { SpeedyApiClient } from './speedy-api.client';
+import { SpeedyApiService } from './speedy-api.service';
+import { SpeedyController } from './speedy.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 
 @Module({
   imports: [PrismaModule],
-  providers: [SpeedyService, SpeedyApiClient],
+  controllers: [SpeedyController],
+  providers: [SpeedyService, SpeedyApiService],
   exports: [SpeedyService],
 })
 export class SpeedyModule {}

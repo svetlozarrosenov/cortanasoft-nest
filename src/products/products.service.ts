@@ -4,7 +4,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { WooCommerceWebhookService } from '../integrations/woocommerce-webhook.service';
+import { WordPressService } from '../wordpress/wordpress.service';
 import { CloudCartService } from '../cloudcart/cloudcart.service';
 import { CreateProductDto, UpdateProductDto, QueryProductsDto } from './dto';
 import { Prisma } from '@prisma/client';
@@ -13,7 +13,7 @@ import { Prisma } from '@prisma/client';
 export class ProductsService {
   constructor(
     private prisma: PrismaService,
-    private wooCommerceWebhook: WooCommerceWebhookService,
+    private wordPressService: WordPressService,
     private cloudCartService: CloudCartService,
   ) {}
 
@@ -49,7 +49,11 @@ export class ProductsService {
     }
 
     // Ако не е зададена ДДС ставка или валута, определяме по данните на компанията
-    if (dto.vatRate === undefined || !dto.purchaseCurrencyId || !dto.saleCurrencyId) {
+    if (
+      dto.vatRate === undefined ||
+      !dto.purchaseCurrencyId ||
+      !dto.saleCurrencyId
+    ) {
       const company = await this.prisma.company.findUnique({
         where: { id: companyId },
         select: { vatNumber: true, currencyId: true },
@@ -188,65 +192,65 @@ export class ProductsService {
   }
 
   async update(companyId: string, id: string, dto: UpdateProductDto) {
-    // Проверка дали продуктът съществува
-    await this.findOne(companyId, id);
-
-    // Проверка за дублиран SKU ако се променя
-    if (dto.sku) {
-      const existingProduct = await this.prisma.product.findFirst({
-        where: {
-          companyId,
-          sku: dto.sku,
-          NOT: { id },
-        },
+    const updatedProduct = await this.prisma.$transaction(async (tx) => {
+      // Проверка дали продуктът съществува
+      const existing = await tx.product.findFirst({
+        where: { id, companyId },
       });
-
-      if (existingProduct) {
-        throw new ConflictException(
-          `Продукт с артикулен номер "${dto.sku}" вече съществува`,
-        );
+      if (!existing) {
+        throw new NotFoundException('Продуктът не е намерен');
       }
-    }
 
-    // Проверка дали категорията съществува
-    if (dto.categoryId) {
-      const category = await this.prisma.productCategory.findFirst({
-        where: {
-          id: dto.categoryId,
-          companyId,
-        },
-      });
+      // Проверка за дублиран SKU ако се променя
+      if (dto.sku) {
+        const duplicate = await tx.product.findFirst({
+          where: {
+            companyId,
+            sku: dto.sku,
+            NOT: { id },
+          },
+        });
 
-      if (!category) {
-        throw new NotFoundException('Категорията не е намерена');
+        if (duplicate) {
+          throw new ConflictException(
+            `Продукт с артикулен номер "${dto.sku}" вече съществува`,
+          );
+        }
       }
-    }
 
-    const updatedProduct = await this.prisma.product.update({
-      where: { id },
-      data: dto,
-      include: {
-        category: true,
-        warrantyTemplate: true,
-        purchaseCurrency: true,
-        saleCurrency: true,
-        createdBy: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
+      // Проверка дали категорията съществува
+      if (dto.categoryId) {
+        const category = await tx.productCategory.findFirst({
+          where: { id: dto.categoryId, companyId },
+        });
+
+        if (!category) {
+          throw new NotFoundException('Категорията не е намерена');
+        }
+      }
+
+      return tx.product.update({
+        where: { id },
+        data: dto,
+        include: {
+          category: true,
+          warrantyTemplate: true,
+          purchaseCurrency: true,
+          saleCurrency: true,
+          createdBy: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
           },
         },
-      },
+      });
     });
 
     // Sync to external integrations (fire-and-forget)
-    this.wooCommerceWebhook
-      .syncProductToWooCommerce(companyId, id)
-      .catch(() => {});
-    this.cloudCartService
-      .syncProductToCloudCart(companyId, id)
-      .catch(() => {});
+    this.wordPressService.syncProduct(companyId, id).catch(() => {});
+    this.cloudCartService.syncProductToCloudCart(companyId, id).catch(() => {});
 
     return updatedProduct;
   }
@@ -289,7 +293,9 @@ export class ProductsService {
     });
 
     if (existing) {
-      throw new ConflictException(`Категория "${data.name}" вече съществува на това ниво`);
+      throw new ConflictException(
+        `Категория "${data.name}" вече съществува на това ниво`,
+      );
     }
 
     return this.prisma.productCategory.create({
@@ -320,7 +326,8 @@ export class ProductsService {
     }
 
     const newName = data.name ?? category.name;
-    const newParentId = data.parentId !== undefined ? (data.parentId || null) : category.parentId;
+    const newParentId =
+      data.parentId !== undefined ? data.parentId || null : category.parentId;
 
     if (newName !== category.name || newParentId !== category.parentId) {
       const existing = await this.prisma.productCategory.findFirst({
@@ -333,7 +340,9 @@ export class ProductsService {
       });
 
       if (existing) {
-        throw new ConflictException(`Категория "${newName}" вече съществува на това ниво`);
+        throw new ConflictException(
+          `Категория "${newName}" вече съществува на това ниво`,
+        );
       }
     }
 

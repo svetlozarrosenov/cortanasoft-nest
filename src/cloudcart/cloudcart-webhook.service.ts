@@ -2,121 +2,13 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
 import { PaymentMethod } from '@prisma/client';
+import {
+  CloudCartOrderPayload,
+  CloudCartOrderProduct,
+  CloudCartPayment,
+} from './interfaces';
 
 const PROVIDER = 'cloudcart';
-
-/**
- * CloudCart order webhook payload (order.created / order.updated)
- * Документация: https://cdncloudcart.com/storage/order.json.json
- */
-interface CloudCartOrderPayload {
-  id: number;
-  status: string; // pending, paid, completed, cancelled, refunded
-  status_fulfillment: string; // not_fulfilled, fulfilled
-  customer_first_name: string;
-  customer_last_name: string;
-  customer_email: string;
-  order_total: number;
-  order_subtotal: number;
-  price_products_subtotal: number;
-  quantity: number;
-  weight: number;
-  vat_included: string; // "yes" | "no"
-  note_customer: string;
-  note_administrator: string;
-  invoice_number: string;
-  invoice_date: string;
-  date_added: string;
-  date_archived: string;
-  email_sent: string;
-  billing_address: CloudCartAddress;
-  shipping_address: CloudCartAddress;
-  products: CloudCartOrderProduct[];
-  payments: CloudCartPayment[];
-  shipping: CloudCartShipping;
-  discounts: CloudCartDiscount[];
-  taxes: CloudCartTax[];
-}
-
-interface CloudCartAddress {
-  first_name: string;
-  last_name: string;
-  city: string;
-  street: string;
-  postal_code: string;
-  country: string;
-  phone: string;
-  company: string; // "yes" | "no"
-  company_name: string;
-  company_vat: string;
-  formatted: string;
-  note_customer: string;
-  note_administrator: string;
-}
-
-interface CloudCartOrderProduct {
-  id: number;
-  sku: string;
-  barcode: string;
-  name: string;
-  quantity: number;
-  price: number; // оригинална цена
-  order_price: number; // цена в поръчката (може да е с отстъпка)
-  weight: number;
-  sale: string;
-  tracked: string;
-  digital: string;
-  category_name: string;
-  vendor_name: string;
-  p1: string;
-  p2: string;
-  p3: string;
-  v1: string;
-  v2: string;
-  v3: string;
-}
-
-interface CloudCartPayment {
-  id: number;
-  provider: string; // "cod", "bank_transfer", "stripe", "paypal", etc.
-  status: string; // "requested", "pending", "completed", "failed", "cancelled"
-  amount: number;
-  date_added: string;
-  date_last_update: string;
-}
-
-interface CloudCartShipping {
-  id: number;
-  provider_name: string;
-  provider_amount: number;
-  provider_insurance: number;
-  tracking_number: string;
-  tracking_url: string;
-  order_insurance: string;
-  order_has_insurance: string;
-  date_expedition: string;
-  date_delivery: string;
-  updated_at: string;
-}
-
-interface CloudCartDiscount {
-  id: number;
-  name: string;
-  code: string;
-  type: string; // "percent", "fixed"
-  type_value: number;
-  order_over: number;
-}
-
-interface CloudCartTax {
-  id: number;
-  tax_name: string;
-  tax: number;
-  tax_type: string;
-  tax_shipping: string;
-  tax_vat: string;
-  order_amount: number;
-}
 
 @Injectable()
 export class CloudCartWebhookService {

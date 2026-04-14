@@ -1,84 +1,21 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, Logger } from '@nestjs/common';
+import {
+  SpeedyCredentials,
+  SpeedySettings,
+  SpeedyCountry,
+  SpeedyShipmentParams,
+} from './interfaces';
 
 const SPEEDY_BASE = 'https://api.speedy.bg/v1';
-
-export interface SpeedyCredentials {
-  username: string;
-  password: string;
-}
-
-export interface SpeedySettings {
-  senderClientId?: number;
-  senderPhone?: string;
-  senderName?: string;
-  senderCountryId?: number;
-  senderSiteId?: number;
-  senderOfficeId?: number;
-  serviceId?: number;
-  payerType?: string;
-  codEnabled?: boolean;
-  codProcessingType?: string;
-  declaredValueEnabled?: boolean;
-  saturdayDelivery?: boolean;
-  deferredDays?: number;
-  returnShipmentServiceId?: number;
-  returnInstructions?: string;
-}
-
-export interface SpeedyCountry {
-  id: string;
-  name: string;
-  nameEn: string;
-  isoAlpha2: string;
-  isoAlpha3: string;
-  postCodeFormats: string;
-  requireState: string;
-  addressType: string;
-  currencyCode: string;
-  defaultOfficeId: string;
-  streetTypes: string;
-  streetTypesEn: string;
-  complexTypes: string;
-  complexTypesEn: string;
-  siteNomen: string;
-}
-
-export interface SpeedyShipmentParams {
-  orderNumber: string;
-  receiverName: string;
-  receiverPhone: string;
-  receiverOfficeId?: number;
-  receiverSiteId?: number;
-  receiverAddress?: {
-    countryId: number;
-    siteId: number;
-    streetName: string;
-    streetNumber?: string;
-    blockNumber?: string;
-    entranceNumber?: string;
-    floorNumber?: string;
-    apartmentNumber?: string;
-    postCode?: string;
-  };
-  parcelsCount: number;
-  weight: number;
-  width?: number;
-  height?: number;
-  depth?: number;
-  description?: string;
-  packageType?: string; // BOX | ENVELOPE | BAG | PALLET
-  codAmount?: number;
-  currency?: string;
-}
 
 /**
  * Pure HTTP клиент към Speedy API. Не знае за Prisma.
  */
 @Injectable()
-export class SpeedyApiClient {
-  private readonly logger = new Logger(SpeedyApiClient.name);
+export class SpeedyApiService {
+  private readonly logger = new Logger(SpeedyApiService.name);
 
   private async fetch<T = Record<string, any>>(
     creds: SpeedyCredentials,
@@ -94,7 +31,9 @@ export class SpeedyApiClient {
     const url = `${SPEEDY_BASE}${path}`;
     const bodyJson = JSON.stringify(payload);
     this.logger.debug(`→ POST ${url}`);
-    this.logger.debug(`→ Body: ${bodyJson.replace(/"password":"[^"]*"/, '"password":"***"')}`);
+    this.logger.debug(
+      `→ Body: ${bodyJson.replace(/"password":"[^"]*"/, '"password":"***"')}`,
+    );
 
     const res = await fetch(url, {
       method: 'POST',
@@ -290,11 +229,7 @@ export class SpeedyApiClient {
     return result.sites || [];
   }
 
-  async findStreets(
-    creds: SpeedyCredentials,
-    siteId: number,
-    name?: string,
-  ) {
+  async findStreets(creds: SpeedyCredentials, siteId: number, name?: string) {
     const result = await this.fetch(creds, '/location/street', {
       siteId,
       name,

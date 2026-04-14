@@ -1,71 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EcontCredentials, CreateLabelParams, EcontSettings } from './interfaces';
 
 const ECONT_BASE = {
   test: 'https://demo.econt.com/ee/services',
   live: 'https://ee.econt.com/services',
 };
 
-export interface EcontCredentials {
-  username: string;
-  password: string;
-  mode: 'test' | 'live';
-}
-
-export interface CreateLabelParams {
-  orderNumber: string;
-  receiverName: string;
-  receiverPhone: string;
-  receiverOfficeCode?: string;
-  receiverAddress?: {
-    city: { country: { code3: string }; name: string; postCode: string };
-    street: string;
-    num: string;
-    other?: string;
-  };
-  weight: number;
-  packCount?: number;
-  dimensionsL?: number;
-  dimensionsW?: number;
-  dimensionsH?: number;
-  description?: string;
-  codAmount?: number;
-  currency?: string;
-}
-
-export interface EcontSettings {
-  senderName?: string;
-  senderPhone?: string;
-  senderOfficeCode?: string;
-  shipmentType?: string;
-  paymentBy?: string;
-  codEnabled?: boolean;
-  cdAgreementNum?: string;
-  cdPayMethod?: string;
-  cdIban?: string;
-  cdBic?: string;
-  smsNotification?: boolean;
-  deliveryReceipt?: boolean;
-  declaredValueEnabled?: boolean;
-  sizeUnder60cm?: boolean;
-  keepUpright?: boolean;
-  payAfterAccept?: boolean;
-  payAfterTest?: boolean;
-  partialDelivery?: boolean;
-  emailOnDelivery?: boolean;
-  returnDaysUntilReturn?: number;
-  returnFailAction?: string;
-  instructionsDefault?: string;
-  paymentShareAmount?: number;
-  paymentSharePercent?: boolean;
-}
-
 /**
  * Pure HTTP клиент към Econt API. Не знае за Prisma, не зависи от DB.
  * Само прави заявки и парсва отговори.
  */
 @Injectable()
-export class EcontApiClient {
-  private readonly logger = new Logger(EcontApiClient.name);
+export class EcontApiService {
+  private readonly logger = new Logger(EcontApiService.name);
 
   async fetch(
     creds: EcontCredentials,

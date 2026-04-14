@@ -6,10 +6,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { EcontService } from '../econt/econt.service';
 import { SpeedyService } from '../speedy/speedy.service';
-import { ShippingProvider } from './shipping-provider.interface';
-import { CreateShipmentDto, CalculateShippingDto } from './dto/create-shipment.dto';
-import { UpdateEcontConfigDto } from '../econt/dto/update-econt-config.dto';
-import { UpdateSpeedyConfigDto } from '../speedy/dto/update-speedy-config.dto';
+import { ShippingProvider } from './interfaces';
+import {
+  CreateShipmentDto,
+  CalculateShippingDto,
+} from './dto/create-shipment.dto';
 
 const SHIPMENT_INCLUDE = {
   order: {
@@ -118,59 +119,5 @@ export class ShippingService {
       data: { status: 'CANCELLED' },
       include: SHIPMENT_INCLUDE,
     });
-  }
-
-  // ==================== Provider-specific endpoints (façade) ====================
-
-  // Econt
-  getEcontConfig(companyId: string) {
-    return this.econtService.getConfig(companyId);
-  }
-  updateEcontConfig(companyId: string, dto: UpdateEcontConfigDto) {
-    return this.econtService.updateConfig(companyId, dto);
-  }
-  getEcontOffices(companyId: string) {
-    return this.econtService.getOffices(companyId);
-  }
-  getEcontClientProfiles(companyId: string) {
-    return this.econtService.getClientProfiles(companyId);
-  }
-
-  // Speedy
-  getSpeedyConfig(companyId: string) {
-    return this.speedyService.getConfig(companyId);
-  }
-  updateSpeedyConfig(companyId: string, dto: UpdateSpeedyConfigDto) {
-    return this.speedyService.updateConfig(companyId, dto);
-  }
-  getSpeedyOffices(companyId: string, siteId?: number, name?: string) {
-    return this.speedyService.getOffices(companyId, siteId, name);
-  }
-  getSpeedySites(companyId: string, name?: string, postCode?: string) {
-    return this.speedyService.getSites(companyId, name, postCode);
-  }
-  getSpeedySiteById(companyId: string, siteId: number) {
-    return this.speedyService.getSiteById(companyId, siteId);
-  }
-  getSpeedyOfficeById(companyId: string, officeId: number) {
-    return this.speedyService.getOfficeById(companyId, officeId);
-  }
-  getSpeedyCountries(companyId: string) {
-    return this.speedyService.getCountries(companyId);
-  }
-  getSpeedyServices(companyId: string) {
-    return this.speedyService.getServices(companyId);
-  }
-  getSpeedyClientInfo(companyId: string) {
-    return this.speedyService.getClientInfo(companyId);
-  }
-  async getSpeedyLabel(companyId: string, shipmentId: string) {
-    const shipment = await this.prisma.shipment.findFirst({
-      where: { id: shipmentId, companyId },
-    });
-    if (!shipment || shipment.provider !== 'speedy') {
-      throw new NotFoundException('Speedy пратка не е намерена');
-    }
-    return this.speedyService.getLabel(companyId, shipment);
   }
 }

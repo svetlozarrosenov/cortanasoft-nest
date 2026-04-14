@@ -708,6 +708,11 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         labelKey: 'modules.settings.speedy',
         actions: ['view', 'edit'],
       },
+      {
+        key: 'integrations',
+        labelKey: 'modules.settings.integrations',
+        actions: ['view', 'edit'],
+      },
     ],
   },
   {

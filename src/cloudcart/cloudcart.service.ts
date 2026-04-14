@@ -5,13 +5,13 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { CloudCartApiService } from './cloudcart-api.service';
 import {
-  CloudCartApiService,
   CloudCartRequestOptions,
   CloudCartCategory,
   CloudCartProduct,
   CloudCartVariant,
-} from './cloudcart-api.service';
+} from './interfaces';
 import { SaveCloudCartIntegrationDto } from './dto';
 
 const PROVIDER = 'cloudcart';
