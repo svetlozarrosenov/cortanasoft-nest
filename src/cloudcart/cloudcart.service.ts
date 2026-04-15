@@ -13,7 +13,10 @@ import {
   CloudCartCategory,
   CloudCartProduct,
   CloudCartVariant,
+  CloudCartCustomer,
 } from './interfaces';
+import { OrdersService } from '../orders/orders.service';
+import { PaymentMethod } from '@prisma/client';
 import { SaveCloudCartIntegrationDto } from './dto';
 
 const PROVIDER = 'cloudcart';
@@ -27,6 +30,7 @@ export class CloudCartService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private cloudCartApi: CloudCartApiService,
+    private ordersService: OrdersService,
   ) {}
 
   // ==================== Webhook JWT Key ====================
@@ -327,6 +331,331 @@ export class CloudCartService {
       skipped,
       errors: errors.slice(0, 20),
     };
+  }
+
+  // ==================== Pull клиенти ====================
+
+  async pullCustomers(companyId: string) {
+    const options = await this.getApiOptions(companyId);
+    const ccCustomers = await this.cloudCartApi.getAllCustomers(options);
+
+    const existingCustomers = await this.prisma.customer.findMany({
+      where: { companyId },
+      select: { email: true },
+    });
+    const existingEmails = new Set(
+      existingCustomers.map((c) => c.email?.toLowerCase()).filter(Boolean),
+    );
+
+    let created = 0;
+    let skipped = 0;
+
+    for (const cc of ccCustomers) {
+      const email = cc.attributes.email?.toLowerCase();
+      if (!email || existingEmails.has(email)) {
+        skipped++;
+        continue;
+      }
+
+      try {
+        const isCompany = !!cc.attributes.company;
+        await this.prisma.customer.create({
+          data: {
+            type: isCompany ? 'COMPANY' : 'INDIVIDUAL',
+            source: 'WEBSITE',
+            firstName: cc.attributes.first_name || null,
+            lastName: cc.attributes.last_name || null,
+            companyName: isCompany ? cc.attributes.company : null,
+            email: cc.attributes.email,
+            phone: cc.attributes.phone || null,
+            companyId,
+          },
+        });
+        existingEmails.add(email);
+        created++;
+      } catch (error: any) {
+        this.logger.warn(
+          `Cannot create customer "${cc.attributes.email}": ${error.message}`,
+        );
+        skipped++;
+      }
+    }
+
+    return { total: ccCustomers.length, created, skipped };
+  }
+
+  // ==================== Pull поръчки ====================
+
+  async pullOrders(companyId: string) {
+    const options = await this.getApiOptions(companyId);
+    const { orders: ccOrders, included } =
+      await this.cloudCartApi.getAllOrders(options);
+
+    const includedMap = new Map<string, any>();
+    for (const item of included) {
+      includedMap.set(`${item.type}:${item.id}`, item);
+    }
+
+    const firstUser = await this.prisma.userCompany.findFirst({
+      where: { companyId },
+      orderBy: { createdAt: 'asc' },
+      select: { userId: true },
+    });
+    if (!firstUser) {
+      throw new BadRequestException('Компанията няма потребители');
+    }
+
+    let created = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const ccOrder of ccOrders) {
+      const attrs = ccOrder.attributes;
+
+      // Дедупликация по notes
+      const existing = await this.prisma.order.findFirst({
+        where: {
+          companyId,
+          notes: { contains: `CloudCart #${ccOrder.id}` },
+        },
+      });
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
+      try {
+        // Customer match/create по email
+        let customerId: string | undefined;
+        if (attrs.customer_email) {
+          const customer = await this.prisma.customer.findFirst({
+            where: { companyId, email: attrs.customer_email.toLowerCase() },
+          });
+          if (customer) {
+            customerId = customer.id;
+          } else {
+            const newCustomer = await this.prisma.customer.create({
+              data: {
+                type: 'INDIVIDUAL',
+                source: 'WEBSITE',
+                firstName: attrs.customer_first_name || null,
+                lastName: attrs.customer_last_name || null,
+                email: attrs.customer_email,
+                companyId,
+              },
+            });
+            customerId = newCustomer.id;
+          }
+        }
+
+        // Resolve line items
+        const lineItemRels =
+          ccOrder.relationships?.products?.data || [];
+        const orderItems: {
+          productId: string;
+          quantity: number;
+          unitPrice: number;
+        }[] = [];
+
+        for (const rel of lineItemRels) {
+          const lineItem = includedMap.get(`${rel.type}:${rel.id}`);
+          if (!lineItem) continue;
+
+          const la = lineItem.attributes;
+          const productId = await this.matchOrCreateProductForPull(
+            companyId,
+            la.product_id ? String(la.product_id) : null,
+            la.sku,
+            la.name,
+            la.price,
+          );
+
+          orderItems.push({
+            productId,
+            quantity: la.quantity,
+            unitPrice: la.price,
+          });
+        }
+
+        if (orderItems.length === 0) {
+          skipped++;
+          continue;
+        }
+
+        // Resolve shipping address
+        const shippingAddrRel =
+          ccOrder.relationships?.['shipping-address']?.data;
+        const shippingAddr = shippingAddrRel
+          ? includedMap.get(`${shippingAddrRel.type}:${shippingAddrRel.id}`)
+          : null;
+        const sa = shippingAddr?.attributes;
+
+        // Resolve billing address
+        const billingAddrRel =
+          ccOrder.relationships?.['billing-address']?.data;
+        const billingAddr = billingAddrRel
+          ? includedMap.get(`${billingAddrRel.type}:${billingAddrRel.id}`)
+          : null;
+        const ba = billingAddr?.attributes;
+
+        // Resolve payment
+        const paymentRel = ccOrder.relationships?.payment?.data;
+        const payment = paymentRel
+          ? includedMap.get(`${paymentRel.type}:${paymentRel.id}`)
+          : null;
+        const paymentMethod = this.mapPaymentMethodFromRest(
+          payment?.attributes?.method,
+        );
+
+        const customerName =
+          [
+            ba?.first_name || attrs.customer_first_name,
+            ba?.last_name || attrs.customer_last_name,
+          ]
+            .filter(Boolean)
+            .join(' ') || 'Unknown';
+
+        const shippingAddress =
+          [sa?.address_1, sa?.address_2].filter(Boolean).join(', ') ||
+          undefined;
+
+        const paymentStatus = this.mapPaymentStatusFromRest(attrs.status);
+
+        await this.ordersService.create(companyId, firstUser.userId, {
+          customerId,
+          customerName,
+          customerEmail: attrs.customer_email || undefined,
+          customerPhone: ba?.phone || sa?.phone || undefined,
+          shippingAddress,
+          shippingCity: sa?.city || undefined,
+          shippingPostalCode: sa?.postcode || undefined,
+          paymentMethod,
+          paymentStatus,
+          shippingCost: 0,
+          discount: 0,
+          notes: `CloudCart #${ccOrder.id}`,
+          items: orderItems,
+          autoConfirm: true,
+        });
+        created++;
+      } catch (error: any) {
+        errors.push(`Order CC#${ccOrder.id}: ${error.message}`);
+        skipped++;
+      }
+    }
+
+    return {
+      total: ccOrders.length,
+      created,
+      skipped,
+      errors: errors.slice(0, 20),
+    };
+  }
+
+  // ==================== Full Import ====================
+
+  async fullImport(companyId: string) {
+    const integration = await this.prisma.integration.findUnique({
+      where: { companyId_provider: { companyId, provider: PROVIDER } },
+    });
+
+    if (!integration) {
+      throw new NotFoundException('CloudCart интеграцията не е намерена');
+    }
+
+    const settings =
+      (integration.settings as Record<string, unknown> | null) ?? {};
+    if (settings.initialImportDone) {
+      throw new BadRequestException(
+        'Импортът вече е извършен. За повторен импорт е необходима ръчна промяна в базата.',
+      );
+    }
+
+    const categories = await this.pullCategories(companyId);
+    const products = await this.pullProducts(companyId);
+    const customers = await this.pullCustomers(companyId);
+    const orders = await this.pullOrders(companyId);
+
+    // Mark as done
+    const newSettings = {
+      ...settings,
+      initialImportDone: true,
+      initialImportDate: new Date().toISOString(),
+    } as unknown as Prisma.InputJsonValue;
+
+    await this.prisma.integration.update({
+      where: { id: integration.id },
+      data: { settings: newSettings },
+    });
+
+    return { categories, products, customers, orders };
+  }
+
+  // ==================== Helpers за pull ====================
+
+  private async matchOrCreateProductForPull(
+    companyId: string,
+    externalId: string | null,
+    sku: string | null,
+    name: string,
+    price: number,
+  ): Promise<string> {
+    if (externalId) {
+      const byExternal = await this.prisma.product.findFirst({
+        where: { companyId, externalId },
+      });
+      if (byExternal) return byExternal.id;
+    }
+
+    if (sku) {
+      const bySku = await this.prisma.product.findFirst({
+        where: { companyId, sku, isActive: true },
+      });
+      if (bySku) return bySku.id;
+    }
+
+    if (name) {
+      const byName = await this.prisma.product.findFirst({
+        where: { companyId, name, isActive: true },
+      });
+      if (byName) return byName.id;
+    }
+
+    const product = await this.prisma.product.create({
+      data: {
+        sku:
+          sku ||
+          `CC-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        externalId,
+        name: name || 'Unknown Product',
+        salePrice: price || 0,
+        trackInventory: false,
+        companyId,
+      },
+    });
+
+    return product.id;
+  }
+
+  private mapPaymentMethodFromRest(
+    method: string | undefined,
+  ): PaymentMethod {
+    if (!method) return PaymentMethod.CARD;
+    const map: Record<string, PaymentMethod> = {
+      cod: PaymentMethod.COD,
+      bank_transfer: PaymentMethod.BANK_TRANSFER,
+      bank: PaymentMethod.BANK_TRANSFER,
+      cash: PaymentMethod.CASH,
+    };
+    return map[method.toLowerCase()] || PaymentMethod.CARD;
+  }
+
+  private mapPaymentStatusFromRest(
+    status: string | undefined,
+  ): 'PENDING' | 'PARTIAL' | 'PAID' {
+    if (!status) return 'PENDING';
+    if (['paid', 'complete', 'completed'].includes(status)) return 'PAID';
+    return 'PENDING';
   }
 
   // ==================== Outbound sync ====================

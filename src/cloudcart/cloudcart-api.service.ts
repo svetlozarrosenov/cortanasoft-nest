@@ -3,6 +3,8 @@ import {
   CloudCartRequestOptions,
   CloudCartCategory,
   CloudCartProduct,
+  CloudCartCustomer,
+  CloudCartOrderRest,
   CloudCartStoreQuantity,
   CloudCartListResponse,
   CloudCartSingleResponse,
@@ -237,5 +239,68 @@ export class CloudCartApiService {
       method: 'PATCH',
       body,
     });
+  }
+
+  // ==================== Customers ====================
+
+  async listCustomers(
+    options: CloudCartRequestOptions,
+    page = 1,
+    pageSize = 50,
+  ): Promise<CloudCartListResponse<CloudCartCustomer>> {
+    return this.request(options, '/customers', {
+      'page[number]': String(page),
+      'page[size]': String(pageSize),
+    });
+  }
+
+  async getAllCustomers(
+    options: CloudCartRequestOptions,
+  ): Promise<CloudCartCustomer[]> {
+    const all: CloudCartCustomer[] = [];
+    let page = 1;
+
+    while (true) {
+      const res = await this.listCustomers(options, page, 50);
+      all.push(...res.data);
+      if (page >= res.meta.page['last-page']) break;
+      page++;
+    }
+
+    return all;
+  }
+
+  // ==================== Orders ====================
+
+  async listOrders(
+    options: CloudCartRequestOptions,
+    page = 1,
+    pageSize = 50,
+  ): Promise<CloudCartListResponse<CloudCartOrderRest>> {
+    return this.request(options, '/orders', {
+      'page[number]': String(page),
+      'page[size]': String(pageSize),
+      sort: '-date_added',
+      include: 'products,payment,shipping-address,billing-address',
+    });
+  }
+
+  async getAllOrders(options: CloudCartRequestOptions): Promise<{
+    orders: CloudCartOrderRest[];
+    included: any[];
+  }> {
+    const orders: CloudCartOrderRest[] = [];
+    const included: any[] = [];
+    let page = 1;
+
+    while (true) {
+      const res = await this.listOrders(options, page, 50);
+      orders.push(...res.data);
+      if (res.included) included.push(...res.included);
+      if (page >= res.meta.page['last-page']) break;
+      page++;
+    }
+
+    return { orders, included };
   }
 }

@@ -70,15 +70,9 @@ export class CloudCartController {
 
   // ==================== Pull от CloudCart ====================
 
-  @Post('pull-categories')
-  async pullCategories(@Param('companyId') companyId: string) {
-    const result = await this.cloudCartService.pullCategories(companyId);
-    return { success: true, ...result };
-  }
-
-  @Post('pull-products')
-  async pullProducts(@Param('companyId') companyId: string) {
-    const result = await this.cloudCartService.pullProducts(companyId);
+  @Post('full-import')
+  async fullImport(@Param('companyId') companyId: string) {
+    const result = await this.cloudCartService.fullImport(companyId);
     return { success: true, ...result };
   }
 }

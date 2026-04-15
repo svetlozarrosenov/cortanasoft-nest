@@ -15,3 +15,10 @@ export type {
   CloudCartDiscount,
   CloudCartTax,
 } from './cloudcart-webhook.interface';
+export type { CloudCartCustomer } from './cloudcart-customer.interface';
+export type {
+  CloudCartOrderRest,
+  CloudCartOrderLineItem,
+  CloudCartOrderPayment as CloudCartOrderPaymentRest,
+  CloudCartOrderAddress,
+} from './cloudcart-order.interface';
