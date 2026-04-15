@@ -816,6 +816,7 @@ model ProductCategory {
 model Product {
   id          String      @id @default(cuid())
   sku         String // Артикулен номер (SKU)
+  externalId  String? // ID в external система (WooCommerce/CloudCart)
   barcode     String? // Баркод (EAN/UPC)
   name        String // Наименование
   description String? // Описание

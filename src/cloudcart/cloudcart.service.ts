@@ -242,6 +242,7 @@ export class CloudCartService {
         await this.prisma.product.create({
           data: {
             sku,
+            externalId: ccProduct.id,
             barcode: variant?.attributes?.barcode || null,
             name: attrs.name,
             description: attrs.description
@@ -306,28 +307,48 @@ export class CloudCartService {
       where: { id: productId },
       select: {
         sku: true,
+        externalId: true,
         name: true,
         salePrice: true,
         isActive: true,
       },
     });
 
-    if (!product || !product.sku) return;
+    if (!product) return;
 
-    // Търсим продукта в CloudCart по SKU (SKU е на variant-а)
-    const result = await this.cloudCartApi.findProductBySku(options, product.sku);
-    if (!result) {
-      this.logger.log(
-        `Product SKU ${product.sku} not found in CloudCart, skipping sync`,
-      );
+    let ccProductId: string;
+    let included: any[] = [];
+
+    if (product.externalId) {
+      // Match по externalId (директно)
+      try {
+        const res = await this.cloudCartApi.getProduct(options, product.externalId);
+        ccProductId = res.data.id;
+        included = res.included || [];
+      } catch {
+        this.logger.log(
+          `Product externalId ${product.externalId} not found in CloudCart, skipping sync`,
+        );
+        return;
+      }
+    } else if (product.sku) {
+      // Fallback — търсим по SKU
+      const result = await this.cloudCartApi.findProductBySku(options, product.sku);
+      if (!result) {
+        this.logger.log(
+          `Product SKU ${product.sku} not found in CloudCart, skipping sync`,
+        );
+        return;
+      }
+      ccProductId = result.product.id;
+      included = result.included;
+    } else {
       return;
     }
 
-    const { product: ccProduct, included } = result;
-
     try {
       // 1. Update product name и active status
-      await this.cloudCartApi.updateProduct(options, ccProduct.id, {
+      await this.cloudCartApi.updateProduct(options, ccProductId, {
         name: product.name,
         active: product.isActive ? 'yes' : 'no',
       });

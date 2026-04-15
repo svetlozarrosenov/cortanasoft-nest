@@ -49,6 +49,7 @@ export interface WooCommerceOrderPayload {
 }
 
 export interface WooCommerceOrderItem {
+  productId: string;
   name: string;
   sku: string;
   quantity: number;

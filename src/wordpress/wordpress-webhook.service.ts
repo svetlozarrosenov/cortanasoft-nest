@@ -140,7 +140,15 @@ export class WordPressWebhookService {
     companyId: string,
     item: WooCommerceOrderItem,
   ): Promise<string> {
-    // 1. Match по SKU
+    // 1. Match по externalId (WooCommerce product ID)
+    if (item.productId) {
+      const byExternal = await this.prisma.product.findFirst({
+        where: { companyId, externalId: item.productId },
+      });
+      if (byExternal) return byExternal.id;
+    }
+
+    // 2. Fallback — match по SKU
     if (item.sku) {
       const bySku = await this.prisma.product.findFirst({
         where: { companyId, sku: item.sku, isActive: true },
@@ -148,7 +156,7 @@ export class WordPressWebhookService {
       if (bySku) return bySku.id;
     }
 
-    // 2. Match по име
+    // 3. Fallback — match по име
     if (item.name) {
       const byName = await this.prisma.product.findFirst({
         where: { companyId, name: item.name, isActive: true },
@@ -156,13 +164,14 @@ export class WordPressWebhookService {
       if (byName) return byName.id;
     }
 
-    // 3. Auto-create
+    // 4. Auto-create
     const sku =
       item.sku ||
       `WC-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const product = await this.prisma.product.create({
       data: {
         sku,
+        externalId: item.productId || null,
         name: item.name || 'Unknown Product',
         salePrice: item.unitPrice || 0,
         trackInventory: false,

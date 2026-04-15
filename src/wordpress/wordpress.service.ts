@@ -167,8 +167,8 @@ export class WordPressService {
       where: { id: productId },
       select: {
         sku: true,
+        externalId: true,
         name: true,
-        description: true,
         salePrice: true,
         weight: true,
         dimensionsL: true,
@@ -183,7 +183,7 @@ export class WordPressService {
       },
     });
 
-    if (!product || !product.sku) return;
+    if (!product || !product.externalId) return;
 
     const stockQuantity = product.inventoryBatches.reduce(
       (sum, b) => sum + Number(b.quantity),
@@ -191,6 +191,7 @@ export class WordPressService {
     );
 
     const payload: Record<string, unknown> = {
+      product_id: product.externalId,
       sku: product.sku,
       name: product.name,
       regular_price: Number(product.salePrice),
@@ -202,8 +203,6 @@ export class WordPressService {
       stock_status: stockQuantity > 0 ? 'instock' : 'outofstock',
       is_active: product.isActive,
     };
-
-    console.log('crb_payload', payload);
     const ok = await this.wpApi.syncProduct(options, payload);
     if (ok) {
       this.logger.log(
