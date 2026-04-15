@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
+import { CloudCartService } from './cloudcart.service';
 import { PaymentMethod } from '@prisma/client';
 import {
   CloudCartOrderPayload,
@@ -17,26 +18,31 @@ export class CloudCartWebhookService {
   constructor(
     private prisma: PrismaService,
     private ordersService: OrdersService,
+    private cloudCartService: CloudCartService,
   ) {}
 
   /**
-   * Намираме компания по CloudCart API ключ.
-   * CloudCart изпраща ключа в request headers при webhook.
-   * Търсим в Integration таблицата по plain-text apiKey.
+   * Верифицира JWT webhook ключ → извлича companyId → проверява дали интеграцията е активна.
    */
   async resolveCompanyByApiKey(apiKey: string | undefined): Promise<string | null> {
     if (!apiKey) return null;
 
-    const integration = await this.prisma.integration.findFirst({
+    const payload = this.cloudCartService.verifyWebhookKey(apiKey);
+    if (!payload || payload.provider !== PROVIDER) return null;
+
+    const integration = await this.prisma.integration.findUnique({
       where: {
-        provider: PROVIDER,
-        apiKey,
-        isActive: true,
+        companyId_provider: {
+          companyId: payload.companyId,
+          provider: PROVIDER,
+        },
       },
-      select: { companyId: true },
+      select: { isActive: true },
     });
 
-    return integration?.companyId || null;
+    if (!integration?.isActive) return null;
+
+    return payload.companyId;
   }
 
   /**
@@ -134,7 +140,15 @@ export class CloudCartWebhookService {
     companyId: string,
     ccProduct: CloudCartOrderProduct,
   ): Promise<string> {
-    // 1. Match по SKU
+    // 1. Match по externalId (CloudCart product ID)
+    if (ccProduct.id) {
+      const byExternal = await this.prisma.product.findFirst({
+        where: { companyId, externalId: String(ccProduct.id) },
+      });
+      if (byExternal) return byExternal.id;
+    }
+
+    // 2. Fallback — match по SKU
     if (ccProduct.sku) {
       const bySku = await this.prisma.product.findFirst({
         where: { companyId, sku: ccProduct.sku, isActive: true },
@@ -142,7 +156,7 @@ export class CloudCartWebhookService {
       if (bySku) return bySku.id;
     }
 
-    // 2. Match по име
+    // 3. Fallback — match по име
     if (ccProduct.name) {
       const byName = await this.prisma.product.findFirst({
         where: { companyId, name: ccProduct.name, isActive: true },
@@ -150,11 +164,12 @@ export class CloudCartWebhookService {
       if (byName) return byName.id;
     }
 
-    // 3. Auto-create
+    // 4. Auto-create
     const sku = ccProduct.sku || `CC-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const product = await this.prisma.product.create({
       data: {
         sku,
+        externalId: ccProduct.id ? String(ccProduct.id) : null,
         barcode: ccProduct.barcode || null,
         name: ccProduct.name || 'Unknown Product',
         salePrice: ccProduct.order_price || ccProduct.price || 0,

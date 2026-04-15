@@ -23,7 +23,8 @@ export class CloudCartController {
   @Get()
   async getIntegration(@Param('companyId') companyId: string) {
     const integration = await this.cloudCartService.getIntegration(companyId);
-    return { success: true, integration };
+    const webhookKey = await this.cloudCartService.getWebhookKey(companyId);
+    return { success: true, integration, webhookKey };
   }
 
   @Put()
@@ -48,6 +49,15 @@ export class CloudCartController {
   async deleteIntegration(@Param('companyId') companyId: string) {
     await this.cloudCartService.deleteIntegration(companyId);
     return { success: true, message: 'CloudCart интеграцията е премахната' };
+  }
+
+  // ==================== Webhook Key ====================
+
+  @Post('regenerate-webhook-key')
+  async regenerateWebhookKey(@Param('companyId') companyId: string) {
+    const integration = await this.cloudCartService.regenerateWebhookKey(companyId);
+    const settings = integration.settings as Record<string, unknown> | null;
+    return { success: true, webhookKey: settings?.webhookKey };
   }
 
   // ==================== Тест на връзката ====================

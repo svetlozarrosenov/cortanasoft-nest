@@ -4,6 +4,8 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CloudCartApiService } from './cloudcart-api.service';
 import {
@@ -23,8 +25,52 @@ export class CloudCartService {
 
   constructor(
     private prisma: PrismaService,
+    private jwtService: JwtService,
     private cloudCartApi: CloudCartApiService,
   ) {}
+
+  // ==================== Webhook JWT Key ====================
+
+  generateWebhookKey(companyId: string): string {
+    return this.jwtService.sign({ companyId, provider: PROVIDER });
+  }
+
+  verifyWebhookKey(token: string): { companyId: string; provider: string } | null {
+    try {
+      return this.jwtService.verify<{ companyId: string; provider: string }>(token);
+    } catch {
+      return null;
+    }
+  }
+
+  async getWebhookKey(companyId: string): Promise<string | null> {
+    const integration = await this.prisma.integration.findUnique({
+      where: { companyId_provider: { companyId, provider: PROVIDER } },
+    });
+    const settings = integration?.settings as Record<string, unknown> | null;
+    return (settings?.webhookKey as string) || null;
+  }
+
+  async regenerateWebhookKey(companyId: string) {
+    const integration = await this.prisma.integration.findUnique({
+      where: { companyId_provider: { companyId, provider: PROVIDER } },
+    });
+    if (!integration) {
+      throw new NotFoundException('CloudCart интеграцията не е намерена');
+    }
+
+    const webhookKey = this.generateWebhookKey(companyId);
+    const prevSettings =
+      integration.settings && typeof integration.settings === 'object' && !Array.isArray(integration.settings)
+        ? (integration.settings as Record<string, unknown>)
+        : {};
+    const settings = { ...prevSettings, webhookKey } as unknown as Prisma.InputJsonValue;
+
+    return this.prisma.integration.update({
+      where: { id: integration.id },
+      data: { settings },
+    });
+  }
 
   // ==================== Интеграция (CRUD) ====================
 
@@ -75,11 +121,14 @@ export class CloudCartService {
       throw new BadRequestException('API ключът е задължителен при създаване на интеграция');
     }
 
+    const webhookKey = this.generateWebhookKey(companyId);
+
     return this.prisma.integration.create({
       data: {
         ...data,
         provider: PROVIDER,
         companyId,
+        settings: { webhookKey } as unknown as Prisma.InputJsonValue,
       },
     });
   }
