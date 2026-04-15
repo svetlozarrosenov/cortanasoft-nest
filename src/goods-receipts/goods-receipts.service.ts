@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WordPressService } from '../wordpress/wordpress.service';
+import { CloudCartService } from '../cloudcart/cloudcart.service';
 import {
   CreateGoodsReceiptDto,
   UpdateGoodsReceiptDto,
@@ -52,6 +53,7 @@ export class GoodsReceiptsService {
   constructor(
     private prisma: PrismaService,
     private wordPressService: WordPressService,
+    private cloudCartService: CloudCartService,
   ) {}
 
   private async generateReceiptNumber(
@@ -613,11 +615,12 @@ export class GoodsReceiptsService {
       });
     });
 
-    // Sync inventory to WordPress (fire-and-forget)
+    // Sync inventory to integrations (fire-and-forget)
     if (isDelivering || isCancellingDelivered) {
       const productIds = [...new Set(receipt.items.map((item) => item.productId))];
       for (const productId of productIds) {
         this.wordPressService.syncProduct(companyId, productId).catch(() => {});
+        this.cloudCartService.syncProductToCloudCart(companyId, productId).catch(() => {});
       }
     }
 

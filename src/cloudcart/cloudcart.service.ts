@@ -311,6 +311,10 @@ export class CloudCartService {
         name: true,
         salePrice: true,
         isActive: true,
+        inventoryBatches: {
+          where: { quantity: { gt: 0 } },
+          select: { quantity: true },
+        },
       },
     });
 
@@ -353,16 +357,20 @@ export class CloudCartService {
         active: product.isActive ? 'yes' : 'no',
       });
 
-      // 2. Update variant price (цената е в центове)
+      // 2. Update variant price + quantity
       const variant = included.find(
-        (item: any) =>
-          item.type === 'variants' && item.attributes?.sku === product.sku,
+        (item: any) => item.type === 'variants',
       );
 
       if (variant) {
         const priceInCents = Math.round(Number(product.salePrice) * 100);
+        const stockQuantity = product.inventoryBatches.reduce(
+          (sum: number, b: any) => sum + Number(b.quantity),
+          0,
+        );
         await this.cloudCartApi.updateVariant(options, variant.id, {
           price: priceInCents,
+          quantity: stockQuantity,
         });
       }
 
