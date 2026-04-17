@@ -2065,9 +2065,11 @@ model Ticket {
   status   TicketStatus   @default(TODO)
 
   // Дати
-  dueDate     DateTime? // Краен срок
-  startedAt   DateTime? // Кога е започнат
-  completedAt DateTime? // Кога е завършен
+  dueDate          DateTime? // Краен срок
+  plannedStartDate DateTime? // Планирано начало (за Gantt/timeline)
+  plannedEndDate   DateTime? // Планиран край (за Gantt/timeline)
+  startedAt        DateTime? // Кога е започнат действително
+  completedAt      DateTime? // Кога е завършен действително
 
   // Оценка на време
   estimatedHours Decimal? @db.Decimal(6, 2) // Очаквани часове

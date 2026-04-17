@@ -33,6 +33,14 @@ export class UpdateTicketDto {
   dueDate?: string;
 
   @IsOptional()
+  @IsDateString()
+  plannedStartDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  plannedEndDate?: string;
+
+  @IsOptional()
   @IsNumber()
   estimatedHours?: number;
 

@@ -405,6 +405,8 @@ export class SprintsService {
             status: true,
             estimatedHours: true,
             actualHours: true,
+            plannedStartDate: true,
+            plannedEndDate: true,
           },
         },
         _count: { select: { members: true } },
@@ -419,16 +421,28 @@ export class SprintsService {
     const totalTickets = tickets.length;
     const completedTickets = tickets.filter((t) => t.status === 'DONE').length;
 
-    const totalEstimatedHours = tickets.reduce(
-      (sum, t) => sum + (t.estimatedHours ? Number(t.estimatedHours) : 0),
-      0,
-    );
+    const sprintHoursPerDay = sprint.hoursPerDay ? Number(sprint.hoursPerDay) : 8;
 
-    // Get total logged hours from time_logs
+    // Effort weight per task: prefer estimatedHours; fall back to planned duration * hoursPerDay.
+    // If neither is set, the task gets 0 weight (effectively "unweighted" — see fallback below).
+    const effortWeight = (t: typeof tickets[number]): number => {
+      if (t.estimatedHours) return Number(t.estimatedHours);
+      if (t.plannedStartDate && t.plannedEndDate) {
+        const ms = new Date(t.plannedEndDate).getTime() - new Date(t.plannedStartDate).getTime();
+        const days = Math.max(1, Math.ceil(ms / (1000 * 60 * 60 * 24)) + 1);
+        return days * sprintHoursPerDay;
+      }
+      return 0;
+    };
+
+    const weights = tickets.map((t) => ({ t, weight: effortWeight(t) }));
+    const totalEstimatedHours = weights.reduce((sum, w) => sum + w.weight, 0);
+    const completedWeight = weights
+      .filter(({ t }) => t.status === 'DONE')
+      .reduce((sum, w) => sum + w.weight, 0);
+
     const timeLogResult = await this.prisma.timeLog.aggregate({
-      where: {
-        ticketId: { in: tickets.map((t) => t.id) },
-      },
+      where: { ticketId: { in: tickets.map((t) => t.id) } },
       _sum: { hours: true },
     });
 
@@ -436,9 +450,14 @@ export class SprintsService {
       ? Number(timeLogResult._sum.hours)
       : 0;
 
-    const percentComplete = totalTickets > 0
-      ? Math.round((completedTickets / totalTickets) * 100)
-      : 0;
+    // Effort-weighted progress: % of total estimated hours that are in DONE tasks.
+    // Fallback to task-count ratio only when no task has any effort info at all.
+    const percentComplete =
+      totalEstimatedHours > 0
+        ? Math.round((completedWeight / totalEstimatedHours) * 100)
+        : totalTickets > 0
+          ? Math.round((completedTickets / totalTickets) * 100)
+          : 0;
 
     const hoursProgress = totalEstimatedHours > 0
       ? Math.round((totalLoggedHours / totalEstimatedHours) * 100)
@@ -468,6 +487,42 @@ export class SprintsService {
       isOverdue = daysRemaining < 0 && percentComplete < 100;
     }
 
+    // ===== Projected completion (based on actual task scheduling, not capacity math) =====
+    // "Когато всички задачи свършат" = max(plannedEndDate) of ACTIVE (not DONE/CANCELLED) tickets
+    const activeTickets = tickets.filter(
+      (t) => t.status !== 'DONE' && t.status !== 'CANCELLED',
+    );
+    const scheduledActive = activeTickets.filter((t) => t.plannedEndDate);
+    const unscheduledCount = activeTickets.length - scheduledActive.length;
+
+    let projectedEndDate: Date | null = null;
+    if (scheduledActive.length > 0) {
+      projectedEndDate = new Date(
+        Math.max(...scheduledActive.map((t) => new Date(t.plannedEndDate!).getTime())),
+      );
+      projectedEndDate.setHours(0, 0, 0, 0);
+    }
+
+    // Working days between today and projectedEndDate (skip weekends)
+    let workingDaysRemaining: number | null = null;
+    if (projectedEndDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      workingDaysRemaining = countWorkingDays(today, projectedEndDate);
+    }
+
+    // Capacity info (informational — NOT used to determine projection)
+    const hoursPerDay = sprint.hoursPerDay ? Number(sprint.hoursPerDay) : 8;
+    const membersCount = sprint._count.members;
+    const remainingEffortHours = Math.max(0, totalEstimatedHours - totalLoggedHours);
+    const availableCapacityHours =
+      workingDaysRemaining !== null && workingDaysRemaining > 0
+        ? membersCount * hoursPerDay * workingDaysRemaining
+        : 0;
+    const isOverBudget = projectedEndDate && sprint.endDate
+      ? projectedEndDate.getTime() > new Date(sprint.endDate).getTime()
+      : false;
+
     return {
       totalTickets,
       completedTickets,
@@ -476,10 +531,33 @@ export class SprintsService {
       percentComplete,
       hoursProgress,
       byStatus,
-      membersCount: sprint._count.members,
+      membersCount,
+      hoursPerDay,
       endDate: sprint.endDate,
       daysRemaining,
       isOverdue,
+      // New projection metrics
+      projectedEndDate,
+      workingDaysRemaining,
+      unscheduledCount,
+      remainingEffortHours,
+      availableCapacityHours,
+      isOverBudget,
+      isUnderCapacity:
+        availableCapacityHours > 0 && availableCapacityHours < remainingEffortHours,
     };
   }
+}
+
+// Count working days between two dates (inclusive of end, exclusive of start if same day)
+function countWorkingDays(from: Date, to: Date): number {
+  if (to < from) return 0;
+  let days = 0;
+  const cursor = new Date(from);
+  while (cursor <= to) {
+    const dow = cursor.getDay();
+    if (dow !== 0 && dow !== 6) days++;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
 }

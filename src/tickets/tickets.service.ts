@@ -67,6 +67,8 @@ export class TicketsService {
         priority: dto.priority || 'MEDIUM',
         status: 'TODO',
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        plannedStartDate: dto.plannedStartDate ? new Date(dto.plannedStartDate) : null,
+        plannedEndDate: dto.plannedEndDate ? new Date(dto.plannedEndDate) : null,
         estimatedHours: dto.estimatedHours,
         assigneeId: dto.assigneeId,
         parentId: dto.parentId,
@@ -229,8 +231,14 @@ export class TicketsService {
     }
 
     // Handle date conversion
-    if (dto.dueDate) {
-      updateData.dueDate = new Date(dto.dueDate);
+    if (dto.dueDate !== undefined) {
+      updateData.dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
+    }
+    if (dto.plannedStartDate !== undefined) {
+      updateData.plannedStartDate = dto.plannedStartDate ? new Date(dto.plannedStartDate) : null;
+    }
+    if (dto.plannedEndDate !== undefined) {
+      updateData.plannedEndDate = dto.plannedEndDate ? new Date(dto.plannedEndDate) : null;
     }
 
     // Handle status transitions with state machine validation

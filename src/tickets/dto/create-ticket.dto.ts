@@ -50,6 +50,14 @@ export class CreateTicketDto {
   dueDate?: string;
 
   @IsOptional()
+  @IsDateString()
+  plannedStartDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  plannedEndDate?: string;
+
+  @IsOptional()
   @IsNumber()
   estimatedHours?: number;
 
