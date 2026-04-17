@@ -97,6 +97,10 @@ export class CreateOfferDto {
 
   @IsString()
   @IsOptional()
+  richDescription?: string;
+
+  @IsString()
+  @IsOptional()
   currencyId?: string;
 
   @IsArray()
@@ -159,6 +163,10 @@ export class UpdateOfferDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsString()
+  @IsOptional()
+  richDescription?: string;
 
   @IsArray()
   @IsOptional()

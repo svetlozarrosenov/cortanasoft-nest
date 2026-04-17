@@ -104,7 +104,7 @@ async function cleanup() {
     await prisma.stockTransferSerial.deleteMany({ where: { stockTransferItem: { stockTransfer: { companyId: c.id } } } });
     await prisma.stockTransferItem.deleteMany({ where: { stockTransfer: { companyId: c.id } } });
     await prisma.stockTransfer.deleteMany({ where: { companyId: c.id } });
-    await prisma.productionOrderMaterial.deleteMany({ where: { productionOrder: { companyId: c.id } } });
+    await prisma.productionMaterialIssuance.deleteMany({ where: { companyId: c.id } });
     await prisma.productionOrder.deleteMany({ where: { companyId: c.id } });
     await prisma.bOMItem.deleteMany({ where: { bom: { companyId: c.id } } });
     await prisma.billOfMaterial.deleteMany({ where: { companyId: c.id } });

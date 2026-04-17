@@ -1,27 +1,4 @@
-import {
-  IsString,
-  IsOptional,
-  IsArray,
-  ValidateNested,
-  IsNumber,
-  Min,
-  IsEnum,
-} from 'class-validator';
-import { Type } from 'class-transformer';
-import { Unit } from '@prisma/client';
-
-export class CreateProductionOrderMaterialDto {
-  @IsString()
-  productId: string;
-
-  @IsNumber()
-  @Min(0.001)
-  plannedQuantity: number;
-
-  @IsEnum(Unit)
-  @IsOptional()
-  unit?: Unit;
-}
+import { IsString, IsOptional, IsNumber, Min } from 'class-validator';
 
 export class CreateProductionOrderDto {
   @IsString()
@@ -31,8 +8,18 @@ export class CreateProductionOrderDto {
   @IsString()
   productId: string;
 
+  // BOM is optional — custom production without a recipe is allowed
   @IsString()
-  bomId: string;
+  @IsOptional()
+  bomId?: string;
+
+  @IsString()
+  @IsOptional()
+  title?: string;
+
+  @IsString()
+  @IsOptional()
+  customerId?: string;
 
   @IsNumber()
   @Min(0.001)
@@ -53,10 +40,4 @@ export class CreateProductionOrderDto {
   @IsString()
   @IsOptional()
   notes?: string;
-
-  @IsArray()
-  @IsOptional()
-  @ValidateNested({ each: true })
-  @Type(() => CreateProductionOrderMaterialDto)
-  materials?: CreateProductionOrderMaterialDto[];
 }

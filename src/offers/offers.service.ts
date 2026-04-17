@@ -20,6 +20,9 @@ const OFFER_INCLUDE = {
       },
     },
   },
+  resultingOrder: {
+    select: { id: true, orderNumber: true, status: true },
+  },
   _count: { select: { items: true } },
 } as const;
 
@@ -135,6 +138,7 @@ export class OffersService {
           discount: offerDiscount,
           total,
           notes: dto.notes || null,
+          richDescription: dto.richDescription || null,
           currencyId,
           companyId,
           createdById: userId,
@@ -263,6 +267,9 @@ export class OffersService {
             validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
           }),
           ...(dto.notes !== undefined && { notes: dto.notes || null }),
+          ...(dto.richDescription !== undefined && {
+            richDescription: dto.richDescription || null,
+          }),
         },
         include: OFFER_INCLUDE,
       });
@@ -357,6 +364,9 @@ export class OffersService {
             validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
           }),
           ...(dto.notes !== undefined && { notes: dto.notes || null }),
+          ...(dto.richDescription !== undefined && {
+            richDescription: dto.richDescription || null,
+          }),
           subtotal,
           vatAmount,
           discount: offerDiscount,
@@ -444,6 +454,26 @@ export class OffersService {
       );
     }
 
+    // Block duplicate order creation from the same offer (unique FK enforces this at DB level too)
+    const existing = await this.prisma.order.findUnique({
+      where: { sourceOfferId: id },
+      select: { id: true, orderNumber: true },
+    });
+    if (existing) {
+      throw new BadRequestException(
+        `Вече има поръчка (${existing.orderNumber}) от тази оферта`,
+      );
+    }
+
+    // Free-text offer items (no productId) cannot be mapped to order items — skip them.
+    // They are prose descriptions; the descriptive content is already in richDescription.
+    const convertibleItems = offer.items.filter((item) => item.productId);
+    if (convertibleItems.length === 0) {
+      throw new BadRequestException(
+        'Няма продукти с productId в офертата — не може да се създаде поръчка',
+      );
+    }
+
     // Mark as accepted if it was sent
     if (offer.status === 'SENT') {
       await this.prisma.offer.update({
@@ -452,48 +482,51 @@ export class OffersService {
       });
     }
 
-    // Generate order number
-    const year = new Date().getFullYear();
-    const prefix = `ORD-${year}-`;
-    const count = await this.prisma.order.count({
-      where: { companyId, orderNumber: { startsWith: prefix } },
-    });
-    const orderNumber = `${prefix}${(count + 1).toString().padStart(5, '0')}`;
+    // Generate order number (inside transaction below)
+    return this.prisma.$transaction(async (tx) => {
+      const year = new Date().getFullYear();
+      const prefix = `ORD-${year}-`;
+      const count = await tx.order.count({
+        where: { companyId, orderNumber: { startsWith: prefix } },
+      });
+      const orderNumber = `${prefix}${(count + 1).toString().padStart(5, '0')}`;
 
-    return this.prisma.order.create({
-      data: {
-        orderNumber,
-        status: 'DRAFT',
-        customerId: offer.customerId,
-        customerName: offer.customerName,
-        customerEmail: offer.customerEmail,
-        customerPhone: offer.customerPhone,
-        shippingAddress: offer.customerAddress,
-        shippingCity: offer.customerCity,
-        shippingPostalCode: offer.customerPostalCode,
-        subtotal: offer.subtotal,
-        vatAmount: offer.vatAmount,
-        discount: offer.discount,
-        total: offer.total,
-        notes: `От оферта ${offer.offerNumber}`,
-        currencyId: offer.currencyId,
-        companyId,
-        createdById: userId,
-        items: {
-          create: offer.items.map((item) => ({
-            productId: item.productId!,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            vatRate: item.vatRate,
-            discount: item.discount,
-            subtotal: item.total,
-          })),
+      return tx.order.create({
+        data: {
+          orderNumber,
+          status: 'DRAFT',
+          customerId: offer.customerId,
+          customerName: offer.customerName,
+          customerEmail: offer.customerEmail,
+          customerPhone: offer.customerPhone,
+          shippingAddress: offer.customerAddress,
+          shippingCity: offer.customerCity,
+          shippingPostalCode: offer.customerPostalCode,
+          subtotal: offer.subtotal,
+          vatAmount: offer.vatAmount,
+          discount: offer.discount,
+          total: offer.total,
+          notes: `От оферта ${offer.offerNumber}`,
+          currencyId: offer.currencyId,
+          sourceOfferId: id,
+          companyId,
+          createdById: userId,
+          items: {
+            create: convertibleItems.map((item) => ({
+              productId: item.productId!,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              vatRate: item.vatRate,
+              discount: item.discount,
+              subtotal: item.total,
+            })),
+          },
         },
-      },
-      include: {
-        items: { include: { product: true } },
-        customer: true,
-      },
+        include: {
+          items: { include: { product: true } },
+          customer: true,
+        },
+      });
     });
   }
 }

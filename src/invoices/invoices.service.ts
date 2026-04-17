@@ -124,23 +124,84 @@ export class InvoicesService {
       customerPostalCode = customerPostalCode || order.customer.postalCode;
     }
 
+    // Partial invoicing: compute remainder, validate requested amount
+    const orderTotal = Number(order.total);
+    const alreadyInvoiced = Number(order.invoicedAmount);
+    const remainder = Math.max(0, orderTotal - alreadyInvoiced);
+
+    if (remainder < 0.01) {
+      throw new BadRequestException(ErrorMessages.invoices.orderFullyInvoiced);
+    }
+
+    const EPSILON = 0.01;
+    const requestedAmount = dto.amount !== undefined ? Number(dto.amount) : remainder;
+
+    if (requestedAmount <= 0) {
+      throw new BadRequestException(ErrorMessages.invoices.invalidInvoiceAmount);
+    }
+    if (requestedAmount > remainder + EPSILON) {
+      throw new BadRequestException(ErrorMessages.invoices.amountExceedsRemainder);
+    }
+
+    const isFullFirstInvoice =
+      alreadyInvoiced === 0 && Math.abs(requestedAmount - orderTotal) < EPSILON;
+
+    // Pro-rata split: scale order's subtotal/vat/discount by ratio
+    const ratio = orderTotal > 0 ? requestedAmount / orderTotal : 0;
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const partialSubtotal = round2(Number(order.subtotal) * ratio);
+    const partialVatAmount = round2(Number(order.vatAmount) * ratio);
+    const partialDiscount = round2(Number(order.discount) * ratio);
+    // Effective VAT rate for the synthetic line item (guard /0)
+    const effectiveVatRate = Number(order.subtotal) > 0
+      ? round2((Number(order.vatAmount) / Number(order.subtotal)) * 100)
+      : 0;
+
     // Generate number + create in a transaction to prevent duplicates
     return this.prisma.$transaction(async (tx) => {
       const invoiceNumber = await this.generateInvoiceNumber(companyId, 'INV', tx);
 
       const orderPaid = Number(order.paidAmount);
-      const orderTotal = Number(order.total);
+      // Pro-rata allocated paid amount for this slice (FIFO: each invoice claims up to its own total)
+      const invoiceAllocatedPaid = Math.max(
+        0,
+        Math.min(requestedAmount, orderPaid - alreadyInvoiced),
+      );
       const invoiceStatus: InvoiceStatus =
-        orderPaid >= orderTotal ? 'PAID' : orderPaid > 0 ? 'PARTIALLY_PAID' : 'ISSUED';
+        invoiceAllocatedPaid >= requestedAmount - EPSILON ? 'PAID'
+        : invoiceAllocatedPaid > 0 ? 'PARTIALLY_PAID'
+        : 'ISSUED';
 
-      return tx.invoice.create({
+      const items = isFullFirstInvoice
+        ? order.items.map((item) => ({
+            productId: item.productId,
+            description: item.product?.name || 'Артикул',
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            vatRate: item.vatRate,
+            discount: item.discount,
+            total: item.subtotal,
+            orderItemId: item.id,
+          }))
+        : [
+            {
+              description: `Фактуриране по поръчка ${order.orderNumber}`,
+              quantity: 1,
+              unitPrice: partialSubtotal,
+              vatRate: effectiveVatRate,
+              discount: 0,
+              total: partialSubtotal,
+            },
+          ];
+
+      const invoice = await tx.invoice.create({
         data: {
           invoiceNumber,
           invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(),
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
           type: 'REGULAR',
           status: invoiceStatus,
-          paidAmount: Math.min(orderPaid, orderTotal),
+          paidAmount: invoiceAllocatedPaid,
           orderId: order.id,
           customerId: order.customerId,
           customerName: order.customerName,
@@ -149,29 +210,26 @@ export class InvoicesService {
           customerAddress,
           customerCity,
           customerPostalCode,
-          subtotal: order.subtotal,
-          vatAmount: order.vatAmount,
-          discount: order.discount,
-          total: order.total,
+          subtotal: isFullFirstInvoice ? order.subtotal : partialSubtotal,
+          vatAmount: isFullFirstInvoice ? order.vatAmount : partialVatAmount,
+          discount: isFullFirstInvoice ? order.discount : partialDiscount,
+          total: requestedAmount,
           paymentMethod: order.paymentMethod,
           notes: dto.notes,
           companyId,
           createdById: userId,
-          items: {
-            create: order.items.map((item) => ({
-              productId: item.productId,
-              description: item.product?.name || 'Артикул',
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              vatRate: item.vatRate,
-              discount: item.discount,
-              total: item.subtotal,
-              orderItemId: item.id,
-            })),
-          },
+          items: { create: items },
         },
         include: this.invoiceInclude,
       });
+
+      // Increment cached invoicedAmount on order
+      await tx.order.update({
+        where: { id: order.id },
+        data: { invoicedAmount: alreadyInvoiced + requestedAmount },
+      });
+
+      return invoice;
     });
   }
 
@@ -475,10 +533,20 @@ export class InvoicesService {
       throw new BadRequestException(ErrorMessages.invoices.alreadyCancelled);
     }
 
-    return this.prisma.invoice.update({
-      where: { id },
-      data: { status: 'CANCELLED' },
-      include: this.invoiceInclude,
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.invoice.update({
+        where: { id },
+        data: { status: 'CANCELLED' },
+        include: this.invoiceInclude,
+      });
+      // Free up invoiced amount on the order so remainder is available again
+      if (invoice.orderId) {
+        await tx.order.update({
+          where: { id: invoice.orderId },
+          data: { invoicedAmount: { decrement: invoice.total } },
+        });
+      }
+      return updated;
     });
   }
 
@@ -490,7 +558,16 @@ export class InvoicesService {
       throw new BadRequestException(ErrorMessages.invoices.canOnlyDeleteDraft);
     }
 
-    await this.prisma.invoice.delete({ where: { id } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.invoice.delete({ where: { id } });
+      // Free up invoiced amount on the order
+      if (invoice.orderId) {
+        await tx.order.update({
+          where: { id: invoice.orderId },
+          data: { invoicedAmount: { decrement: invoice.total } },
+        });
+      }
+    });
 
     return { message: 'Фактурата е изтрита успешно' };
   }

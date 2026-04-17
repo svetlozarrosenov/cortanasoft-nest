@@ -83,6 +83,9 @@ export const ErrorMessages = {
     cannotCancelPartiallyPaid: 'Не може да анулирате частично платена фактура. Създайте кредитно известие.',
     alreadyCancelled: 'Фактурата вече е анулирана',
     canOnlyDeleteDraft: 'Може да изтриете само чернови фактури',
+    orderFullyInvoiced: 'Поръчката е изцяло фактурирана — няма остатък за издаване',
+    invalidInvoiceAmount: 'Невалидна сума за фактуриране',
+    amountExceedsRemainder: 'Сумата надвишава остатъка от поръчката, който не е фактуриран',
   },
 
   // ==================== Инвентар ====================
@@ -244,6 +247,11 @@ export const ErrorMessages = {
     canOnlyDeleteDraft: 'Може да изтриете само чернови поръчки',
     insufficientMaterials: (productName: string, available: number, required: number) =>
       `Недостатъчна наличност за "${productName}" - налични: ${available}, необходими: ${required}`,
+    customerNotFound: 'Клиентът не е намерен',
+    canOnlyIssueInProgress: 'Може да изписвате материали само по поръчка в производство',
+    issuanceNotFound: 'Записът за изписване не е намерен',
+    alreadyReturned: 'Материалът вече е върнат',
+    cannotReturnCompleted: 'Не може да върнете материал от завършена поръчка',
   },
 };
 

@@ -173,24 +173,29 @@ export class PaymentsService {
       },
     });
 
-    // Sync linked invoices (non-cancelled): invoice.paidAmount = min(paid, invoice.total)
+    // Sync linked invoices (non-cancelled) — FIFO allocation of paid amount across invoices.
+    // Oldest invoices get filled first, later ones only if payment covers them.
     const invoices = await tx.invoice.findMany({
       where: { orderId, status: { not: 'CANCELLED' } },
       select: { id: true, total: true, status: true },
+      orderBy: { createdAt: 'asc' },
     });
 
+    let remainingPaid = paid;
     for (const inv of invoices) {
       const invTotal = Number(inv.total);
-      const invPaid = Math.min(paid, invTotal);
+      const allocated = Math.min(remainingPaid, invTotal);
+      remainingPaid = Math.max(0, remainingPaid - allocated);
+
       let invStatus = inv.status;
       if (invStatus !== 'DRAFT') {
-        if (invPaid >= invTotal) invStatus = 'PAID';
-        else if (invPaid > 0) invStatus = 'PARTIALLY_PAID';
+        if (allocated >= invTotal) invStatus = 'PAID';
+        else if (allocated > 0) invStatus = 'PARTIALLY_PAID';
         else invStatus = 'ISSUED';
       }
       await tx.invoice.update({
         where: { id: inv.id },
-        data: { paidAmount: invPaid, status: invStatus },
+        data: { paidAmount: allocated, status: invStatus },
       });
     }
   }

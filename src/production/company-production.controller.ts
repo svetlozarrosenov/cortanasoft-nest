@@ -14,6 +14,7 @@ import {
   CreateProductionOrderDto,
   UpdateProductionOrderDto,
   QueryProductionOrdersDto,
+  IssueMaterialDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -56,6 +57,15 @@ export class CompanyProductionController {
     return this.productionService.findOne(companyId, id);
   }
 
+  @Get(':id/planned-materials')
+  @RequireView('production', 'orders')
+  plannedMaterials(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.productionService.getPlannedMaterials(companyId, id);
+  }
+
   @Patch(':id')
   @RequireEdit('production', 'orders')
   update(
@@ -68,18 +78,38 @@ export class CompanyProductionController {
 
   @Post(':id/start')
   @RequireEdit('production', 'orders')
-  start(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.productionService.start(companyId, id);
+  start(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.productionService.start(companyId, id, user.id);
+  }
+
+  @Post(':id/issue-material')
+  @RequireEdit('production', 'orders')
+  issueMaterial(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+    @Body() dto: IssueMaterialDto,
+  ) {
+    return this.productionService.issueMaterial(companyId, id, user.id, dto);
+  }
+
+  @Post('issuances/:issuanceId/return')
+  @RequireEdit('production', 'orders')
+  returnMaterial(
+    @Param('companyId') companyId: string,
+    @Param('issuanceId') issuanceId: string,
+  ) {
+    return this.productionService.returnMaterial(companyId, issuanceId);
   }
 
   @Post(':id/complete')
   @RequireEdit('production', 'orders')
-  complete(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-    @Body() body?: { materials?: { productId: string; actualQuantity: number }[] },
-  ) {
-    return this.productionService.complete(companyId, id, body?.materials);
+  complete(@Param('companyId') companyId: string, @Param('id') id: string) {
+    return this.productionService.complete(companyId, id);
   }
 
   @Post(':id/cancel')
