@@ -374,6 +374,36 @@ export class TicketsService {
     });
   }
 
+  async stopProgress(companyId: string, id: string) {
+    const ticket = await this.prisma.ticket.findFirst({
+      where: { id, companyId },
+    });
+
+    if (!ticket) {
+      throw new NotFoundException('Ticket not found');
+    }
+
+    if (ticket.status !== 'IN_PROGRESS') {
+      throw new BadRequestException(
+        'Can only stop tickets that are in progress',
+      );
+    }
+
+    // Keep startedAt as a first-start audit field
+    return this.prisma.ticket.update({
+      where: { id },
+      data: { status: 'TODO' },
+      include: {
+        assignee: {
+          select: { id: true, email: true, firstName: true, lastName: true },
+        },
+        createdBy: {
+          select: { id: true, email: true, firstName: true, lastName: true },
+        },
+      },
+    });
+  }
+
   async cancel(companyId: string, id: string) {
     const ticket = await this.prisma.ticket.findFirst({
       where: { id, companyId },

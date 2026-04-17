@@ -48,6 +48,7 @@ import { WarrantiesModule } from './warranties/warranties.module';
 import { ContactSubmissionsModule } from './contact-submissions/contact-submissions.module';
 import { CloudCartModule } from './cloudcart/cloudcart.module';
 import { WordPressModule } from './wordpress/wordpress.module';
+import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
@@ -114,6 +115,7 @@ import { WordPressModule } from './wordpress/wordpress.module';
     ContactSubmissionsModule,
     CloudCartModule,
     WordPressModule,
+    PaymentsModule,
   ],
   controllers: [],
   providers: [],

@@ -8,6 +8,7 @@ import { CreateOrderDto, UpdateOrderDto, QueryOrdersDto } from './dto';
 import { Prisma } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
 import { WarrantiesService } from '../warranties/warranties.service';
+import { PaymentsService } from '../payments/payments.service';
 
 /** Round a number to 2 decimal places to avoid floating-point drift */
 function round2(n: number): number {
@@ -37,6 +38,7 @@ export class OrdersService {
   constructor(
     private prisma: PrismaService,
     private warrantiesService: WarrantiesService,
+    private paymentsService: PaymentsService,
   ) {}
 
   private async generateOrderNumber(
@@ -157,16 +159,19 @@ export class OrdersService {
     const total = round2(subtotal + vatAmount + shippingCost - orderDiscount);
 
     // Generate order number inside transaction to avoid race condition
+    const initialPaymentStatus =
+      (dto.paymentStatus as 'PENDING' | 'PARTIAL' | 'PAID') || 'PENDING';
+
     const order = await this.prisma.$transaction(async (tx) => {
       const orderNumber =
         dto.orderNumber || (await this.generateOrderNumber(companyId, tx));
 
-      return tx.order.create({
+      const createdOrder = await tx.order.create({
         data: {
           orderNumber,
           orderDate: dto.orderDate ? new Date(dto.orderDate) : new Date(),
           status: 'DRAFT',
-          paymentStatus: (dto.paymentStatus as 'PENDING' | 'PARTIAL' | 'PAID') || 'PENDING',
+          paymentStatus: 'PENDING',
           customerId: dto.customerId,
           customerName: dto.customerName,
           customerEmail: dto.customerEmail,
@@ -196,6 +201,20 @@ export class OrdersService {
         },
         include: ORDER_INCLUDE,
       });
+
+      // Seed payment if integration passed a non-PENDING status
+      if (initialPaymentStatus !== 'PENDING') {
+        await this.paymentsService.syncPaymentsFromStatus(
+          tx,
+          companyId,
+          createdOrder.id,
+          initialPaymentStatus,
+          Number(createdOrder.total),
+          createdOrder.paymentMethod,
+        );
+      }
+
+      return createdOrder;
     });
 
     // Auto-create issued warranties for products with warranty templates
@@ -298,30 +317,31 @@ export class OrdersService {
       });
     }
 
-    // Allow payment status updates for confirmed+ orders
+    // Allow payment status updates for confirmed+ orders.
+    // Delegates to PaymentsService so payments history stays authoritative:
+    // PAID creates a synthetic payment for the remainder, PENDING wipes auto-generated ones.
     if (order.status === 'DELIVERED') {
       if (dto.paymentStatus) {
         return this.prisma.$transaction(async (tx) => {
-          const updatedOrder = await tx.order.update({
+          if (dto.paymentStatus === 'REFUNDED') {
+            await tx.order.update({
+              where: { id },
+              data: { paymentStatus: 'REFUNDED' },
+            });
+          } else {
+            await this.paymentsService.syncPaymentsFromStatus(
+              tx,
+              companyId,
+              id,
+              dto.paymentStatus as 'PENDING' | 'PARTIAL' | 'PAID',
+              Number(order.total),
+              order.paymentMethod,
+            );
+          }
+          return tx.order.findFirst({
             where: { id },
-            data: { paymentStatus: dto.paymentStatus },
             include: ORDER_INCLUDE,
           });
-
-          // Sync linked invoice payment status
-          if (dto.paymentStatus === 'PAID') {
-            await tx.invoice.updateMany({
-              where: { orderId: id, companyId, status: { not: 'CANCELLED' } },
-              data: { paidAmount: updatedOrder.total, status: 'PAID' },
-            });
-          } else if (dto.paymentStatus === 'PENDING') {
-            await tx.invoice.updateMany({
-              where: { orderId: id, companyId, status: { not: 'CANCELLED' } },
-              data: { paidAmount: 0, status: 'ISSUED' },
-            });
-          }
-
-          return updatedOrder;
         });
       }
       throw new BadRequestException(ErrorMessages.orders.canOnlyUpdatePending);

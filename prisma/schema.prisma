@@ -36,6 +36,7 @@ model Currency {
   deals              Deal[] // Сделки в тази валута
   companyPlans       CompanyPlan[] // Планове в тази валута
   expenses           Expense[] // Разходи в тази валута
+  payments           Payment[] // Плащания в тази валута
 
   @@map("currencies")
 }
@@ -210,6 +211,7 @@ model Company {
   warrantyTemplates  WarrantyTemplate[]
   issuedWarranties   IssuedWarranty[]
   integrations       Integration[]
+  payments           Payment[]
 
   @@map("companies")
 }
@@ -442,6 +444,9 @@ model User {
 
   // Гаранции
   createdWarrantyTemplates WarrantyTemplate[] @relation("WarrantyTemplateCreator")
+
+  // Плащания
+  createdPayments Payment[] @relation("PaymentCreator")
 
   // Terms acceptance
   termsAcceptedAt DateTime?
@@ -1427,6 +1432,7 @@ model Order {
   // Плащане
   paymentMethod PaymentMethod @default(CASH)
   paymentStatus PaymentStatus @default(PENDING)
+  paidAmount    Decimal       @default(0) @db.Decimal(12, 2) // Сумиран eквивалент на Payment-ите (derived)
 
   // Суми
   subtotal     Decimal @db.Decimal(12, 2) // Сума без ДДС
@@ -1460,6 +1466,7 @@ model Order {
   stockDocuments   StockDocument[]
   shipments        Shipment[]
   issuedWarranties IssuedWarranty[]
+  payments         Payment[]
 
   @@unique([companyId, orderNumber])
   @@index([companyId, status])
@@ -1498,6 +1505,38 @@ model OrderItem {
   invoiceItems InvoiceItem[]
 
   @@map("order_items")
+}
+
+// Плащане по поръчка (история на реални плащания)
+model Payment {
+  id        String        @id @default(cuid())
+  amount    Decimal       @db.Decimal(12, 2) // Сума на плащането
+  paidAt    DateTime      @default(now()) // Кога е извършено плащането
+  method    PaymentMethod @default(CASH) // Метод на плащане
+  reference String? // Референция (№ на банково извлечение, касов бон...)
+  notes     String? // Бележка
+
+  // Валута на плащането (може да се различава от валутата на поръчката)
+  currencyId   String?
+  currency     Currency? @relation(fields: [currencyId], references: [id])
+  exchangeRate Decimal   @default(1) @db.Decimal(10, 6)
+
+  // Релации
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdById String?
+  createdBy   User?   @relation("PaymentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, orderId])
+  @@index([companyId, paidAt])
+  @@map("payments")
 }
 
 // ==================== ОФЕРТИ ====================

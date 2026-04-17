@@ -2,6 +2,15 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { InvoicesService } from './invoices.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PaymentsService } from '../payments/payments.service';
+
+const mockPayments = {
+  create: jest.fn(),
+  update: jest.fn(),
+  remove: jest.fn(),
+  syncPaymentsFromStatus: jest.fn(),
+  recalculateOrderState: jest.fn(),
+};
 
 const mockPrisma = {
   invoice: {
@@ -32,6 +41,7 @@ describe('InvoicesService', () => {
       providers: [
         InvoicesService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: PaymentsService, useValue: mockPayments },
       ],
     }).compile();
     service = module.get<InvoicesService>(InvoicesService);

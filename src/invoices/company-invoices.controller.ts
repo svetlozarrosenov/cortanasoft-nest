@@ -137,8 +137,9 @@ export class CompanyInvoicesController {
     @Param('companyId') companyId: string,
     @Param('id') id: string,
     @Body() dto: RecordPaymentDto,
+    @CurrentUser() user: any,
   ) {
-    return this.invoicesService.recordPayment(companyId, id, dto);
+    return this.invoicesService.recordPayment(companyId, id, dto, user.id);
   }
 
   @Post(':id/cancel')

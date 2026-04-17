@@ -13,10 +13,14 @@ import {
 } from './dto';
 import { Prisma, InvoiceStatus, OrderStatus } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
+import { PaymentsService } from '../payments/payments.service';
 
 @Injectable()
 export class InvoicesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private paymentsService: PaymentsService,
+  ) {}
 
   private async generateInvoiceNumber(
     companyId: string,
@@ -124,14 +128,19 @@ export class InvoicesService {
     return this.prisma.$transaction(async (tx) => {
       const invoiceNumber = await this.generateInvoiceNumber(companyId, 'INV', tx);
 
+      const orderPaid = Number(order.paidAmount);
+      const orderTotal = Number(order.total);
+      const invoiceStatus: InvoiceStatus =
+        orderPaid >= orderTotal ? 'PAID' : orderPaid > 0 ? 'PARTIALLY_PAID' : 'ISSUED';
+
       return tx.invoice.create({
         data: {
           invoiceNumber,
           invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(),
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
           type: 'REGULAR',
-          status: order.paymentStatus === 'PAID' ? 'PAID' : 'ISSUED',
-          paidAmount: order.paymentStatus === 'PAID' ? order.total : 0,
+          status: invoiceStatus,
+          paidAmount: Math.min(orderPaid, orderTotal),
           orderId: order.id,
           customerId: order.customerId,
           customerName: order.customerName,
@@ -400,7 +409,12 @@ export class InvoicesService {
     });
   }
 
-  async recordPayment(companyId: string, id: string, dto: RecordPaymentDto) {
+  async recordPayment(
+    companyId: string,
+    id: string,
+    dto: RecordPaymentDto,
+    userId?: string,
+  ) {
     const invoice = await this.findOne(companyId, id);
 
     // Cannot record payment on DRAFT or CANCELLED invoices
@@ -414,10 +428,20 @@ export class InvoicesService {
       throw new BadRequestException(ErrorMessages.invoices.alreadyFullyPaid);
     }
 
+    // Order-linked invoices delegate to Payment records (single source of truth)
+    if (invoice.orderId) {
+      await this.paymentsService.create(companyId, userId || '', {
+        orderId: invoice.orderId,
+        amount: dto.amount,
+        method: dto.paymentMethod as any,
+      });
+      return this.findOne(companyId, id);
+    }
+
+    // Proforma fallback: keep scalar paidAmount behavior (no order to derive from)
     const newPaidAmount = Number(invoice.paidAmount) + dto.amount;
     const invoiceTotal = Number(invoice.total);
 
-    // Determine new status
     let newStatus: InvoiceStatus = invoice.status;
     if (newPaidAmount >= invoiceTotal) {
       newStatus = 'PAID';
@@ -428,7 +452,7 @@ export class InvoicesService {
     return this.prisma.invoice.update({
       where: { id },
       data: {
-        paidAmount: Math.min(newPaidAmount, invoiceTotal), // Don't overpay
+        paidAmount: Math.min(newPaidAmount, invoiceTotal),
         status: newStatus,
         paymentMethod: dto.paymentMethod || invoice.paymentMethod,
         paymentDate: new Date(),

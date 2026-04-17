@@ -95,6 +95,15 @@ export class CompanyTicketsController {
     return this.ticketsService.startProgress(companyId, id);
   }
 
+  @Post(':id/stop')
+  @RequireEdit('tickets', 'allTickets')
+  stopProgress(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.ticketsService.stopProgress(companyId, id);
+  }
+
   @Post(':id/submit-review')
   @RequireEdit('tickets', 'allTickets')
   submitForReview(

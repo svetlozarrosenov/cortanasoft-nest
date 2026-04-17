@@ -256,12 +256,24 @@ export class ProductsService {
   }
 
   async remove(companyId: string, id: string) {
-    // Проверка дали продуктът съществува
-    await this.findOne(companyId, id);
+    const product = await this.findOne(companyId, id);
 
-    return this.prisma.product.delete({
-      where: { id },
-    });
+    try {
+      return await this.prisma.product.delete({
+        where: { id },
+      });
+    } catch (error) {
+      const prismaError = error as { code?: string; message?: string };
+      if (
+        prismaError.code === 'P2003' ||
+        (prismaError.message && prismaError.message.includes('RESTRICT'))
+      ) {
+        throw new ConflictException(
+          `Продукт "${product.name}" не може да бъде изтрит, защото е използван в доставки, поръчки или други документи.`,
+        );
+      }
+      throw error;
+    }
   }
 
   // Категории
