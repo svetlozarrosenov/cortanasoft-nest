@@ -72,7 +72,6 @@ export class TicketsService {
         estimatedHours: dto.estimatedHours,
         assigneeId: dto.assigneeId,
         parentId: dto.parentId,
-        tags: dto.tags,
         sprintId: dto.sprintId,
         companyId,
         createdById: userId,

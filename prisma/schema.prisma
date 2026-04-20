@@ -2097,9 +2097,6 @@ model Ticket {
   parent   Ticket?  @relation("TicketSubtasks", fields: [parentId], references: [id], onDelete: SetNull)
   subtasks Ticket[] @relation("TicketSubtasks")
 
-  // Тагове (JSON масив)
-  tags String? // Comma-separated тагове
-
   // Спринт (по избор)
   sprintId String?
   sprint   Sprint? @relation(fields: [sprintId], references: [id], onDelete: SetNull)
