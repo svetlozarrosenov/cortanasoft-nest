@@ -106,6 +106,24 @@ export class CreateCompanyDto {
   @IsOptional()
   pushNotificationsEnabled?: boolean;
 
+  // Лого
+  @IsString()
+  @IsOptional()
+  logoUrl?: string;
+
+  // PDF template keys (NULL = default)
+  @IsString()
+  @IsOptional()
+  invoiceTemplateKey?: string;
+
+  @IsString()
+  @IsOptional()
+  offerTemplateKey?: string;
+
+  @IsString()
+  @IsOptional()
+  stockDocumentTemplateKey?: string;
+
   // Системни полета
   @IsEnum(CompanyRole)
   @IsOptional()

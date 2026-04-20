@@ -140,6 +140,12 @@ model Company {
   // Лого
   logoUrl String? // URL към логото на компанията (Cloudflare R2)
 
+  // PDF template keys — точка за lookup в template registry на frontend-а.
+  // NULL = default. Задава се ръчно от superadmin при custom клиентски шаблон.
+  invoiceTemplateKey       String?
+  offerTemplateKey         String?
+  stockDocumentTemplateKey String?
+
   // Контакти
   phone   String? // Телефон
   email   String? // Имейл на фирмата
