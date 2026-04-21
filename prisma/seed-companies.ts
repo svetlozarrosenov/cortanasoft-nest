@@ -1960,7 +1960,7 @@ function createFullPermissions() {
     production: ['bom', 'orders'],
     hr: ['employees', 'departments', 'attendance', 'leaves', 'payroll', 'performance'],
     bi: ['sales', 'customers', 'products'],
-    tickets: ['allTickets', 'myTickets', 'urgent', 'discussions', 'sprints'],
+    tickets: ['allTickets', 'myTickets', 'urgent', 'sprints'],
     communication: ['chat'],
     settings: ['profile', 'security', 'usersRoles'],
     ai: ['invoiceScanning'],

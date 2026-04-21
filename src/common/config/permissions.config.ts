@@ -660,11 +660,6 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         actions: ['view', 'edit'],
       },
       {
-        key: 'discussions',
-        labelKey: 'modules.tickets.discussions',
-        actions: ['view', 'create', 'edit', 'delete'],
-      },
-      {
         key: 'sprints',
         labelKey: 'modules.tickets.sprints',
         actions: ['view', 'create', 'edit', 'delete'],
@@ -679,7 +674,7 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
       {
         key: 'chat',
         labelKey: 'modules.communication.chat',
-        actions: ['view'],
+        actions: ['view', 'create', 'edit', 'delete'],
       },
     ],
   },
