@@ -58,8 +58,31 @@ export class CompanyTicketsController {
 
   @Get('summary')
   @RequireView('tickets', 'allTickets')
-  getSummary(@Param('companyId') companyId: string, @Request() req: any) {
-    return this.ticketsService.getSummary(companyId, req.user.id);
+  getSummary(
+    @Param('companyId') companyId: string,
+    @Request() req: any,
+    @Query() query: { myTickets?: string; priority?: string | string[] },
+  ) {
+    const myTickets =
+      query?.myTickets === 'assigned' || query?.myTickets === 'created'
+        ? query.myTickets
+        : undefined;
+
+    let priority: any = undefined;
+    if (query?.priority) {
+      if (Array.isArray(query.priority)) {
+        priority = query.priority;
+      } else if (typeof query.priority === 'string' && query.priority.includes(',')) {
+        priority = query.priority.split(',').map((s) => s.trim()).filter(Boolean);
+      } else {
+        priority = query.priority;
+      }
+    }
+
+    return this.ticketsService.getSummary(companyId, req.user.id, {
+      myTickets,
+      priority,
+    });
   }
 
   @Get(':id')

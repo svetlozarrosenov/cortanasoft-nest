@@ -12,7 +12,7 @@ import {
   CreateReminderDto,
   CreateTimeLogDto,
 } from './dto';
-import { TicketStatus } from '@prisma/client';
+import { TicketStatus, TicketPriority } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
 import { parseTimeString } from '../common/utils/parse-time';
 
@@ -722,7 +722,26 @@ export class TicketsService {
 
   // ==================== Summary ====================
 
-  async getSummary(companyId: string, userId: string) {
+  async getSummary(
+    companyId: string,
+    userId: string,
+    filters?: {
+      myTickets?: 'assigned' | 'created';
+      priority?: TicketPriority | TicketPriority[];
+    },
+  ) {
+    // Base scope the rest of the counts share. `total` / `myAssigned` / `myCreated` /
+    // `urgent` are derived from this scope so that a `priority=URGENT` query
+    // returns URGENT-scope breakdowns rather than a mix of all + priority.
+    const base: any = { companyId };
+    if (filters?.myTickets === 'assigned') base.assigneeId = userId;
+    else if (filters?.myTickets === 'created') base.createdById = userId;
+    if (filters?.priority) {
+      base.priority = Array.isArray(filters.priority)
+        ? { in: filters.priority }
+        : filters.priority;
+    }
+
     const [
       total,
       myAssigned,
@@ -734,23 +753,23 @@ export class TicketsService {
       overdue,
       urgent,
     ] = await Promise.all([
-      this.prisma.ticket.count({ where: { companyId } }),
-      this.prisma.ticket.count({ where: { companyId, assigneeId: userId } }),
-      this.prisma.ticket.count({ where: { companyId, createdById: userId } }),
-      this.prisma.ticket.count({ where: { companyId, status: 'TODO' } }),
-      this.prisma.ticket.count({ where: { companyId, status: 'IN_PROGRESS' } }),
-      this.prisma.ticket.count({ where: { companyId, status: 'IN_REVIEW' } }),
-      this.prisma.ticket.count({ where: { companyId, status: 'DONE' } }),
+      this.prisma.ticket.count({ where: base }),
+      this.prisma.ticket.count({ where: { ...base, assigneeId: userId } }),
+      this.prisma.ticket.count({ where: { ...base, createdById: userId } }),
+      this.prisma.ticket.count({ where: { ...base, status: 'TODO' } }),
+      this.prisma.ticket.count({ where: { ...base, status: 'IN_PROGRESS' } }),
+      this.prisma.ticket.count({ where: { ...base, status: 'IN_REVIEW' } }),
+      this.prisma.ticket.count({ where: { ...base, status: 'DONE' } }),
       this.prisma.ticket.count({
         where: {
-          companyId,
+          ...base,
           status: { notIn: ['DONE', 'CANCELLED'] },
           dueDate: { lt: new Date() },
         },
       }),
       this.prisma.ticket.count({
         where: {
-          companyId,
+          ...base,
           priority: 'URGENT',
           status: { notIn: ['DONE', 'CANCELLED'] },
         },
