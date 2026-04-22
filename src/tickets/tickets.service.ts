@@ -59,6 +59,11 @@ export class TicketsService {
   async create(companyId: string, userId: string, dto: CreateTicketDto) {
     const ticketNumber = await this.generateTicketNumber(companyId);
 
+    const plannedStartDate = dto.plannedStartDate ? new Date(dto.plannedStartDate) : null;
+    const plannedEndDate = dto.plannedEndDate
+      ? new Date(dto.plannedEndDate)
+      : await this.derivePlannedEnd(plannedStartDate, dto.estimatedHours, dto.sprintId);
+
     const ticket = await this.prisma.ticket.create({
       data: {
         ticketNumber,
@@ -67,8 +72,8 @@ export class TicketsService {
         type: dto.type || 'TASK',
         priority: dto.priority || 'MEDIUM',
         status: 'TODO',
-        plannedStartDate: dto.plannedStartDate ? new Date(dto.plannedStartDate) : null,
-        plannedEndDate: dto.plannedEndDate ? new Date(dto.plannedEndDate) : null,
+        plannedStartDate,
+        plannedEndDate,
         estimatedHours: dto.estimatedHours,
         assigneeId: dto.assigneeId,
         parentId: dto.parentId,
@@ -246,6 +251,31 @@ export class TicketsService {
     }
     if (dto.plannedEndDate !== undefined) {
       updateData.plannedEndDate = dto.plannedEndDate ? new Date(dto.plannedEndDate) : null;
+    }
+
+    // Auto-derive plannedEndDate if user didn't set it explicitly (or cleared it) but
+    // we still have a start date + estimate. Triggered when any of (start, end, estimate,
+    // sprint) changes so the end stays consistent with fresh inputs.
+    const touched =
+      dto.plannedStartDate !== undefined ||
+      dto.plannedEndDate !== undefined ||
+      dto.estimatedHours !== undefined ||
+      dto.sprintId !== undefined;
+    const endWillBeEmpty =
+      dto.plannedEndDate !== undefined
+        ? !dto.plannedEndDate
+        : !ticket.plannedEndDate;
+    if (touched && endWillBeEmpty) {
+      const effStart =
+        dto.plannedStartDate !== undefined
+          ? dto.plannedStartDate ? new Date(dto.plannedStartDate) : null
+          : ticket.plannedStartDate;
+      const effEstimate =
+        dto.estimatedHours !== undefined ? dto.estimatedHours : ticket.estimatedHours ? Number(ticket.estimatedHours) : undefined;
+      const effSprintId =
+        dto.sprintId !== undefined ? (dto.sprintId || null) : ticket.sprintId;
+      const derived = await this.derivePlannedEnd(effStart, effEstimate, effSprintId);
+      if (derived) updateData.plannedEndDate = derived;
     }
 
     // Handle status transitions with state machine validation
@@ -886,6 +916,40 @@ export class TicketsService {
       data: [{ sprintId, userId: assigneeId, companyId }],
       skipDuplicates: true,
     });
+  }
+
+  // Derive plannedEndDate = start + ceil(estimate/hoursPerDay) business days (skip weekends).
+  // Returns null when inputs are incomplete. hoursPerDay comes from the sprint if the
+  // ticket belongs to one; otherwise falls back to 8.
+  private async derivePlannedEnd(
+    plannedStartDate: Date | null | undefined,
+    estimatedHours: number | null | undefined,
+    sprintId: string | null | undefined,
+  ): Promise<Date | null> {
+    if (!plannedStartDate || !estimatedHours || estimatedHours <= 0) return null;
+
+    let hoursPerDay = 8;
+    if (sprintId) {
+      const sprint = await this.prisma.sprint.findUnique({
+        where: { id: sprintId },
+        select: { hoursPerDay: true },
+      });
+      if (sprint?.hoursPerDay) hoursPerDay = Number(sprint.hoursPerDay);
+    }
+
+    const days = Math.max(1, Math.ceil(Number(estimatedHours) / hoursPerDay));
+    const end = new Date(plannedStartDate);
+    let added = 1; // start day counts as day 1
+    while (added < days) {
+      end.setDate(end.getDate() + 1);
+      const dow = end.getDay();
+      if (dow !== 0 && dow !== 6) added++;
+    }
+    // If start itself lands on weekend, walk forward so the end day is a workday too.
+    while (end.getDay() === 0 || end.getDay() === 6) {
+      end.setDate(end.getDate() + 1);
+    }
+    return end;
   }
 
   private async recalculateActualHours(ticketId: string) {
