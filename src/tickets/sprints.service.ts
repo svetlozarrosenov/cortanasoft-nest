@@ -103,6 +103,8 @@ export class SprintsService {
             status: true,
             estimatedHours: true,
             actualHours: true,
+            plannedStartDate: true,
+            plannedEndDate: true,
             assigneeId: true,
           },
         },
@@ -113,21 +115,25 @@ export class SprintsService {
       ],
     });
 
-    // Enrich each sprint with computed progress
+    // Enrich each sprint with computed progress (effort-weighted, consistent with getProgress)
     return sprints.map((sprint) => {
       const tickets = sprint.tickets || [];
+      const hoursPerDay = sprint.hoursPerDay ? Number(sprint.hoursPerDay) : 8;
       const totalTickets = tickets.length;
       const completedTickets = tickets.filter((t) => t.status === 'DONE').length;
-      const totalEstimatedHours = tickets.reduce(
-        (sum, t) => sum + (t.estimatedHours ? Number(t.estimatedHours) : 0),
-        0,
-      );
+
+      const weights = tickets.map((t) => ({ t, weight: computeEffortWeight(t, hoursPerDay) }));
+      const totalEstimatedHours = weights.reduce((sum, w) => sum + w.weight, 0);
+      const completedWeight = weights
+        .filter(({ t }) => t.status === 'DONE')
+        .reduce((sum, w) => sum + w.weight, 0);
+
       const totalActualHours = tickets.reduce(
         (sum, t) => sum + (t.actualHours ? Number(t.actualHours) : 0),
         0,
       );
-      const percentComplete = totalTickets > 0
-        ? Math.round((completedTickets / totalTickets) * 100)
+      const percentComplete = totalEstimatedHours > 0
+        ? Math.round((completedWeight / totalEstimatedHours) * 100)
         : 0;
 
       // Remove full ticket array from response to keep it light
@@ -247,6 +253,21 @@ export class SprintsService {
       },
       data: { sprintId },
     });
+
+    // Auto-add assignees of added tickets as sprint members
+    const addedTickets = await this.prisma.ticket.findMany({
+      where: { id: { in: dto.ticketIds }, companyId, sprintId },
+      select: { assigneeId: true },
+    });
+    const assigneeIds = Array.from(
+      new Set(addedTickets.map((t) => t.assigneeId).filter((id): id is string => !!id)),
+    );
+    if (assigneeIds.length > 0) {
+      await this.prisma.sprintMember.createMany({
+        data: assigneeIds.map((userId) => ({ sprintId, userId, companyId })),
+        skipDuplicates: true,
+      });
+    }
 
     // Recalculate end date
     await this.calculateEndDate(sprintId);
@@ -423,19 +444,7 @@ export class SprintsService {
 
     const sprintHoursPerDay = sprint.hoursPerDay ? Number(sprint.hoursPerDay) : 8;
 
-    // Effort weight per task: prefer estimatedHours; fall back to planned duration * hoursPerDay.
-    // If neither is set, the task gets 0 weight (effectively "unweighted" — see fallback below).
-    const effortWeight = (t: typeof tickets[number]): number => {
-      if (t.estimatedHours) return Number(t.estimatedHours);
-      if (t.plannedStartDate && t.plannedEndDate) {
-        const ms = new Date(t.plannedEndDate).getTime() - new Date(t.plannedStartDate).getTime();
-        const days = Math.max(1, Math.ceil(ms / (1000 * 60 * 60 * 24)) + 1);
-        return days * sprintHoursPerDay;
-      }
-      return 0;
-    };
-
-    const weights = tickets.map((t) => ({ t, weight: effortWeight(t) }));
+    const weights = tickets.map((t) => ({ t, weight: computeEffortWeight(t, sprintHoursPerDay) }));
     const totalEstimatedHours = weights.reduce((sum, w) => sum + w.weight, 0);
     const completedWeight = weights
       .filter(({ t }) => t.status === 'DONE')
@@ -451,13 +460,11 @@ export class SprintsService {
       : 0;
 
     // Effort-weighted progress: % of total estimated hours that are in DONE tasks.
-    // Fallback to task-count ratio only when no task has any effort info at all.
-    const percentComplete =
-      totalEstimatedHours > 0
-        ? Math.round((completedWeight / totalEstimatedHours) * 100)
-        : totalTickets > 0
-          ? Math.round((completedTickets / totalTickets) * 100)
-          : 0;
+    // Every task has a non-zero weight (default = 1 working day) so percentComplete is
+    // stable even when some tickets miss estimates.
+    const percentComplete = totalEstimatedHours > 0
+      ? Math.round((completedWeight / totalEstimatedHours) * 100)
+      : 0;
 
     const hoursProgress = totalEstimatedHours > 0
       ? Math.round((totalLoggedHours / totalEstimatedHours) * 100)
@@ -514,7 +521,11 @@ export class SprintsService {
     // Capacity info (informational — NOT used to determine projection)
     const hoursPerDay = sprint.hoursPerDay ? Number(sprint.hoursPerDay) : 8;
     const membersCount = sprint._count.members;
-    const remainingEffortHours = Math.max(0, totalEstimatedHours - totalLoggedHours);
+    // Work still to do = sum of effort weights of non-DONE/non-CANCELLED tickets.
+    // Decoupled from logged hours so DONE tickets with extra logged time don't skew this.
+    const remainingEffortHours = weights
+      .filter(({ t }) => t.status !== 'DONE' && t.status !== 'CANCELLED')
+      .reduce((sum, w) => sum + w.weight, 0);
     const availableCapacityHours =
       workingDaysRemaining !== null && workingDaysRemaining > 0
         ? membersCount * hoursPerDay * workingDaysRemaining
@@ -560,4 +571,26 @@ function countWorkingDays(from: Date, to: Date): number {
     cursor.setDate(cursor.getDate() + 1);
   }
   return days;
+}
+
+// Effort weight per ticket. Priority:
+//   1. estimatedHours (explicit author intent)
+//   2. plannedStartDate..plannedEndDate × hoursPerDay (derived from schedule)
+//   3. hoursPerDay (default = 1 working day) — so every ticket counts in the weighted total
+// Shared between findAll and getProgress so list + detail views report identical %.
+function computeEffortWeight(
+  t: {
+    estimatedHours?: unknown;
+    plannedStartDate?: Date | null;
+    plannedEndDate?: Date | null;
+  },
+  hoursPerDay: number,
+): number {
+  if (t.estimatedHours) return Number(t.estimatedHours);
+  if (t.plannedStartDate && t.plannedEndDate) {
+    const ms = new Date(t.plannedEndDate).getTime() - new Date(t.plannedStartDate).getTime();
+    const days = Math.max(1, Math.ceil(ms / (1000 * 60 * 60 * 24)) + 1);
+    return days * hoursPerDay;
+  }
+  return hoursPerDay;
 }

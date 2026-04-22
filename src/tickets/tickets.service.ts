@@ -59,7 +59,7 @@ export class TicketsService {
   async create(companyId: string, userId: string, dto: CreateTicketDto) {
     const ticketNumber = await this.generateTicketNumber(companyId);
 
-    return this.prisma.ticket.create({
+    const ticket = await this.prisma.ticket.create({
       data: {
         ticketNumber,
         title: dto.title,
@@ -89,6 +89,10 @@ export class TicketsService {
         },
       },
     });
+
+    await this.ensureSprintMembership(companyId, ticket.sprintId, ticket.assigneeId);
+
+    return ticket;
   }
 
   async findAll(companyId: string, userId: string, query: QueryTicketDto) {
@@ -266,7 +270,7 @@ export class TicketsService {
       }
     }
 
-    return this.prisma.ticket.update({
+    const updated = await this.prisma.ticket.update({
       where: { id },
       data: updateData,
       include: {
@@ -281,6 +285,10 @@ export class TicketsService {
         },
       },
     });
+
+    await this.ensureSprintMembership(companyId, updated.sprintId, updated.assigneeId);
+
+    return updated;
   }
 
   async remove(companyId: string, id: string) {
@@ -455,7 +463,7 @@ export class TicketsService {
       throw new NotFoundException('Ticket not found');
     }
 
-    return this.prisma.ticket.update({
+    const updated = await this.prisma.ticket.update({
       where: { id },
       data: { assigneeId: userId },
       include: {
@@ -467,6 +475,10 @@ export class TicketsService {
         },
       },
     });
+
+    await this.ensureSprintMembership(companyId, updated.sprintId, updated.assigneeId);
+
+    return updated;
   }
 
   // ==================== Comments ====================
@@ -864,6 +876,20 @@ export class TicketsService {
     await this.recalculateActualHours(ticketId);
 
     return { success: true };
+  }
+
+  // Auto-add assignee as sprint member when a ticket lands in a sprint with an assignee.
+  // No-op when either is missing. skipDuplicates handles already-member case.
+  private async ensureSprintMembership(
+    companyId: string,
+    sprintId: string | null | undefined,
+    assigneeId: string | null | undefined,
+  ) {
+    if (!sprintId || !assigneeId) return;
+    await this.prisma.sprintMember.createMany({
+      data: [{ sprintId, userId: assigneeId, companyId }],
+      skipDuplicates: true,
+    });
   }
 
   private async recalculateActualHours(ticketId: string) {
