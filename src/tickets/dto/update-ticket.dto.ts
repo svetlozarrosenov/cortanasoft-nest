@@ -4,6 +4,9 @@ import {
   IsEnum,
   IsDateString,
   IsNumber,
+  IsInt,
+  Min,
+  Max,
 } from 'class-validator';
 import { TicketPriority, TicketStatus, TicketType } from './create-ticket.dto';
 
@@ -43,6 +46,18 @@ export class UpdateTicketDto {
   @IsOptional()
   @IsNumber()
   actualHours?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(24)
+  hoursPerDay?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(7)
+  workingDaysPerWeek?: number;
 
   @IsOptional()
   @IsString()

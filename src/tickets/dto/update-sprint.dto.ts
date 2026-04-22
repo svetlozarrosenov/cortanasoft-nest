@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsDateString, IsEnum, IsNumber, IsArray, Min } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsEnum, IsArray } from 'class-validator';
 
 export enum SprintStatus {
   PLANNING = 'PLANNING',
@@ -27,11 +27,6 @@ export class UpdateSprintDto {
   @IsOptional()
   @IsDateString()
   endDate?: string;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(1)
-  hoursPerDay?: number;
 
   @IsOptional()
   @IsArray()

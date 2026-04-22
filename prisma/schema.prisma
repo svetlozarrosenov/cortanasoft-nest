@@ -1958,10 +1958,7 @@ model Sprint {
 
   // Дати
   startDate DateTime? // Начална дата
-  endDate   DateTime? // Крайна дата (auto-calculated или ръчна)
-
-  // Конфигурация за автоматично изчисление
-  hoursPerDay Decimal? @db.Decimal(4, 2) // Работни часове на ден (по подразбиране 8)
+  endDate   DateTime? // Крайна дата — max(ticket.plannedEndDate) на задачите; може и ръчно
 
   // Връзка с компания
   companyId String
@@ -2072,14 +2069,19 @@ model Ticket {
   status   TicketStatus   @default(TODO)
 
   // Дати
-  plannedStartDate DateTime? // Планирано начало (за Gantt/timeline)
-  plannedEndDate   DateTime? // Планиран край (за Gantt/timeline)
+  plannedStartDate DateTime // Планирано начало (задължително)
+  plannedEndDate   DateTime // Планиран край (задължително)
   startedAt        DateTime? // Кога е започнат действително
   completedAt      DateTime? // Кога е завършен действително
 
   // Оценка на време
   estimatedHours Decimal? @db.Decimal(6, 2) // Очаквани часове
   actualHours    Decimal? @db.Decimal(6, 2) // Действителни часове
+
+  // Колко часа е един работен ден за тази задача (default 8 се прилага в кода)
+  hoursPerDay Decimal? @db.Decimal(4, 2)
+  // Работни дни в седмицата: 5 (Пн-Пт), 6 (Пн-Сб), 7 (всеки ден)
+  workingDaysPerWeek Int @default(5)
 
   // Позиция в Kanban колона (midpoint ordering). NULL = legacy / без ръчно подредба;
   // ранкирани тикети идват преди null-ранкираните в ASC сортировка.

@@ -4,6 +4,9 @@ import {
   IsEnum,
   IsDateString,
   IsNumber,
+  IsInt,
+  Min,
+  Max,
 } from 'class-validator';
 
 export enum TicketPriority {
@@ -45,17 +48,27 @@ export class CreateTicketDto {
   @IsEnum(TicketPriority)
   priority?: TicketPriority;
 
-  @IsOptional()
   @IsDateString()
-  plannedStartDate?: string;
+  plannedStartDate: string;
 
-  @IsOptional()
   @IsDateString()
-  plannedEndDate?: string;
+  plannedEndDate: string;
 
   @IsOptional()
   @IsNumber()
   estimatedHours?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(24)
+  hoursPerDay?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(7)
+  workingDaysPerWeek?: number;
 
   @IsOptional()
   @IsString()

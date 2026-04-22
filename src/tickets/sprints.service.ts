@@ -72,7 +72,6 @@ export class SprintsService {
         name: dto.name,
         description: dto.description,
         startDate: dto.startDate ? new Date(dto.startDate) : null,
-        hoursPerDay: dto.hoursPerDay,
         companyId,
         createdById: userId,
         ...(dto.memberIds && dto.memberIds.length > 0
@@ -105,6 +104,7 @@ export class SprintsService {
             actualHours: true,
             plannedStartDate: true,
             plannedEndDate: true,
+            hoursPerDay: true,
             assigneeId: true,
           },
         },
@@ -118,11 +118,10 @@ export class SprintsService {
     // Enrich each sprint with computed progress (effort-weighted, consistent with getProgress)
     return sprints.map((sprint) => {
       const tickets = sprint.tickets || [];
-      const hoursPerDay = sprint.hoursPerDay ? Number(sprint.hoursPerDay) : 8;
       const totalTickets = tickets.length;
       const completedTickets = tickets.filter((t) => t.status === 'DONE').length;
 
-      const weights = tickets.map((t) => ({ t, weight: computeEffortWeight(t, hoursPerDay) }));
+      const weights = tickets.map((t) => ({ t, weight: computeEffortWeight(t) }));
       const totalEstimatedHours = weights.reduce((sum, w) => sum + w.weight, 0);
       const completedWeight = weights
         .filter(({ t }) => t.status === 'DONE')
@@ -188,7 +187,6 @@ export class SprintsService {
     if (dto.status !== undefined) updateData.status = dto.status;
     if (dto.startDate !== undefined) updateData.startDate = dto.startDate ? new Date(dto.startDate) : null;
     if (dto.endDate !== undefined) updateData.endDate = dto.endDate ? new Date(dto.endDate) : null;
-    if (dto.hoursPerDay !== undefined) updateData.hoursPerDay = dto.hoursPerDay;
 
     await this.prisma.sprint.update({
       where: { id },
@@ -215,7 +213,7 @@ export class SprintsService {
     // (manual value wins; auto-calc would overwrite it).
     if (
       dto.endDate === undefined &&
-      (dto.startDate !== undefined || dto.memberIds !== undefined || dto.hoursPerDay !== undefined)
+      (dto.startDate !== undefined || dto.memberIds !== undefined)
     ) {
       await this.calculateEndDate(id);
     }
@@ -353,69 +351,32 @@ export class SprintsService {
 
   // ==================== End Date Calculation ====================
 
+  // Sprint's endDate = max(ticket.plannedEndDate) of non-CANCELLED tickets.
+  // Tickets are the source of truth now — they carry their own hoursPerDay +
+  // workingDaysPerWeek and derive their own end dates independently.
   async calculateEndDate(sprintId: string) {
     const sprint = await this.prisma.sprint.findUnique({
       where: { id: sprintId },
       include: {
         tickets: {
           where: { status: { not: 'CANCELLED' } },
-          select: { estimatedHours: true, assigneeId: true },
+          select: { plannedEndDate: true },
         },
-        members: true,
       },
     });
 
-    if (!sprint || !sprint.startDate) {
-      return null;
-    }
+    if (!sprint) return null;
 
-    const totalEstimatedHours = sprint.tickets.reduce(
-      (sum, t) => sum + (t.estimatedHours ? Number(t.estimatedHours) : 0),
-      0,
-    );
-
-    if (totalEstimatedHours === 0) {
-      await this.prisma.sprint.update({
-        where: { id: sprintId },
-        data: { endDate: sprint.startDate },
-      });
-      return { endDate: sprint.startDate, totalEstimatedHours: 0, workersCount: 1 };
-    }
-
-    // Use members count, fall back to unique ticket assignees
-    const uniqueAssignees = new Set(
-      sprint.tickets.map((t) => t.assigneeId).filter(Boolean),
-    );
-
-    const workersCount = sprint.members.length > 0
-      ? sprint.members.length
-      : Math.max(uniqueAssignees.size, 1);
-    const hoursPerDay = sprint.hoursPerDay ? Number(sprint.hoursPerDay) : 8;
-    const workingDays = Math.ceil(totalEstimatedHours / (workersCount * hoursPerDay));
-
-    const endDate = this.addBusinessDays(new Date(sprint.startDate), workingDays);
+    const endDates = sprint.tickets.map((t) => t.plannedEndDate.getTime());
+    const maxEnd = endDates.length > 0 ? new Date(Math.max(...endDates)) : null;
+    const endDate = maxEnd ?? sprint.startDate ?? null;
 
     await this.prisma.sprint.update({
       where: { id: sprintId },
       data: { endDate },
     });
 
-    return { endDate, totalEstimatedHours, workersCount };
-  }
-
-  private addBusinessDays(date: Date, days: number): Date {
-    const result = new Date(date);
-    let added = 0;
-
-    while (added < days) {
-      result.setDate(result.getDate() + 1);
-      const dayOfWeek = result.getDay();
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        added++;
-      }
-    }
-
-    return result;
+    return { endDate, ticketCount: sprint.tickets.length };
   }
 
   // ==================== Progress ====================
@@ -432,6 +393,7 @@ export class SprintsService {
             actualHours: true,
             plannedStartDate: true,
             plannedEndDate: true,
+            hoursPerDay: true,
           },
         },
         _count: { select: { members: true } },
@@ -446,9 +408,7 @@ export class SprintsService {
     const totalTickets = tickets.length;
     const completedTickets = tickets.filter((t) => t.status === 'DONE').length;
 
-    const sprintHoursPerDay = sprint.hoursPerDay ? Number(sprint.hoursPerDay) : 8;
-
-    const weights = tickets.map((t) => ({ t, weight: computeEffortWeight(t, sprintHoursPerDay) }));
+    const weights = tickets.map((t) => ({ t, weight: computeEffortWeight(t) }));
     const totalEstimatedHours = weights.reduce((sum, w) => sum + w.weight, 0);
     const completedWeight = weights
       .filter(({ t }) => t.status === 'DONE')
@@ -522,8 +482,10 @@ export class SprintsService {
       workingDaysRemaining = countWorkingDays(today, projectedEndDate);
     }
 
-    // Capacity info (informational — NOT used to determine projection)
-    const hoursPerDay = sprint.hoursPerDay ? Number(sprint.hoursPerDay) : 8;
+    // Capacity info (informational — NOT used to determine projection).
+    // Sprint-level hoursPerDay no longer exists; use 8 as team-average default for
+    // "available capacity" display. Individual ticket end dates use each ticket's own.
+    const hoursPerDay = 8;
     const membersCount = sprint._count.members;
     // Work still to do = sum of effort weights of non-DONE/non-CANCELLED tickets.
     // Decoupled from logged hours so DONE tickets with extra logged time don't skew this.
@@ -579,18 +541,19 @@ function countWorkingDays(from: Date, to: Date): number {
 
 // Effort weight per ticket. Priority:
 //   1. estimatedHours (explicit author intent)
-//   2. plannedStartDate..plannedEndDate × hoursPerDay (derived from schedule)
-//   3. hoursPerDay (default = 1 working day) — so every ticket counts in the weighted total
-// Shared between findAll and getProgress so list + detail views report identical %.
+//   2. plannedStartDate..plannedEndDate × ticket.hoursPerDay (derived from schedule)
+//   3. ticket.hoursPerDay (1 working day) — so every ticket counts in the weighted total
+// Uses each ticket's own hoursPerDay (default 8) — no sprint-level override anymore.
 function computeEffortWeight(
   t: {
     estimatedHours?: unknown;
     plannedStartDate?: Date | null;
     plannedEndDate?: Date | null;
+    hoursPerDay?: unknown;
   },
-  hoursPerDay: number,
 ): number {
   if (t.estimatedHours) return Number(t.estimatedHours);
+  const hoursPerDay = t.hoursPerDay ? Number(t.hoursPerDay) : 8;
   if (t.plannedStartDate && t.plannedEndDate) {
     const ms = new Date(t.plannedEndDate).getTime() - new Date(t.plannedStartDate).getTime();
     const days = Math.max(1, Math.ceil(ms / (1000 * 60 * 60 * 24)) + 1);

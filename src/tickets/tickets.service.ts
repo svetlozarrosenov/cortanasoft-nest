@@ -59,10 +59,15 @@ export class TicketsService {
   async create(companyId: string, userId: string, dto: CreateTicketDto) {
     const ticketNumber = await this.generateTicketNumber(companyId);
 
-    const plannedStartDate = dto.plannedStartDate ? new Date(dto.plannedStartDate) : null;
+    // plannedStartDate/plannedEndDate са required — DTO го валидира. plannedEndDate може
+    // да се подаде explicit или да се изведе от plannedStartDate + estimatedHours.
+    const plannedStartDate = new Date(dto.plannedStartDate);
+    const workingDaysPerWeek = dto.workingDaysPerWeek ?? 5;
+    const hoursPerDay = dto.hoursPerDay;
     const plannedEndDate = dto.plannedEndDate
       ? new Date(dto.plannedEndDate)
-      : await this.derivePlannedEnd(plannedStartDate, dto.estimatedHours, dto.sprintId);
+      : this.derivePlannedEnd(plannedStartDate, dto.estimatedHours, hoursPerDay, workingDaysPerWeek)
+          ?? plannedStartDate;
 
     const ticket = await this.prisma.ticket.create({
       data: {
@@ -75,6 +80,8 @@ export class TicketsService {
         plannedStartDate,
         plannedEndDate,
         estimatedHours: dto.estimatedHours,
+        hoursPerDay: dto.hoursPerDay,
+        workingDaysPerWeek,
         assigneeId: dto.assigneeId,
         parentId: dto.parentId,
         sprintId: dto.sprintId,
@@ -95,6 +102,7 @@ export class TicketsService {
     });
 
     await this.ensureSprintMembership(companyId, ticket.sprintId, ticket.assigneeId);
+    if (ticket.sprintId) await this.recalcSprintEnd(ticket.sprintId);
 
     return ticket;
   }
@@ -245,36 +253,36 @@ export class TicketsService {
       updateData.sprintId = dto.sprintId || null;
     }
 
-    // Handle date conversion
-    if (dto.plannedStartDate !== undefined) {
-      updateData.plannedStartDate = dto.plannedStartDate ? new Date(dto.plannedStartDate) : null;
+    // Handle date conversion. Required в schema, не позволяваме clear.
+    if (dto.plannedStartDate !== undefined && dto.plannedStartDate) {
+      updateData.plannedStartDate = new Date(dto.plannedStartDate);
     }
-    if (dto.plannedEndDate !== undefined) {
-      updateData.plannedEndDate = dto.plannedEndDate ? new Date(dto.plannedEndDate) : null;
+    if (dto.plannedEndDate !== undefined && dto.plannedEndDate) {
+      updateData.plannedEndDate = new Date(dto.plannedEndDate);
     }
 
-    // Auto-derive plannedEndDate if user didn't set it explicitly (or cleared it) but
-    // we still have a start date + estimate. Triggered when any of (start, end, estimate,
-    // sprint) changes so the end stays consistent with fresh inputs.
-    const touched =
-      dto.plannedStartDate !== undefined ||
-      dto.plannedEndDate !== undefined ||
-      dto.estimatedHours !== undefined ||
-      dto.sprintId !== undefined;
-    const endWillBeEmpty =
-      dto.plannedEndDate !== undefined
-        ? !dto.plannedEndDate
-        : !ticket.plannedEndDate;
-    if (touched && endWillBeEmpty) {
-      const effStart =
-        dto.plannedStartDate !== undefined
-          ? dto.plannedStartDate ? new Date(dto.plannedStartDate) : null
-          : ticket.plannedStartDate;
-      const effEstimate =
-        dto.estimatedHours !== undefined ? dto.estimatedHours : ticket.estimatedHours ? Number(ticket.estimatedHours) : undefined;
-      const effSprintId =
-        dto.sprintId !== undefined ? (dto.sprintId || null) : ticket.sprintId;
-      const derived = await this.derivePlannedEnd(effStart, effEstimate, effSprintId);
+    // Auto-derive plannedEndDate if user didn't set it explicitly but any of
+    // (start, estimate, hoursPerDay, workingDaysPerWeek) changed.
+    const recomputeEnd =
+      dto.plannedEndDate === undefined &&
+      (dto.plannedStartDate !== undefined ||
+        dto.estimatedHours !== undefined ||
+        dto.hoursPerDay !== undefined ||
+        dto.workingDaysPerWeek !== undefined);
+    if (recomputeEnd) {
+      const effStart = dto.plannedStartDate
+        ? new Date(dto.plannedStartDate)
+        : ticket.plannedStartDate;
+      const effEstimate = dto.estimatedHours !== undefined
+        ? dto.estimatedHours
+        : ticket.estimatedHours ? Number(ticket.estimatedHours) : undefined;
+      const effHoursPerDay = dto.hoursPerDay !== undefined
+        ? dto.hoursPerDay
+        : ticket.hoursPerDay ? Number(ticket.hoursPerDay) : undefined;
+      const effWorkdays = dto.workingDaysPerWeek !== undefined
+        ? dto.workingDaysPerWeek
+        : ticket.workingDaysPerWeek;
+      const derived = this.derivePlannedEnd(effStart, effEstimate, effHoursPerDay, effWorkdays);
       if (derived) updateData.plannedEndDate = derived;
     }
 
@@ -313,6 +321,11 @@ export class TicketsService {
     });
 
     await this.ensureSprintMembership(companyId, updated.sprintId, updated.assigneeId);
+    // Recalc sprint's endDate if this ticket is in a sprint (or was moved to/from one)
+    if (updated.sprintId) await this.recalcSprintEnd(updated.sprintId);
+    if (ticket.sprintId && ticket.sprintId !== updated.sprintId) {
+      await this.recalcSprintEnd(ticket.sprintId);
+    }
 
     return updated;
   }
@@ -918,38 +931,50 @@ export class TicketsService {
     });
   }
 
-  // Derive plannedEndDate = start + ceil(estimate/hoursPerDay) business days (skip weekends).
-  // Returns null when inputs are incomplete. hoursPerDay comes from the sprint if the
-  // ticket belongs to one; otherwise falls back to 8.
-  private async derivePlannedEnd(
+  // Derive plannedEndDate = start + ceil(estimate/hoursPerDay) working days.
+  // workingDaysPerWeek: 5 = Пн-Пт, 6 = Пн-Сб, 7 = всеки ден.
+  // Returns null when inputs are incomplete. All fields come from the ticket itself
+  // (no sprint lookup) — each ticket is self-describing.
+  private derivePlannedEnd(
     plannedStartDate: Date | null | undefined,
     estimatedHours: number | null | undefined,
-    sprintId: string | null | undefined,
-  ): Promise<Date | null> {
+    hoursPerDay: number | null | undefined,
+    workingDaysPerWeek: number = 5,
+  ): Date | null {
     if (!plannedStartDate || !estimatedHours || estimatedHours <= 0) return null;
 
-    let hoursPerDay = 8;
-    if (sprintId) {
-      const sprint = await this.prisma.sprint.findUnique({
-        where: { id: sprintId },
-        select: { hoursPerDay: true },
-      });
-      if (sprint?.hoursPerDay) hoursPerDay = Number(sprint.hoursPerDay);
-    }
-
-    const days = Math.max(1, Math.ceil(Number(estimatedHours) / hoursPerDay));
+    const hpd = hoursPerDay && hoursPerDay > 0 ? Number(hoursPerDay) : 8;
+    const days = Math.max(1, Math.ceil(Number(estimatedHours) / hpd));
     const end = new Date(plannedStartDate);
+    // Walk start forward to a working day if it lands on a day off.
+    while (!isWorkingDay(end.getDay(), workingDaysPerWeek)) {
+      end.setDate(end.getDate() + 1);
+    }
     let added = 1; // start day counts as day 1
     while (added < days) {
       end.setDate(end.getDate() + 1);
-      const dow = end.getDay();
-      if (dow !== 0 && dow !== 6) added++;
-    }
-    // If start itself lands on weekend, walk forward so the end day is a workday too.
-    while (end.getDay() === 0 || end.getDay() === 6) {
-      end.setDate(end.getDate() + 1);
+      if (isWorkingDay(end.getDay(), workingDaysPerWeek)) added++;
     }
     return end;
+  }
+
+  // Recompute parent sprint's endDate = max(non-CANCELLED ticket.plannedEndDate).
+  // Called after any ticket mutation that could affect sprint boundaries.
+  private async recalcSprintEnd(sprintId: string) {
+    const result = await this.prisma.ticket.aggregate({
+      where: { sprintId, status: { not: 'CANCELLED' } },
+      _max: { plannedEndDate: true },
+    });
+    const sprint = await this.prisma.sprint.findUnique({
+      where: { id: sprintId },
+      select: { startDate: true },
+    });
+    if (!sprint) return;
+    const endDate = result._max.plannedEndDate ?? sprint.startDate ?? null;
+    await this.prisma.sprint.update({
+      where: { id: sprintId },
+      data: { endDate },
+    });
   }
 
   private async recalculateActualHours(ticketId: string) {
@@ -963,4 +988,13 @@ export class TicketsService {
       data: { actualHours: result._sum.hours || 0 },
     });
   }
+}
+
+// Shared: is this day-of-week (0=Sun..6=Sat) a working day given workingDaysPerWeek?
+// 5 → skip Sat + Sun, 6 → skip only Sun, 7 → every day is working.
+function isWorkingDay(dayOfWeek: number, workingDaysPerWeek: number): boolean {
+  if (workingDaysPerWeek >= 7) return true;
+  if (dayOfWeek === 0) return false; // Sunday off unless 7-day week
+  if (dayOfWeek === 6 && workingDaysPerWeek <= 5) return false; // Saturday off for 5-day week
+  return true;
 }
