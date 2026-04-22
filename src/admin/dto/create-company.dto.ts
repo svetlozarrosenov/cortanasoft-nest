@@ -106,6 +106,10 @@ export class CreateCompanyDto {
   @IsOptional()
   pushNotificationsEnabled?: boolean;
 
+  @IsBoolean()
+  @IsOptional()
+  enableReviewStatus?: boolean;
+
   // Лого
   @IsString()
   @IsOptional()
