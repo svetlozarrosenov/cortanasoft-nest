@@ -41,7 +41,7 @@ export class DashboardService {
         where: {
           companyId,
           status: { in: ['TODO', 'IN_PROGRESS'] },
-          dueDate: { lt: now },
+          plannedEndDate: { lt: now },
         },
       }),
       // Active tickets last month (for comparison)

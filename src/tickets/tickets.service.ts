@@ -67,7 +67,6 @@ export class TicketsService {
         type: dto.type || 'TASK',
         priority: dto.priority || 'MEDIUM',
         status: 'TODO',
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         plannedStartDate: dto.plannedStartDate ? new Date(dto.plannedStartDate) : null,
         plannedEndDate: dto.plannedEndDate ? new Date(dto.plannedEndDate) : null,
         estimatedHours: dto.estimatedHours,
@@ -242,9 +241,6 @@ export class TicketsService {
     }
 
     // Handle date conversion
-    if (dto.dueDate !== undefined) {
-      updateData.dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
-    }
     if (dto.plannedStartDate !== undefined) {
       updateData.plannedStartDate = dto.plannedStartDate ? new Date(dto.plannedStartDate) : null;
     }
@@ -777,7 +773,7 @@ export class TicketsService {
         where: {
           ...base,
           status: { notIn: ['DONE', 'CANCELLED'] },
-          dueDate: { lt: new Date() },
+          plannedEndDate: { lt: new Date() },
         },
       }),
       this.prisma.ticket.count({

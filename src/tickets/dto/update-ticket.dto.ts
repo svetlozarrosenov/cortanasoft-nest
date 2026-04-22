@@ -30,10 +30,6 @@ export class UpdateTicketDto {
 
   @IsOptional()
   @IsDateString()
-  dueDate?: string;
-
-  @IsOptional()
-  @IsDateString()
   plannedStartDate?: string;
 
   @IsOptional()
