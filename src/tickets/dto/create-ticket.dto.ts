@@ -72,4 +72,8 @@ export class CreateTicketDto {
   @IsOptional()
   @IsString()
   sprintId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  rank?: number;
 }

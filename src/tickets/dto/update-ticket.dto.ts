@@ -59,4 +59,8 @@ export class UpdateTicketDto {
   @IsOptional()
   @IsString()
   sprintId?: string;
+
+  @IsOptional()
+  @IsNumber()
+  rank?: number;
 }

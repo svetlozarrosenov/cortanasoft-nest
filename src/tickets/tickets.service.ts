@@ -131,6 +131,13 @@ export class TicketsService {
       ];
     }
 
+    // 'rank' sort puts manually-ordered tickets first (NULLS LAST), tie-break by createdAt DESC.
+    // Used by Kanban so drag-reorder persists. Other sortBy values keep their prior semantics.
+    const orderBy: any =
+      sortBy === 'rank'
+        ? [{ rank: { sort: 'asc', nulls: 'last' } }, { createdAt: 'desc' }]
+        : { [sortBy]: sortOrder };
+
     const [tickets, total] = await Promise.all([
       this.prisma.ticket.findMany({
         where,
@@ -145,7 +152,7 @@ export class TicketsService {
             select: { subtasks: true, comments: true },
           },
         },
-        orderBy: { [sortBy]: sortOrder },
+        orderBy,
         skip: (page - 1) * limit,
         take: limit,
       }),
