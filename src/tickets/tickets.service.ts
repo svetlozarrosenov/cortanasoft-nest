@@ -20,13 +20,14 @@ import { parseTimeString } from '../common/utils/parse-time';
 export class TicketsService {
   constructor(private prisma: PrismaService) {}
 
-  // Valid status transitions state machine
+  // Open state machine: всеки статус може да отиде към всеки друг без
+  // ограничения. Клиентите искат пълна свобода за ръчна корекция.
   private readonly validTransitions: Record<TicketStatus, TicketStatus[]> = {
-    TODO: ['IN_PROGRESS', 'CANCELLED'],
-    IN_PROGRESS: ['IN_REVIEW', 'DONE', 'CANCELLED'],
-    IN_REVIEW: ['IN_PROGRESS', 'DONE', 'CANCELLED'],
-    DONE: [],
-    CANCELLED: [],
+    TODO: ['IN_PROGRESS', 'IN_REVIEW', 'DONE', 'CANCELLED'],
+    IN_PROGRESS: ['TODO', 'IN_REVIEW', 'DONE', 'CANCELLED'],
+    IN_REVIEW: ['TODO', 'IN_PROGRESS', 'DONE', 'CANCELLED'],
+    DONE: ['TODO', 'IN_PROGRESS', 'IN_REVIEW', 'CANCELLED'],
+    CANCELLED: ['TODO', 'IN_PROGRESS', 'IN_REVIEW', 'DONE'],
   };
 
   // ==================== Ticket Number Generation ====================
