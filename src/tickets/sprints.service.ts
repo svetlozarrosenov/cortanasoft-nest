@@ -211,8 +211,12 @@ export class SprintsService {
       }
     }
 
-    // Recalculate end date if relevant fields changed
-    if (dto.startDate !== undefined || dto.memberIds !== undefined || dto.hoursPerDay !== undefined) {
+    // Recalculate end date if relevant fields changed — UNLESS user explicitly set endDate
+    // (manual value wins; auto-calc would overwrite it).
+    if (
+      dto.endDate === undefined &&
+      (dto.startDate !== undefined || dto.memberIds !== undefined || dto.hoursPerDay !== undefined)
+    ) {
       await this.calculateEndDate(id);
     }
 
