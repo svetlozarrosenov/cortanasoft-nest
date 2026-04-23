@@ -2375,12 +2375,15 @@ model DemoRequest {
 
   // Статус и проследяване
   status DemoRequestStatus @default(NEW)
-  notes  String?           @db.Text // Вътрешни бележки (от администратора)
 
   // Дати
   contactedAt DateTime? // Кога е осъществен контакт
   scheduledAt DateTime? // Кога е насрочено демо
   completedAt DateTime? // Кога е завършено демо
+
+  // Timeline — задачи и бележки
+  tasks DemoRequestTask[]
+  notes DemoRequestNote[]
 
   // Аудит
   createdAt DateTime @default(now())
@@ -2390,6 +2393,44 @@ model DemoRequest {
   @@index([createdAt])
   @@index([email])
   @@map("demo_requests")
+}
+
+// Задача по заявка за демо (с due date и push нотификация)
+model DemoRequestTask {
+  id            String      @id @default(cuid())
+  demoRequestId String
+  demoRequest   DemoRequest @relation(fields: [demoRequestId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?   @db.Text
+  dueDate     DateTime // Краен срок (точният момент на push нотификацията)
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  notifiedAt  DateTime? // Кога е изпратена push нотификацията (guard срещу дубликати)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([demoRequestId])
+  @@index([dueDate])
+  @@index([completed, notifiedAt])
+  @@map("demo_request_tasks")
+}
+
+// Бележка по заявка за демо (timeline запис)
+model DemoRequestNote {
+  id            String      @id @default(cuid())
+  demoRequestId String
+  demoRequest   DemoRequest @relation(fields: [demoRequestId], references: [id], onDelete: Cascade)
+
+  content String @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([demoRequestId])
+  @@index([createdAt])
+  @@map("demo_request_notes")
 }
 
 // ==================== РАЗХОДИ ====================

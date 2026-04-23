@@ -6,6 +6,10 @@ import {
   CreateDemoRequestDto,
   UpdateDemoRequestDto,
   QueryDemoRequestsDto,
+  CreateDemoRequestTaskDto,
+  UpdateDemoRequestTaskDto,
+  CreateDemoRequestNoteDto,
+  UpdateDemoRequestNoteDto,
 } from './dto';
 import { Prisma, DemoRequestStatus } from '@prisma/client';
 
@@ -137,11 +141,15 @@ export class DemoRequestsService {
   }
 
   /**
-   * Get a single demo request by ID (admin only)
+   * Get a single demo request by ID with tasks and notes timeline (admin only)
    */
   async findOne(id: string) {
     const demoRequest = await this.prisma.demoRequest.findUnique({
       where: { id },
+      include: {
+        tasks: { orderBy: [{ completed: 'asc' }, { dueDate: 'asc' }] },
+        notes: { orderBy: { createdAt: 'desc' } },
+      },
     });
 
     if (!demoRequest) {
@@ -155,13 +163,12 @@ export class DemoRequestsService {
    * Update a demo request (admin only)
    */
   async update(id: string, dto: UpdateDemoRequestDto) {
-    await this.findOne(id);
+    await this.ensureExists(id);
 
     return this.prisma.demoRequest.update({
       where: { id },
       data: {
         ...(dto.status && { status: dto.status }),
-        ...(dto.notes !== undefined && { notes: dto.notes }),
         ...(dto.contactedAt && { contactedAt: new Date(dto.contactedAt) }),
         ...(dto.scheduledAt && { scheduledAt: new Date(dto.scheduledAt) }),
         ...(dto.completedAt && { completedAt: new Date(dto.completedAt) }),
@@ -169,11 +176,120 @@ export class DemoRequestsService {
     });
   }
 
+  private async ensureExists(id: string) {
+    const exists = await this.prisma.demoRequest.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!exists) {
+      throw new NotFoundException('Demo request not found');
+    }
+  }
+
+  // ==================== TASKS ====================
+
+  async createTask(demoRequestId: string, dto: CreateDemoRequestTaskDto) {
+    await this.ensureExists(demoRequestId);
+    return this.prisma.demoRequestTask.create({
+      data: {
+        demoRequestId,
+        title: dto.title,
+        description: dto.description,
+        dueDate: new Date(dto.dueDate),
+      },
+    });
+  }
+
+  async updateTask(
+    demoRequestId: string,
+    taskId: string,
+    dto: UpdateDemoRequestTaskDto,
+  ) {
+    const task = await this.prisma.demoRequestTask.findUnique({
+      where: { id: taskId },
+    });
+    if (!task || task.demoRequestId !== demoRequestId) {
+      throw new NotFoundException('Task not found');
+    }
+
+    const data: Prisma.DemoRequestTaskUpdateInput = {};
+    if (dto.title !== undefined) data.title = dto.title;
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.dueDate !== undefined) {
+      data.dueDate = new Date(dto.dueDate);
+      // Resetting dueDate forward should re-enable notification
+      if (!task.completed && new Date(dto.dueDate) > new Date()) {
+        data.notifiedAt = null;
+      }
+    }
+    if (dto.completed !== undefined) {
+      data.completed = dto.completed;
+      data.completedAt = dto.completed ? new Date() : null;
+    }
+
+    return this.prisma.demoRequestTask.update({
+      where: { id: taskId },
+      data,
+    });
+  }
+
+  async deleteTask(demoRequestId: string, taskId: string) {
+    const task = await this.prisma.demoRequestTask.findUnique({
+      where: { id: taskId },
+      select: { id: true, demoRequestId: true },
+    });
+    if (!task || task.demoRequestId !== demoRequestId) {
+      throw new NotFoundException('Task not found');
+    }
+    await this.prisma.demoRequestTask.delete({ where: { id: taskId } });
+  }
+
+  // ==================== NOTES ====================
+
+  async createNote(demoRequestId: string, dto: CreateDemoRequestNoteDto) {
+    await this.ensureExists(demoRequestId);
+    return this.prisma.demoRequestNote.create({
+      data: {
+        demoRequestId,
+        content: dto.content,
+      },
+    });
+  }
+
+  async updateNote(
+    demoRequestId: string,
+    noteId: string,
+    dto: UpdateDemoRequestNoteDto,
+  ) {
+    const note = await this.prisma.demoRequestNote.findUnique({
+      where: { id: noteId },
+      select: { id: true, demoRequestId: true },
+    });
+    if (!note || note.demoRequestId !== demoRequestId) {
+      throw new NotFoundException('Note not found');
+    }
+    return this.prisma.demoRequestNote.update({
+      where: { id: noteId },
+      data: { content: dto.content },
+    });
+  }
+
+  async deleteNote(demoRequestId: string, noteId: string) {
+    const note = await this.prisma.demoRequestNote.findUnique({
+      where: { id: noteId },
+      select: { id: true, demoRequestId: true },
+    });
+    if (!note || note.demoRequestId !== demoRequestId) {
+      throw new NotFoundException('Note not found');
+    }
+    await this.prisma.demoRequestNote.delete({ where: { id: noteId } });
+  }
+
   /**
    * Delete a demo request (admin only)
    */
   async remove(id: string) {
-    await this.findOne(id);
+    await this.ensureExists(id);
 
     return this.prisma.demoRequest.delete({
       where: { id },
