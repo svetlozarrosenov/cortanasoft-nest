@@ -823,6 +823,11 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
           },
         ],
       },
+      {
+        key: 'analytics',
+        labelKey: 'modules.admin.analytics',
+        actions: ['view', 'edit'],
+      },
     ],
   },
 ];

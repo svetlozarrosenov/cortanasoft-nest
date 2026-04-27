@@ -49,6 +49,7 @@ import { ContactSubmissionsModule } from './contact-submissions/contact-submissi
 import { CloudCartModule } from './cloudcart/cloudcart.module';
 import { WordPressModule } from './wordpress/wordpress.module';
 import { PaymentsModule } from './payments/payments.module';
+import { AnalyticsGoogleModule } from './analytics-google/analytics-google.module';
 
 @Module({
   imports: [
@@ -116,6 +117,7 @@ import { PaymentsModule } from './payments/payments.module';
     CloudCartModule,
     WordPressModule,
     PaymentsModule,
+    AnalyticsGoogleModule,
   ],
   controllers: [],
   providers: [],

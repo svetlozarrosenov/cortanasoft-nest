@@ -3146,3 +3146,20 @@ model ContactSubmission {
   @@index([createdAt])
   @@map("contact_submissions")
 }
+
+// ==================== GOOGLE ANALYTICS ====================
+// Singleton конфиг за Google Analytics интеграция (само за OWNER компанията).
+// serviceAccountJsonEncrypted съдържа AES-256-GCM шифрован JSON на service account-а.
+
+model GoogleAnalyticsConfig {
+  id                          String   @id @default(cuid())
+  measurementId               String? // GA4 Measurement ID (G-XXXXXXXXXX) — за tracking на публичния сайт
+  propertyId                  String? // GA4 Property ID (само цифри) — за Data API в админа
+  serviceAccountJsonEncrypted String?  @db.Text // AES-GCM шифрован JSON — само ако се ползва Data API
+  serviceAccountEmail         String? // Само за UI/debug — извлечен от JSON-а при save
+  isActive                    Boolean  @default(true)
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  @@map("google_analytics_config")
+}
