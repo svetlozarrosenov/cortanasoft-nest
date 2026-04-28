@@ -50,6 +50,7 @@ import { CloudCartModule } from './cloudcart/cloudcart.module';
 import { WordPressModule } from './wordpress/wordpress.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AnalyticsGoogleModule } from './analytics-google/analytics-google.module';
+import { MetaPixelModule } from './meta-pixel/meta-pixel.module';
 
 @Module({
   imports: [
@@ -118,6 +119,7 @@ import { AnalyticsGoogleModule } from './analytics-google/analytics-google.modul
     WordPressModule,
     PaymentsModule,
     AnalyticsGoogleModule,
+    MetaPixelModule,
   ],
   controllers: [],
   providers: [],

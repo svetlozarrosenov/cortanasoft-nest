@@ -828,6 +828,11 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         labelKey: 'modules.admin.analytics',
         actions: ['view', 'edit'],
       },
+      {
+        key: 'metaPixel',
+        labelKey: 'modules.admin.metaPixel',
+        actions: ['view', 'edit'],
+      },
     ],
   },
 ];
