@@ -95,6 +95,10 @@ export class CreateStockDocumentDto {
 
   @IsString()
   @IsOptional()
+  serviceOrderId?: string;
+
+  @IsString()
+  @IsOptional()
   notes?: string;
 
   // Items

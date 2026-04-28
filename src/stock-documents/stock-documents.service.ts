@@ -120,6 +120,7 @@ export class StockDocumentsService {
         total: hasItems ? total : null,
         orderId: dto.orderId || null,
         invoiceId: dto.invoiceId || null,
+        serviceOrderId: dto.serviceOrderId || null,
         notes: dto.notes || null,
         companyId,
         createdById: userId,

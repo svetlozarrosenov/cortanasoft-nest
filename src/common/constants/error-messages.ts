@@ -253,6 +253,23 @@ export const ErrorMessages = {
     alreadyReturned: 'Материалът вече е върнат',
     cannotReturnCompleted: 'Не може да върнете материал от завършена поръчка',
   },
+
+  // ==================== Сервиз ====================
+  service: {
+    orderNotFound: 'Сервизната заявка не е намерена',
+    assetNotFound: 'Активът не е намерен',
+    contractNotFound: 'Договорът не е намерен',
+    partNotFound: 'Резервната част не е намерена',
+    laborNotFound: 'Записът за труд не е намерен',
+    attachmentNotFound: 'Прикаченият файл не е намерен',
+    loanerNotFound: 'Заетото устройство не е намерено',
+    invalidStatusTransition: (from: string, to: string) =>
+      `Невалиден преход на статус от "${from}" към "${to}"`,
+    cannotEditClosed: 'Не може да редактирате приключена заявка',
+    canOnlyDeleteNewOrCanceled: 'Може да изтриете само нови или отказани заявки',
+    timerAlreadyRunning: 'Имате стартиран таймер по тази заявка. Спрете го преди да започнете нов.',
+    noActiveTimer: 'Няма стартиран таймер по тази заявка',
+  },
 };
 
 /**

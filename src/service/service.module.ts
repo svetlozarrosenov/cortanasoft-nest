@@ -1,0 +1,35 @@
+import { Module } from '@nestjs/common';
+import { PrismaModule } from '../prisma/prisma.module';
+import { StockDocumentsModule } from '../stock-documents/stock-documents.module';
+import { ServiceNumberingService } from './service-numbering.service';
+import { ServiceOrdersService } from './service-orders.service';
+import { ServiceAssetsService } from './service-assets.service';
+import { ServiceContractsService } from './service-contracts.service';
+import { ServiceProtocolsService } from './service-protocols.service';
+import { ServiceInvoicingService } from './service-invoicing.service';
+import { ServiceStockService } from './service-stock.service';
+import { CompanyServiceOrdersController } from './company-service-orders.controller';
+import { CompanyServiceAssetsController } from './company-service-assets.controller';
+import { CompanyServiceContractsController } from './company-service-contracts.controller';
+import { ServicePublicController } from './service-public.controller';
+
+@Module({
+  imports: [PrismaModule, StockDocumentsModule],
+  controllers: [
+    CompanyServiceOrdersController,
+    CompanyServiceAssetsController,
+    CompanyServiceContractsController,
+    ServicePublicController,
+  ],
+  providers: [
+    ServiceNumberingService,
+    ServiceOrdersService,
+    ServiceAssetsService,
+    ServiceContractsService,
+    ServiceProtocolsService,
+    ServiceInvoicingService,
+    ServiceStockService,
+  ],
+  exports: [ServiceOrdersService, ServiceAssetsService, ServiceContractsService],
+})
+export class ServiceModule {}

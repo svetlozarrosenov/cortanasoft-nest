@@ -25,18 +25,18 @@ model Currency {
   updatedAt DateTime @updatedAt
 
   // Релации
-  companies          Company[] // Компании с тази валута по подразбиране
-  goodsReceipts      GoodsReceipt[] // Доставки в тази валута
-  goodsReceiptItems  GoodsReceiptItem[] // Редове от доставки в тази валута
-  productsPurchase   Product[]      @relation("ProductPurchaseCurrency") // Продукти с тази валута за покупка
-  productsSale       Product[]      @relation("ProductSaleCurrency") // Продукти с тази валута за продажба
-  orders             Order[] // Поръчки в тази валута
-  invoices           Invoice[] // Фактури в тази валута
-  offers             Offer[] // Оферти в тази валута
-  deals              Deal[] // Сделки в тази валута
-  companyPlans       CompanyPlan[] // Планове в тази валута
-  expenses           Expense[] // Разходи в тази валута
-  payments           Payment[] // Плащания в тази валута
+  companies         Company[] // Компании с тази валута по подразбиране
+  goodsReceipts     GoodsReceipt[] // Доставки в тази валута
+  goodsReceiptItems GoodsReceiptItem[] // Редове от доставки в тази валута
+  productsPurchase  Product[]          @relation("ProductPurchaseCurrency") // Продукти с тази валута за покупка
+  productsSale      Product[]          @relation("ProductSaleCurrency") // Продукти с тази валута за продажба
+  orders            Order[] // Поръчки в тази валута
+  invoices          Invoice[] // Фактури в тази валута
+  offers            Offer[] // Оферти в тази валута
+  deals             Deal[] // Сделки в тази валута
+  companyPlans      CompanyPlan[] // Планове в тази валута
+  expenses          Expense[] // Разходи в тази валута
+  payments          Payment[] // Плащания в тази валута
 
   @@map("currencies")
 }
@@ -54,11 +54,11 @@ model Country {
   updatedAt  DateTime @updatedAt
 
   // Релации
-  companies    Company[] // Компании в тази държава
-  suppliers    Supplier[] // Доставчици от тази държава
-  settlements  Settlement[] // Населени места в тази държава
-  customers    Customer[] // Клиенти от тази държава
-  locations    Location[] // Локации в тази държава
+  companies   Company[] // Компании в тази държава
+  suppliers   Supplier[] // Доставчици от тази държава
+  settlements Settlement[] // Населени места в тази държава
+  customers   Customer[] // Клиенти от тази държава
+  locations   Location[] // Локации в тази държава
 
   @@map("countries")
 }
@@ -142,9 +142,10 @@ model Company {
 
   // PDF template keys — точка за lookup в template registry на frontend-а.
   // NULL = default. Задава се ръчно от superadmin при custom клиентски шаблон.
-  invoiceTemplateKey       String?
-  offerTemplateKey         String?
-  stockDocumentTemplateKey String?
+  invoiceTemplateKey         String?
+  offerTemplateKey           String?
+  stockDocumentTemplateKey   String?
+  serviceProtocolTemplateKey String?
 
   // Контакти
   phone   String? // Телефон
@@ -162,14 +163,17 @@ model Company {
 
   // WooCommerce интеграция
   woocommerceDomain String? // Домейн на WordPress/WooCommerce магазин (напр. shop.example.com)
-  woocommerceApiKey  String? // API ключ за изходящи webhook-ове към WP плъгина
+  woocommerceApiKey String? // API ключ за изходящи webhook-ове към WP плъгина
 
   // Настройки за функционалност
   pushNotificationsEnabled Boolean @default(false) // Разрешаване на push нотификации за компанията
-  enableReviewStatus       Boolean @default(true)  // Използва ли се IN_REVIEW статус в workflow на задачите
+  enableReviewStatus       Boolean @default(true) // Използва ли се IN_REVIEW статус в workflow на задачите
 
   // HR настройки
   defaultAnnualLeaveDays Int @default(20) // Дни платен отпуск по подразбиране за нови служители
+
+  // Сервизен модул — opt-in per company
+  serviceModuleEnabled Boolean @default(false)
 
   // Системни полета
   role      CompanyRole @default(CLIENT)
@@ -182,52 +186,57 @@ model Company {
   products            Product[]
   productCategories   ProductCategory[]
   suppliers           Supplier[]
-  locations          Location[]
-  goodsReceipts      GoodsReceipt[]
-  inventoryBatches   InventoryBatch[]
-  inventorySerials   InventorySerial[]
-  orders             Order[]
-  offers             Offer[]
-  customers          Customer[]
-  invoices           Invoice[]
-  leads              Lead[]
-  deals              Deal[]
-  dealTasks          DealTask[]
-  departments        Department[]
-  attendances        Attendance[]
-  payrolls           Payroll[]
-  performanceReviews PerformanceReview[]
-  tickets            Ticket[]
-  sprints            Sprint[]
-  sprintMembers      SprintMember[]
-  timeLogs           TimeLog[]
-  chatRooms          ChatRoom[]
-  leaves             Leave[]
-  leaveBalances      LeaveBalance[]
-  companyPlans       CompanyPlan[]
-  expenses           Expense[]
-  documents          Document[]
-  stockDocuments     StockDocument[]
-  billOfMaterials    BillOfMaterial[]
-  productionOrders   ProductionOrder[]
+  locations           Location[]
+  goodsReceipts       GoodsReceipt[]
+  inventoryBatches    InventoryBatch[]
+  inventorySerials    InventorySerial[]
+  orders              Order[]
+  offers              Offer[]
+  customers           Customer[]
+  invoices            Invoice[]
+  leads               Lead[]
+  deals               Deal[]
+  dealTasks           DealTask[]
+  departments         Department[]
+  attendances         Attendance[]
+  payrolls            Payroll[]
+  performanceReviews  PerformanceReview[]
+  tickets             Ticket[]
+  sprints             Sprint[]
+  sprintMembers       SprintMember[]
+  timeLogs            TimeLog[]
+  chatRooms           ChatRoom[]
+  leaves              Leave[]
+  leaveBalances       LeaveBalance[]
+  companyPlans        CompanyPlan[]
+  expenses            Expense[]
+  documents           Document[]
+  stockDocuments      StockDocument[]
+  billOfMaterials     BillOfMaterial[]
+  productionOrders    ProductionOrder[]
   productionIssuances ProductionMaterialIssuance[]
-  apiKeys            ApiKey[]
-  stockTransfers     StockTransfer[]
-  econtConfig        EcontConfig?
-  speedyConfig       SpeedyConfig?
-  shipments          Shipment[]
-  warrantyTemplates  WarrantyTemplate[]
-  issuedWarranties   IssuedWarranty[]
-  integrations       Integration[]
-  payments           Payment[]
+  apiKeys             ApiKey[]
+  stockTransfers      StockTransfer[]
+  econtConfig         EcontConfig?
+  speedyConfig        SpeedyConfig?
+  shipments           Shipment[]
+  warrantyTemplates   WarrantyTemplate[]
+  issuedWarranties    IssuedWarranty[]
+  integrations        Integration[]
+  payments            Payment[]
+
+  // Сервиз
+  serviceOrders    ServiceOrder[]
+  serviceAssets    ServiceAsset[]
+  serviceContracts ServiceContract[]
 
   @@map("companies")
 }
 
 // API ключове за външни интеграции (WordPress, Drupal и др.)
 model ApiKey {
-  id     String @id @default(cuid())
-  name   String // Име/описание (напр. "WooCommerce магазин")
+  id      String @id @default(cuid())
+  name    String // Име/описание (напр. "WooCommerce магазин")
   keyHash String @unique // SHA-256 хеш на ключа
   prefix  String // Първите 14 символа за показване (напр. "cs_live_Ab12Cd...")
 
@@ -244,7 +253,7 @@ model ApiKey {
 
 // Интеграции с външни системи (CloudCart, WooCommerce и др.)
 model Integration {
-  id       String @id @default(cuid())
+  id       String  @id @default(cuid())
   provider String // "cloudcart", "woocommerce", и др.
   isActive Boolean @default(true)
 
@@ -398,9 +407,9 @@ model User {
   createdGoodsReceipts  GoodsReceipt[]  @relation("GoodsReceiptCreator")
   createdOrders         Order[]         @relation("OrderCreator")
   createdOffers         Offer[]         @relation("OfferCreator")
-  createdInvoices        Invoice[]       @relation("InvoiceCreator")
-  createdStockDocuments  StockDocument[] @relation("StockDocumentCreator")
-  createdPlans           CompanyPlan[]   @relation("PlanCreator")
+  createdInvoices       Invoice[]       @relation("InvoiceCreator")
+  createdStockDocuments StockDocument[] @relation("StockDocumentCreator")
+  createdPlans          CompanyPlan[]   @relation("PlanCreator")
   assignedCustomers     Customer[]      @relation("CustomerAssignee")
   assignedDeals         Deal[]          @relation("DealAssignee")
   createdDeals          Deal[]          @relation("DealCreator")
@@ -457,6 +466,13 @@ model User {
   // Плащания
   createdPayments Payment[] @relation("PaymentCreator")
 
+  // Сервиз
+  assignedServiceOrders           ServiceOrder[]              @relation("ServiceOrderTechnician")
+  receivedServiceOrders           ServiceOrder[]              @relation("ServiceOrderReceiver")
+  serviceOrderTimeLogs            ServiceOrderTimeLog[]       @relation("ServiceOrderTimeLogTechnician")
+  serviceOrderAttachmentsUploaded ServiceOrderAttachment[]    @relation("ServiceOrderAttachmentUploader")
+  serviceOrderStatusChanges       ServiceOrderStatusHistory[] @relation("ServiceOrderStatusChanger")
+
   // Terms acceptance
   termsAcceptedAt DateTime?
 
@@ -468,11 +484,11 @@ model User {
 
 // Токен за възстановяване на парола
 model PasswordReset {
-  id        String   @id @default(cuid())
-  token     String   @unique
+  id        String    @id @default(cuid())
+  token     String    @unique
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -770,16 +786,16 @@ enum Unit {
 enum ProductType {
   PRODUCT // Обикновен продукт (без специално проследяване)
   SERVICE // Услуга (без инвентар)
-  BATCH   // Партиден продукт (LOT номер, срок на годност)
-  SERIAL  // Продукт със сериен номер (уникален номер за всяка единица)
+  BATCH // Партиден продукт (LOT номер, срок на годност)
+  SERIAL // Продукт със сериен номер (уникален номер за всяка единица)
 }
 
 // Статус на приемане на стока
 enum GoodsReceiptStatus {
-  EXPECTED       // Очаквана
+  EXPECTED // Очаквана
   DELIVERED_PAID // Доставена и платена
   DELIVERED_UNPAID // Доставена и неплатена
-  CANCELLED      // Анулирана
+  CANCELLED // Анулирана
 }
 
 // Статус на сериен номер
@@ -891,9 +907,9 @@ model Product {
   stockDocumentItems StockDocumentItem[]
 
   // Производство
-  bomAsProduct        BillOfMaterial[]            @relation("BOMProduct")
-  bomItems            BOMItem[]                   @relation("BOMItemProduct")
-  productionOrders    ProductionOrder[]           @relation("ProductionOrderProduct")
+  bomAsProduct        BillOfMaterial[]             @relation("BOMProduct")
+  bomItems            BOMItem[]                    @relation("BOMItemProduct")
+  productionOrders    ProductionOrder[]            @relation("ProductionOrderProduct")
   productionIssuances ProductionMaterialIssuance[] @relation("IssuanceProduct")
 
   // Трансфери между складове
@@ -901,6 +917,11 @@ model Product {
 
   // Гаранции
   issuedWarranties IssuedWarranty[]
+
+  // Сервиз
+  serviceOrderParts ServiceOrderPart[]
+  serviceAssets     ServiceAsset[]
+  serviceLoaners    ServiceLoaner[]
 
   @@unique([companyId, sku])
   @@index([companyId, name])
@@ -950,8 +971,8 @@ model Supplier {
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  goodsReceipts  GoodsReceipt[]
-  expenses       Expense[]
+  goodsReceipts GoodsReceipt[]
+  expenses      Expense[]
 
   @@unique([companyId, eik])
   @@index([companyId, name])
@@ -970,7 +991,7 @@ model Location {
   city        String? // Град
   postalCode  String? // Пощенски код
   countryId   String? // Държава
-  country     Country? @relation(fields: [countryId], references: [id])
+  country     Country?     @relation(fields: [countryId], references: [id])
   description String? // Описание
   isDefault   Boolean      @default(false) // Дали е локация по подразбиране
   isActive    Boolean      @default(true)
@@ -980,16 +1001,16 @@ model Location {
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  storageZones     StorageZone[]
-  goodsReceipts    GoodsReceipt[]
-  inventoryBatches InventoryBatch[]
-  inventorySerials InventorySerial[]
-  orders           Order[]
-  orderItems       OrderItem[]
-  productionOrders ProductionOrder[]
+  storageZones        StorageZone[]
+  goodsReceipts       GoodsReceipt[]
+  inventoryBatches    InventoryBatch[]
+  inventorySerials    InventorySerial[]
+  orders              Order[]
+  orderItems          OrderItem[]
+  productionOrders    ProductionOrder[]
   productionIssuances ProductionMaterialIssuance[] @relation("IssuanceLocation")
-  stockTransfersFrom StockTransfer[] @relation("StockTransferFrom")
-  stockTransfersTo   StockTransfer[] @relation("StockTransferTo")
+  stockTransfersFrom  StockTransfer[]              @relation("StockTransferFrom")
+  stockTransfersTo    StockTransfer[]              @relation("StockTransferTo")
 
   @@unique([companyId, code])
   @@map("locations")
@@ -1114,7 +1135,7 @@ model Customer {
   type CustomerType @default(INDIVIDUAL)
 
   // Етап и източник (от Lead/CrmCompany)
-  stage  CustomerStage  @default(ACTIVE)
+  stage  CustomerStage   @default(ACTIVE)
   source CustomerSource?
 
   // Информация за фирма (ако type = COMPANY)
@@ -1168,14 +1189,17 @@ model Customer {
   assignedToId String?
   assignedTo   User?   @relation("CustomerAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
 
-  orders             Order[]
-  offers             Offer[]
-  invoices           Invoice[]
-  leads              Lead[]
-  deals              Deal[]
-  stockDocuments     StockDocument[]
-  issuedWarranties   IssuedWarranty[]
-  productionOrders   ProductionOrder[] @relation("ProductionOrderCustomer")
+  orders           Order[]
+  offers           Offer[]
+  invoices         Invoice[]
+  leads            Lead[]
+  deals            Deal[]
+  stockDocuments   StockDocument[]
+  issuedWarranties IssuedWarranty[]
+  productionOrders ProductionOrder[] @relation("ProductionOrderCustomer")
+  serviceOrders    ServiceOrder[]
+  serviceAssets    ServiceAsset[]
+  serviceContracts ServiceContract[]
 
   @@unique([companyId, eik])
   @@index([companyId, type])
@@ -1301,8 +1325,8 @@ model Deal {
   customer   Customer? @relation(fields: [customerId], references: [id])
 
   // Свързан лийд
-  leadId    String?
-  lead      Lead? @relation(fields: [leadId], references: [id])
+  leadId String?
+  lead   Lead?   @relation(fields: [leadId], references: [id])
 
   // Отговорник
   assignedToId String?
@@ -1342,8 +1366,8 @@ model Deal {
 model DealTask {
   id String @id @default(cuid())
 
-  title       String    // Заглавие на задачата
-  description String?   // Описание
+  title       String // Заглавие на задачата
+  description String? // Описание
   dueDate     DateTime? // Краен срок
   isDone      Boolean   @default(false) // Изпълнена ли е
 
@@ -1353,13 +1377,13 @@ model DealTask {
 
   // Релации
   dealId String
-  deal   Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
 
   assignedToId String?
-  assignedTo   User? @relation("DealTaskAssignee", fields: [assignedToId], references: [id])
+  assignedTo   User?   @relation("DealTaskAssignee", fields: [assignedToId], references: [id])
 
   createdById String?
-  createdBy   User? @relation("DealTaskCreator", fields: [createdById], references: [id])
+  createdBy   User?   @relation("DealTaskCreator", fields: [createdById], references: [id])
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -1431,7 +1455,7 @@ model Order {
   customerPhone String? // Телефон
 
   // Доставка
-  deliveryMethod     String   @default("none") // none, manual, econt_office, econt_address
+  deliveryMethod     String  @default("none") // none, manual, econt_office, econt_address
   shippingAddress    String? // Адрес за доставка
   shippingCity       String? // Град
   shippingPostalCode String? // Пощенски код
@@ -1441,10 +1465,10 @@ model Order {
   econtOfficeName    String? // Име на офис на Еконт
 
   // Плащане
-  paymentMethod PaymentMethod @default(CASH)
-  paymentStatus PaymentStatus @default(PENDING)
-  paidAmount    Decimal       @default(0) @db.Decimal(12, 2) // Сумиран eквивалент на Payment-ите (derived)
-  invoicedAmount Decimal      @default(0) @db.Decimal(12, 2) // Сумарна сума на издадените (не cancelled) фактури (derived)
+  paymentMethod  PaymentMethod @default(CASH)
+  paymentStatus  PaymentStatus @default(PENDING)
+  paidAmount     Decimal       @default(0) @db.Decimal(12, 2) // Сумиран eквивалент на Payment-ите (derived)
+  invoicedAmount Decimal       @default(0) @db.Decimal(12, 2) // Сумарна сума на издадените (не cancelled) фактури (derived)
 
   // Суми
   subtotal     Decimal @db.Decimal(12, 2) // Сума без ДДС
@@ -1559,11 +1583,11 @@ model Payment {
 
 // Статус на оферта
 enum OfferStatus {
-  DRAFT     // Чернова
-  SENT      // Изпратена
-  ACCEPTED  // Приета
-  REJECTED  // Отхвърлена
-  EXPIRED   // Изтекла
+  DRAFT // Чернова
+  SENT // Изпратена
+  ACCEPTED // Приета
+  REJECTED // Отхвърлена
+  EXPIRED // Изтекла
   CANCELLED // Анулирана
 }
 
@@ -1591,7 +1615,7 @@ model Offer {
   customerPostalCode String? // Пощенски код
 
   // Суми
-  subtotal Decimal @db.Decimal(12, 2) // Сума без ДДС
+  subtotal  Decimal @db.Decimal(12, 2) // Сума без ДДС
   vatAmount Decimal @db.Decimal(12, 2) // ДДС
   discount  Decimal @default(0) @db.Decimal(10, 2) // Отстъпка
   total     Decimal @db.Decimal(12, 2) // Обща сума с ДДС
@@ -1614,7 +1638,7 @@ model Offer {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   createdById String?
-  createdBy   User? @relation("OfferCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?   @relation("OfferCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   items          OfferItem[]
   resultingOrder Order?      @relation("OrderFromOffer")
@@ -1637,7 +1661,7 @@ model OfferItem {
   total       Decimal @db.Decimal(12, 2)
 
   offerId String
-  offer   Offer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  offer   Offer  @relation(fields: [offerId], references: [id], onDelete: Cascade)
 
   productId String?
   product   Product? @relation(fields: [productId], references: [id])
@@ -1680,6 +1704,7 @@ model InventoryBatch {
 
   orderItems         OrderItem[]
   stockTransferItems StockTransferItem[]
+  serviceOrderParts  ServiceOrderPart[]
 
   @@unique([companyId, productId, batchNumber])
   @@index([companyId, productId])
@@ -1714,8 +1739,9 @@ model InventorySerial {
   goodsReceiptItemId String?
   goodsReceiptItem   GoodsReceiptItem? @relation(fields: [goodsReceiptItemId], references: [id], onDelete: SetNull)
 
-  orderItems            OrderItem[]
-  stockTransferSerials  StockTransferSerial[]
+  orderItems           OrderItem[]
+  stockTransferSerials StockTransferSerial[]
+  serviceOrderParts    ServiceOrderPart[]
 
   @@unique([companyId, productId, serialNumber])
   @@index([companyId, productId])
@@ -1777,6 +1803,7 @@ model Invoice {
   // Връзка с план (ако е генерирана от план)
   companyPlanInvoice CompanyPlanInvoice?
   stockDocuments     StockDocument[]
+  serviceOrders      ServiceOrder[]
 
   // Създател
   createdById String?
@@ -1943,8 +1970,8 @@ model PerformanceReviewItem {
 
 // Статус на спринт
 enum SprintStatus {
-  PLANNING  // Планиране
-  ACTIVE    // Активен
+  PLANNING // Планиране
+  ACTIVE // Активен
   COMPLETED // Завършен
   CANCELLED // Анулиран
 }
@@ -1966,7 +1993,7 @@ model Sprint {
 
   // Създаден от
   createdById String
-  createdBy   User @relation("SprintCreator", fields: [createdById], references: [id])
+  createdBy   User   @relation("SprintCreator", fields: [createdById], references: [id])
 
   // Членове на екипа
   members SprintMember[]
@@ -1987,11 +2014,11 @@ model SprintMember {
   id       String   @id @default(cuid())
   joinedAt DateTime @default(now())
 
-  sprintId  String
-  sprint    Sprint @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+  sprintId String
+  sprint   Sprint @relation(fields: [sprintId], references: [id], onDelete: Cascade)
 
-  userId    String
-  user      User @relation("SprintMemberUser", fields: [userId], references: [id])
+  userId String
+  user   User   @relation("SprintMemberUser", fields: [userId], references: [id])
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -2079,9 +2106,9 @@ model Ticket {
   actualHours    Decimal? @db.Decimal(6, 2) // Действителни часове
 
   // Колко часа е един работен ден за тази задача (default 8 се прилага в кода)
-  hoursPerDay Decimal? @db.Decimal(4, 2)
+  hoursPerDay        Decimal? @db.Decimal(4, 2)
   // Работни дни в седмицата: 5 (Пн-Пт), 6 (Пн-Сб), 7 (всеки ден)
-  workingDaysPerWeek Int @default(5)
+  workingDaysPerWeek Int      @default(5)
 
   // Позиция в Kanban колона (midpoint ordering). NULL = legacy / без ръчно подредба;
   // ранкирани тикети идват преди null-ранкираните в ASC сортировка.
@@ -2437,28 +2464,28 @@ model DemoRequestNote {
 
 // Категории разходи
 enum ExpenseCategory {
-  DELIVERY         // Доставка/Транспорт
-RENT             // Наем
-  UTILITIES        // Комунални (ток, вода, отопление)
-  MARKETING        // Маркетинг и реклама
-  OFFICE_SUPPLIES  // Офис консумативи
-  EQUIPMENT        // Оборудване
-  MAINTENANCE      // Поддръжка
-  INSURANCE        // Застраховки
-  TAXES            // Данъци и такси
-  TRAVEL           // Командировки
-  COMMUNICATION    // Комуникации (телефон, интернет)
-  SOFTWARE         // Софтуер и лицензи
-  CONSULTING       // Консултантски услуги
-  BANKING          // Банкови такси
-  OTHER            // Други разходи
+  DELIVERY // Доставка/Транспорт
+  RENT // Наем
+  UTILITIES // Комунални (ток, вода, отопление)
+  MARKETING // Маркетинг и реклама
+  OFFICE_SUPPLIES // Офис консумативи
+  EQUIPMENT // Оборудване
+  MAINTENANCE // Поддръжка
+  INSURANCE // Застраховки
+  TAXES // Данъци и такси
+  TRAVEL // Командировки
+  COMMUNICATION // Комуникации (телефон, интернет)
+  SOFTWARE // Софтуер и лицензи
+  CONSULTING // Консултантски услуги
+  BANKING // Банкови такси
+  OTHER // Други разходи
 }
 
 // Статус на разход
 enum ExpenseStatus {
-  PENDING   // Чакащ
-  APPROVED  // Одобрен
-  PAID      // Платен
+  PENDING // Чакащ
+  APPROVED // Одобрен
+  PAID // Платен
   CANCELLED // Анулиран
 }
 
@@ -2467,11 +2494,11 @@ model Expense {
   id String @id @default(cuid())
 
   // Основна информация
-  description String              // Описание на разхода
-  category    ExpenseCategory     // Категория
-  amount      Decimal  @db.Decimal(12, 2) // Сума
-  vatAmount   Decimal  @default(0) @db.Decimal(12, 2) // ДДС сума
-  totalAmount Decimal  @db.Decimal(12, 2) // Обща сума (с ДДС)
+  description String // Описание на разхода
+  category    ExpenseCategory // Категория
+  amount      Decimal         @db.Decimal(12, 2) // Сума
+  vatAmount   Decimal         @default(0) @db.Decimal(12, 2) // ДДС сума
+  totalAmount Decimal         @db.Decimal(12, 2) // Обща сума (с ДДС)
 
   // Валута
   currencyId   String?
@@ -2479,14 +2506,14 @@ model Expense {
   exchangeRate Decimal   @default(1) @db.Decimal(10, 6) // Курс към фирмена валута
 
   // Дати
-  expenseDate DateTime @default(now()) // Дата на разхода
-  dueDate     DateTime?                // Падеж за плащане
-  paidAt      DateTime?                // Дата на плащане
+  expenseDate DateTime  @default(now()) // Дата на разхода
+  dueDate     DateTime? // Падеж за плащане
+  paidAt      DateTime? // Дата на плащане
 
   // Документи
-  invoiceNumber String?  // Номер на фактура
-  receiptNumber String?  // Номер на касова бележка
-  attachmentUrl String?  // Прикачен файл (сканирано копие)
+  invoiceNumber String? // Номер на фактура
+  receiptNumber String? // Номер на касова бележка
+  attachmentUrl String? // Прикачен файл (сканирано копие)
 
   // Статус
   status ExpenseStatus @default(PENDING)
@@ -2516,7 +2543,7 @@ model Expense {
 
   // Одобрител
   approvedById String?
-  approvedBy   User?   @relation("ExpenseApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedBy   User?     @relation("ExpenseApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   approvedAt   DateTime?
 
   documents Document[]
@@ -2538,7 +2565,7 @@ model Document {
   fileName String // Оригинално име на файла
   fileUrl  String // R2 публичен URL
   fileKey  String // R2 object key (за изтриване)
-  fileSize Int    // Размер в байтове
+  fileSize Int // Размер в байтове
   mimeType String // MIME тип
 
   createdAt DateTime @default(now())
@@ -2547,7 +2574,7 @@ model Document {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   uploadedById String?
-  uploadedBy   User? @relation("DocumentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  uploadedBy   User?   @relation("DocumentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
 
   // Полиморфни връзки — само една е попълнена за всеки документ
   goodsReceiptId String?
@@ -2573,8 +2600,8 @@ model Document {
 // ==================== СТОКОВИ ДОКУМЕНТИ / ПРОТОКОЛИ ====================
 
 enum StockDocumentType {
-  STOCK_RECEIPT          // Стокова разписка
-  ACCEPTANCE_PROTOCOL    // Приемо-предавателен протокол
+  STOCK_RECEIPT // Стокова разписка
+  ACCEPTANCE_PROTOCOL // Приемо-предавателен протокол
   ASCERTAINMENT_PROTOCOL // Констативен протокол
 }
 
@@ -2587,8 +2614,8 @@ enum ProductionOrderStatus {
 }
 
 enum StockDocumentStatus {
-  DRAFT     // Чернова
-  ISSUED    // Издаден
+  DRAFT // Чернова
+  ISSUED // Издаден
   CANCELLED // Анулиран
 }
 
@@ -2600,12 +2627,12 @@ model StockDocument {
   status         StockDocumentStatus @default(DRAFT)
 
   // Получател (клиент)
-  customerId     String?
-  customer       Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  recipientName  String // Получател / Приемащ
-  recipientEik   String?
+  customerId       String?
+  customer         Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  recipientName    String // Получател / Приемащ
+  recipientEik     String?
   recipientAddress String?
-  recipientCity  String?
+  recipientCity    String?
 
   // Представители (за подпис)
   senderRepresentative   String? // Предал (от наша страна)
@@ -2623,10 +2650,12 @@ model StockDocument {
   total     Decimal? @db.Decimal(12, 2)
 
   // Връзки с други документи (опционални)
-  orderId   String?
-  order     Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  invoiceId String?
-  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  orderId        String?
+  order          Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  invoiceId      String?
+  invoice        Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  serviceOrderId String?
+  serviceOrder   ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
 
   notes String? @db.Text
 
@@ -2668,13 +2697,13 @@ model StockDocumentItem {
 
 // Рецепта (Bill of Materials)
 model BillOfMaterial {
-  id              String   @id @default(cuid())
-  name            String
-  description     String?
-  outputQuantity  Decimal  @default(1) @db.Decimal(10, 3)
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  outputQuantity Decimal  @default(1) @db.Decimal(10, 3)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   productId String
   product   Product @relation("BOMProduct", fields: [productId], references: [id], onDelete: Restrict)
@@ -2683,7 +2712,7 @@ model BillOfMaterial {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   createdById String?
-  createdBy   User? @relation("BOMCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?   @relation("BOMCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   items            BOMItem[]
   productionOrders ProductionOrder[]
@@ -2715,7 +2744,7 @@ model BOMItem {
 model ProductionOrder {
   id               String                @id @default(cuid())
   orderNumber      String
-  title            String?               // Описателно име ("Кухня ап. 5 ул. Иван Вазов")
+  title            String? // Описателно име ("Кухня ап. 5 ул. Иван Вазов")
   quantity         Decimal               @db.Decimal(10, 3)
   status           ProductionOrderStatus @default(DRAFT)
   plannedStartDate DateTime?
@@ -2744,7 +2773,7 @@ model ProductionOrder {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   createdById String?
-  createdBy   User? @relation("ProductionOrderCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?   @relation("ProductionOrderCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
   issuances ProductionMaterialIssuance[]
 
@@ -2758,12 +2787,12 @@ model ProductionOrder {
 // Изписване на материал към производствена поръчка (history log, не план).
 // Всеки поход до склада = един запис. unitCost е snapshot на момента на изписване.
 model ProductionMaterialIssuance {
-  id        String   @id @default(cuid())
-  quantity  Decimal  @db.Decimal(10, 3) // Положително = изпазано; отрицателно = връщане
-  unitCost  Decimal  @default(0) @db.Decimal(12, 4) // Snapshot на cost-а при изписване
-  issuedAt  DateTime @default(now())
-  notes     String?
-  returned  Boolean  @default(false) // Ако цялото количество е върнато
+  id       String   @id @default(cuid())
+  quantity Decimal  @db.Decimal(10, 3) // Положително = изпазано; отрицателно = връщане
+  unitCost Decimal  @default(0) @db.Decimal(12, 4) // Snapshot на cost-а при изписване
+  issuedAt DateTime @default(now())
+  notes    String?
+  returned Boolean  @default(false) // Ако цялото количество е върнато
 
   productId String
   product   Product @relation("IssuanceProduct", fields: [productId], references: [id], onDelete: Restrict)
@@ -2775,7 +2804,7 @@ model ProductionMaterialIssuance {
   location   Location? @relation("IssuanceLocation", fields: [locationId], references: [id], onDelete: SetNull)
 
   createdById String?
-  createdBy   User? @relation("IssuanceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?   @relation("IssuanceCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -2957,13 +2986,13 @@ model SpeedyConfig {
   senderClientId  BigInt? // Speedy client ID (от test connection — може да е > INT32)
 
   // Услуги
-  serviceId        Int? // Service ID (505 = стандартна)
-  codEnabled       Boolean @default(false)
-  codProcessingType String? // CASH | POSTAL_MONEY_TRANSFER
+  serviceId            Int? // Service ID (505 = стандартна)
+  codEnabled           Boolean @default(false)
+  codProcessingType    String? // CASH | POSTAL_MONEY_TRANSFER
   declaredValueEnabled Boolean @default(false)
-  saturdayDelivery Boolean @default(false)
-  deferredDays     Int?    @default(0) // 0, 1 или 2
-  payerType        String? @default("SENDER") // SENDER | RECIPIENT | THIRD_PARTY
+  saturdayDelivery     Boolean @default(false)
+  deferredDays         Int?    @default(0) // 0, 1 или 2
+  payerType            String? @default("SENDER") // SENDER | RECIPIENT | THIRD_PARTY
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2992,11 +3021,11 @@ model Shipment {
   officeName String? // Име на офис
 
   // Адрес (ако deliveryType == ADDRESS)
-  addressCity       String?
-  addressPostCode   String?
-  addressStreet     String?
-  addressNum        String?
-  addressOther      String? // Блок/Вход/Етаж/Апартамент
+  addressCity     String?
+  addressPostCode String?
+  addressStreet   String?
+  addressNum      String?
+  addressOther    String? // Блок/Вход/Етаж/Апартамент
 
   // Данни за пратката
   weight      Decimal? @db.Decimal(10, 3) // Тегло в кг
@@ -3007,13 +3036,13 @@ model Shipment {
   description String? // Описание на съдържанието
 
   // Наложен платеж
-  codAmount  Decimal? @db.Decimal(12, 2) // Сума за наложен платеж
-  currency   String   @default("BGN")
+  codAmount Decimal? @db.Decimal(12, 2) // Сума за наложен платеж
+  currency  String   @default("BGN")
 
   // Разходи
-  shippingCost       Decimal? @db.Decimal(10, 2) // Цена на доставката
-  senderDueAmount    Decimal? @db.Decimal(10, 2)
-  receiverDueAmount  Decimal? @db.Decimal(10, 2)
+  shippingCost      Decimal? @db.Decimal(10, 2) // Цена на доставката
+  senderDueAmount   Decimal? @db.Decimal(10, 2)
+  receiverDueAmount Decimal? @db.Decimal(10, 2)
 
   // Tracking
   pdfUrl               String? // URL на товарителницата
@@ -3028,7 +3057,7 @@ model Shipment {
 
   // Релации
   orderId String
-  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -3043,7 +3072,7 @@ model Shipment {
 enum WarrantyType {
   STANDARD // Стандартна
   EXTENDED // Разширена
-  LIMITED  // Ограничена
+  LIMITED // Ограничена
 }
 
 enum WarrantyDurationUnit {
@@ -3053,25 +3082,25 @@ enum WarrantyDurationUnit {
 }
 
 enum IssuedWarrantyStatus {
-  ACTIVE  // Активна
+  ACTIVE // Активна
   EXPIRED // Изтекла
-  VOIDED  // Анулирана
+  VOIDED // Анулирана
 }
 
 // Гаранционен шаблон
 model WarrantyTemplate {
-  id           String              @id @default(cuid())
-  name         String              // Име на гаранцията
-  type         WarrantyType        @default(STANDARD)
-  duration     Int                 // Числова продължителност
+  id           String               @id @default(cuid())
+  name         String // Име на гаранцията
+  type         WarrantyType         @default(STANDARD)
+  duration     Int // Числова продължителност
   durationUnit WarrantyDurationUnit @default(MONTHS)
-  description  String?             @db.Text // Условия (rich text HTML)
-  isActive     Boolean             @default(true)
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
+  description  String?              @db.Text // Условия (rich text HTML)
+  isActive     Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
 
-  companyId   String
-  company     Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   createdById String?
   createdBy   User?   @relation("WarrantyTemplateCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -3086,16 +3115,16 @@ model WarrantyTemplate {
 
 // Издадена гаранция (автоматично при поръчка)
 model IssuedWarranty {
-  id              String               @id @default(cuid())
-  warrantyNumber  String               // Автоматичен номер (WAR-2026-00001)
-  startDate       DateTime             // Начална дата (дата на поръчката)
-  endDate         DateTime             // Крайна дата (изчислена)
-  status          IssuedWarrantyStatus @default(ACTIVE)
-  serialNumber    String?              // Сериен номер (ако е серийно проследен)
-  notes           String?              @db.Text
-  quantity        Decimal              @default(1) @db.Decimal(10, 3) // Количество
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  id             String               @id @default(cuid())
+  warrantyNumber String // Автоматичен номер (WAR-2026-00001)
+  startDate      DateTime // Начална дата (дата на поръчката)
+  endDate        DateTime // Крайна дата (изчислена)
+  status         IssuedWarrantyStatus @default(ACTIVE)
+  serialNumber   String? // Сериен номер (ако е серийно проследен)
+  notes          String?              @db.Text
+  quantity       Decimal              @default(1) @db.Decimal(10, 3) // Количество
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -3104,13 +3133,15 @@ model IssuedWarranty {
   warrantyTemplate   WarrantyTemplate @relation(fields: [warrantyTemplateId], references: [id], onDelete: Restrict)
 
   orderId String
-  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   productId String
   product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   customerId String?
   customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  serviceAssets ServiceAsset[]
 
   @@unique([companyId, warrantyNumber])
   @@index([companyId, status])
@@ -3178,4 +3209,344 @@ model MetaPixelConfig {
   updatedAt  DateTime @updatedAt
 
   @@map("meta_pixel_config")
+}
+
+// ==================== СЕРВИЗ ====================
+
+// Статус на сервизна заявка
+enum ServiceOrderStatus {
+  NEW // Приета
+  DIAGNOSING // Диагностика
+  AWAITING_QUOTE // Изготвя се оферта
+  AWAITING_APPROVAL // Чака одобрение от клиента
+  AWAITING_PARTS // Чака части
+  IN_REPAIR // В ремонт
+  READY // Готов за получаване
+  DELIVERED // Предаден
+  CANCELED // Отказан
+}
+
+// Тип на сервизна заявка
+enum ServiceOrderType {
+  WARRANTY // Гаранционен
+  PAID // Платен
+  CONTRACT // По договор
+  GOODWILL // Жест към клиента
+}
+
+// Приоритет на сервизна заявка
+enum ServiceOrderPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+// Място на изпълнение
+enum ServiceLocation {
+  IN_HOUSE // В сервиза
+  ON_SITE // На място при клиента
+  PICKUP // С куриер до сервиза и обратно
+}
+
+// Статус на обслужван актив
+enum ServiceAssetStatus {
+  ACTIVE
+  RETIRED
+  LOST
+}
+
+// Произход на резервна част
+enum ServicePartSource {
+  STOCK // От склад на компанията
+  PURCHASE // Поръчана от доставчик
+  CUSTOMER // Донесена от клиента
+}
+
+// Статус на заето устройство
+enum LoanerStatus {
+  LOANED
+  RETURNED
+}
+
+// Статус на сервизен договор
+enum ServiceContractStatus {
+  ACTIVE
+  PAUSED
+  EXPIRED
+  CANCELED
+}
+
+// Регистър на обслужваните устройства/активи
+model ServiceAsset {
+  id           String             @id @default(cuid())
+  assetNumber  String // ASSET-2026-00001
+  name         String // "Климатик Daikin 12000 BTU"
+  brand        String?
+  model        String?
+  serialNumber String? // Сериен номер / IMEI / VIN — каквото е приложимо
+  imei         String?
+  vin          String?
+  purchaseDate DateTime?
+  notes        String?            @db.Text
+  status       ServiceAssetStatus @default(ACTIVE)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  warrantyId String?
+  warranty   IssuedWarranty? @relation(fields: [warrantyId], references: [id], onDelete: SetNull)
+
+  serviceOrders ServiceOrder[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, assetNumber])
+  @@index([companyId, customerId])
+  @@index([companyId, serialNumber])
+  @@map("service_assets")
+}
+
+// Сервизна заявка
+model ServiceOrder {
+  id              String               @id @default(cuid())
+  orderNumber     String // SRV-2026-00001
+  type            ServiceOrderType     @default(PAID)
+  status          ServiceOrderStatus   @default(NEW)
+  priority        ServiceOrderPriority @default(NORMAL)
+  serviceLocation ServiceLocation      @default(IN_HOUSE)
+
+  // Времеви линии
+  receivedAt  DateTime  @default(now()) // Дата на приемане
+  promisedAt  DateTime? // Обещан срок (SLA)
+  diagnosedAt DateTime?
+  approvedAt  DateTime?
+  completedAt DateTime?
+  deliveredAt DateTime?
+
+  // Описания
+  customerComplaint String  @db.Text // Какво казва клиентът
+  diagnosis         String? @db.Text // Какво намерихме
+  workPerformed     String? @db.Text // Какво направихме
+  internalNotes     String? @db.Text
+
+  // Състояние при приемане (за приемен протокол)
+  accessories   String? @db.Text // "зарядно, кутия, паспорт"
+  cosmeticState String? @db.Text
+  declaredFault String? @db.Text
+
+  // Суми
+  partsTotal     Decimal @default(0) @db.Decimal(12, 2)
+  laborTotal     Decimal @default(0) @db.Decimal(12, 2)
+  discountAmount Decimal @default(0) @db.Decimal(12, 2)
+  totalAmount    Decimal @default(0) @db.Decimal(12, 2)
+
+  // Одобрение от клиента
+  isApprovedByCustomer Boolean @default(false)
+  approvalChannel      String? // email | phone | portal | in_person
+
+  // Публичен tracking токен
+  publicToken String? @unique
+
+  // Релации
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  assetId String?
+  asset   ServiceAsset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  technicianId String?
+  technician   User?   @relation("ServiceOrderTechnician", fields: [technicianId], references: [id], onDelete: SetNull)
+
+  receivedById String?
+  receivedBy   User?   @relation("ServiceOrderReceiver", fields: [receivedById], references: [id], onDelete: SetNull)
+
+  contractId String?
+  contract   ServiceContract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  parts         ServiceOrderPart[]
+  labor         ServiceOrderLabor[]
+  timeLogs      ServiceOrderTimeLog[]
+  attachments   ServiceOrderAttachment[]
+  loaners       ServiceLoaner[]
+  statusHistory ServiceOrderStatusHistory[]
+  protocols     StockDocument[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, orderNumber])
+  @@index([companyId, status])
+  @@index([companyId, technicianId])
+  @@index([companyId, customerId])
+  @@map("service_orders")
+}
+
+// Резервна част в сервизна заявка
+model ServiceOrderPart {
+  id             String       @id @default(cuid())
+  serviceOrderId String
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  source     ServicePartSource @default(STOCK)
+  quantity   Decimal           @db.Decimal(10, 3)
+  unitPrice  Decimal           @db.Decimal(12, 2)
+  totalPrice Decimal           @db.Decimal(12, 2)
+  isWarranty Boolean           @default(false)
+
+  // Свързване със склад (когато source = STOCK)
+  inventoryBatchId  String?
+  inventoryBatch    InventoryBatch?  @relation(fields: [inventoryBatchId], references: [id], onDelete: SetNull)
+  inventorySerialId String?
+  inventorySerial   InventorySerial? @relation(fields: [inventorySerialId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([serviceOrderId])
+  @@map("service_order_parts")
+}
+
+// Труд в сервизна заявка
+model ServiceOrderLabor {
+  id             String       @id @default(cuid())
+  serviceOrderId String
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  description String
+  hours       Decimal @db.Decimal(8, 2)
+  hourlyRate  Decimal @db.Decimal(10, 2)
+  totalPrice  Decimal @db.Decimal(12, 2)
+  isWarranty  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([serviceOrderId])
+  @@map("service_order_labor")
+}
+
+// Лог на отработено време от техник
+model ServiceOrderTimeLog {
+  id             String       @id @default(cuid())
+  serviceOrderId String
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  technicianId String
+  technician   User   @relation("ServiceOrderTimeLogTechnician", fields: [technicianId], references: [id], onDelete: Restrict)
+
+  startedAt DateTime
+  endedAt   DateTime?
+  minutes   Int?
+  notes     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([serviceOrderId])
+  @@index([technicianId])
+  @@map("service_order_time_logs")
+}
+
+// Прикачен файл (снимка, документ) към сервизна заявка
+model ServiceOrderAttachment {
+  id             String       @id @default(cuid())
+  serviceOrderId String
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  url      String // R2 URL
+  fileName String
+  mimeType String?
+  kind     String? // photo_in | photo_out | invoice_supplier | other
+
+  uploadedById String?
+  uploadedBy   User?   @relation("ServiceOrderAttachmentUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([serviceOrderId])
+  @@map("service_order_attachments")
+}
+
+// История на статусните промени
+model ServiceOrderStatusHistory {
+  id             String       @id @default(cuid())
+  serviceOrderId String
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  fromStatus ServiceOrderStatus?
+  toStatus   ServiceOrderStatus
+  note       String?
+
+  changedById String?
+  changedBy   User?   @relation("ServiceOrderStatusChanger", fields: [changedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([serviceOrderId])
+  @@map("service_order_status_history")
+}
+
+// Заето устройство (loaner) към клиент за периода на ремонта
+model ServiceLoaner {
+  id             String       @id @default(cuid())
+  serviceOrderId String
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  serialNumber String?
+  description  String?
+  status       LoanerStatus @default(LOANED)
+  loanedAt     DateTime     @default(now())
+  returnedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([serviceOrderId])
+  @@map("service_loaners")
+}
+
+// Сервизен договор / абонамент за поддръжка
+model ServiceContract {
+  id                    String                @id @default(cuid())
+  contractNumber        String // SVC-2026-00001
+  name                  String
+  status                ServiceContractStatus @default(ACTIVE)
+  startDate             DateTime
+  endDate               DateTime?
+  monthlyFee            Decimal               @default(0) @db.Decimal(12, 2)
+  includedHoursPerMonth Decimal               @default(0) @db.Decimal(8, 2)
+  responseTimeHours     Int? // SLA в часове
+  notes                 String?               @db.Text
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  serviceOrders ServiceOrder[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, contractNumber])
+  @@index([companyId, status])
+  @@map("service_contracts")
 }

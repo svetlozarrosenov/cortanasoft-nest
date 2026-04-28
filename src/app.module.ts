@@ -51,6 +51,7 @@ import { WordPressModule } from './wordpress/wordpress.module';
 import { PaymentsModule } from './payments/payments.module';
 import { AnalyticsGoogleModule } from './analytics-google/analytics-google.module';
 import { MetaPixelModule } from './meta-pixel/meta-pixel.module';
+import { ServiceModule } from './service/service.module';
 
 @Module({
   imports: [
@@ -120,6 +121,7 @@ import { MetaPixelModule } from './meta-pixel/meta-pixel.module';
     PaymentsModule,
     AnalyticsGoogleModule,
     MetaPixelModule,
+    ServiceModule,
   ],
   controllers: [],
   providers: [],

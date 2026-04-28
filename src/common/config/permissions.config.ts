@@ -679,6 +679,33 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
     ],
   },
   {
+    key: 'service',
+    labelKey: 'modules.service.title',
+    icon: 'Wrench',
+    pages: [
+      {
+        key: 'orders',
+        labelKey: 'modules.service.orders',
+        actions: ['view', 'create', 'edit', 'delete'],
+      },
+      {
+        key: 'assets',
+        labelKey: 'modules.service.assets',
+        actions: ['view', 'create', 'edit', 'delete'],
+      },
+      {
+        key: 'contracts',
+        labelKey: 'modules.service.contracts',
+        actions: ['view', 'create', 'edit', 'delete'],
+      },
+      {
+        key: 'calendar',
+        labelKey: 'modules.service.calendar',
+        actions: ['view'],
+      },
+    ],
+  },
+  {
     key: 'settings',
     labelKey: 'modules.settings.title',
     icon: 'Settings',
