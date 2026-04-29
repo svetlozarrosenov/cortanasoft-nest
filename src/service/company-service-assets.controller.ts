@@ -57,6 +57,15 @@ export class CompanyServiceAssetsController {
     return this.assets.lookupBySerial(companyId, serial);
   }
 
+  @Post('from-sale')
+  @RequireCreate('service', 'assets')
+  createFromSale(
+    @Param('companyId') companyId: string,
+    @Body() dto: { inventorySerialId: string; customerId?: string },
+  ) {
+    return this.assets.createFromSale(companyId, dto);
+  }
+
   @Get(':id')
   @RequireView('service', 'assets')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {

@@ -137,16 +137,191 @@ export class ServiceAssetsService {
   }
 
   async lookupBySerial(companyId: string, serial: string) {
-    return this.prisma.serviceAsset.findFirst({
+    const trimmed = (serial || '').trim();
+    if (!trimmed) {
+      return { existingAssets: [], soldSerials: [] };
+    }
+
+    const existingAssets = await this.prisma.serviceAsset.findMany({
       where: {
         companyId,
         OR: [
-          { serialNumber: serial },
-          { imei: serial },
-          { vin: serial },
+          { serialNumber: trimmed },
+          { imei: trimmed },
+          { vin: trimmed },
         ],
       },
-      include: ASSET_INCLUDE,
+      include: {
+        ...ASSET_INCLUDE,
+        warranty: true,
+        serviceOrders: {
+          orderBy: { receivedAt: 'desc' },
+          take: 10,
+          select: {
+            id: true,
+            orderNumber: true,
+            status: true,
+            receivedAt: true,
+            completedAt: true,
+            customerComplaint: true,
+          },
+        },
+      },
+    });
+
+    const inventorySerials = await this.prisma.inventorySerial.findMany({
+      where: {
+        companyId,
+        serialNumber: trimmed,
+        status: 'SOLD',
+      },
+      include: {
+        product: true,
+        location: { select: { id: true, name: true } },
+      },
+    });
+
+    const soldSerials = await Promise.all(
+      inventorySerials.map(async (serialRow) => {
+        const orderItem = await this.prisma.orderItem.findFirst({
+          where: {
+            inventorySerialId: serialRow.id,
+            order: {
+              companyId,
+              status: { notIn: ['DRAFT', 'CANCELLED'] },
+            },
+          },
+          orderBy: { order: { orderDate: 'desc' } },
+          include: {
+            order: {
+              select: {
+                id: true,
+                orderNumber: true,
+                orderDate: true,
+                status: true,
+                customerId: true,
+                customerName: true,
+                customerEmail: true,
+                customerPhone: true,
+                customer: true,
+              },
+            },
+          },
+        });
+
+        if (!orderItem || !orderItem.order) return null;
+
+        const activeWarranty = await this.prisma.issuedWarranty.findFirst({
+          where: {
+            companyId,
+            serialNumber: trimmed,
+            productId: serialRow.productId,
+            status: 'ACTIVE',
+            endDate: { gte: new Date() },
+          },
+          orderBy: { endDate: 'desc' },
+          include: { warrantyTemplate: true },
+        });
+
+        return {
+          inventorySerial: serialRow,
+          orderItem: {
+            id: orderItem.id,
+            quantity: orderItem.quantity,
+            unitPrice: orderItem.unitPrice,
+          },
+          order: orderItem.order,
+          activeWarranty,
+        };
+      }),
+    );
+
+    return {
+      existingAssets,
+      soldSerials: soldSerials.filter((s) => s !== null),
+    };
+  }
+
+  async createFromSale(
+    companyId: string,
+    dto: { inventorySerialId: string; customerId?: string },
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const serial = await tx.inventorySerial.findFirst({
+        where: { id: dto.inventorySerialId, companyId },
+        include: { product: true },
+      });
+      if (!serial) {
+        throw new NotFoundException('Серийният номер не е намерен');
+      }
+
+      const orderItem = await tx.orderItem.findFirst({
+        where: {
+          inventorySerialId: serial.id,
+          order: {
+            companyId,
+            status: { notIn: ['DRAFT', 'CANCELLED'] },
+          },
+        },
+        orderBy: { order: { orderDate: 'desc' } },
+        include: { order: true },
+      });
+
+      const resolvedCustomerId = dto.customerId || orderItem?.order.customerId;
+      if (!resolvedCustomerId) {
+        throw new NotFoundException(
+          'Не може да се определи клиент за този артикул',
+        );
+      }
+
+      const customer = await tx.customer.findFirst({
+        where: { id: resolvedCustomerId, companyId },
+      });
+      if (!customer) {
+        throw new NotFoundException(ErrorMessages.customers.notFound);
+      }
+
+      const existing = await tx.serviceAsset.findFirst({
+        where: {
+          companyId,
+          serialNumber: serial.serialNumber,
+          customerId: resolvedCustomerId,
+        },
+      });
+      if (existing) {
+        return tx.serviceAsset.findUnique({
+          where: { id: existing.id },
+          include: ASSET_INCLUDE,
+        });
+      }
+
+      const warranty = await tx.issuedWarranty.findFirst({
+        where: {
+          companyId,
+          serialNumber: serial.serialNumber,
+          productId: serial.productId,
+          status: 'ACTIVE',
+          endDate: { gte: new Date() },
+        },
+        orderBy: { endDate: 'desc' },
+      });
+
+      const assetNumber = await this.numbering.next('asset', companyId, tx);
+
+      return tx.serviceAsset.create({
+        data: {
+          companyId,
+          assetNumber,
+          name: serial.product.name,
+          serialNumber: serial.serialNumber,
+          purchaseDate: orderItem?.order.orderDate || null,
+          status: 'ACTIVE',
+          customerId: resolvedCustomerId,
+          productId: serial.productId,
+          warrantyId: warranty?.id,
+        },
+        include: ASSET_INCLUDE,
+      });
     });
   }
 }
