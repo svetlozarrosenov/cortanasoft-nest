@@ -51,6 +51,7 @@ import { PaymentsModule } from './payments/payments.module';
 import { AnalyticsGoogleModule } from './analytics-google/analytics-google.module';
 import { MetaPixelModule } from './meta-pixel/meta-pixel.module';
 import { ServiceModule } from './service/service.module';
+import { HandoverProtocolsModule } from './handover-protocols/handover-protocols.module';
 
 @Module({
   imports: [
@@ -120,6 +121,7 @@ import { ServiceModule } from './service/service.module';
     AnalyticsGoogleModule,
     MetaPixelModule,
     ServiceModule,
+    HandoverProtocolsModule,
   ],
   controllers: [],
   providers: [],

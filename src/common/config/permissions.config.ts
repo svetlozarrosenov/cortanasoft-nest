@@ -292,6 +292,11 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
+        key: 'handoverProtocols',
+        labelKey: 'modules.erp.handoverProtocols',
+        actions: ['view', 'create', 'edit', 'delete'],
+      },
+      {
         key: 'analytics',
         labelKey: 'modules.erp.profitAnalytics',
         actions: ['view'],

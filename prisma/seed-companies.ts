@@ -1954,7 +1954,7 @@ function createFullPermissions() {
   const modules: Record<string, string[]> = {
     dashboard: ['overview'],
     crm: ['customers', 'contacts', 'deals'],
-    erp: ['products', 'categories', 'orders', 'invoices', 'suppliers', 'expenses', 'stockDocuments', 'analytics'],
+    erp: ['products', 'categories', 'orders', 'invoices', 'handoverProtocols', 'suppliers', 'expenses', 'stockDocuments', 'analytics'],
     warehouse: ['locations', 'inventory', 'goodsReceipts', 'stockTransfers'],
     production: ['bom', 'orders'],
     hr: ['employees', 'departments', 'attendance', 'leaves', 'payroll', 'performance'],
