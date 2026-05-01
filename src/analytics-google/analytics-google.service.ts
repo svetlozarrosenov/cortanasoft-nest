@@ -4,6 +4,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
 import { PrismaService } from '../prisma/prisma.service';
 import { SaveGoogleAnalyticsConfigDto } from './dto';
@@ -20,7 +21,23 @@ interface ServiceAccountJson {
 export class AnalyticsGoogleService {
   private readonly logger = new Logger(AnalyticsGoogleService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private configService: ConfigService,
+  ) {}
+
+  private getFirebaseEnvCredentials(): {
+    client_email: string;
+    private_key: string;
+  } | null {
+    const clientEmail = this.configService.get<string>('FIREBASE_CLIENT_EMAIL');
+    const privateKey = this.configService.get<string>('FIREBASE_PRIVATE_KEY');
+    if (!clientEmail || !privateKey) return null;
+    return {
+      client_email: clientEmail,
+      private_key: privateKey.replace(/\\n/g, '\n'),
+    };
+  }
 
   async getConfig() {
     const config = await this.prisma.googleAnalyticsConfig.findFirst({
@@ -94,6 +111,9 @@ export class AnalyticsGoogleService {
       serviceAccountEmail = parsed.client_email;
       savedPropertyId = propertyToTest;
     } else if (propertyId) {
+      if (this.getFirebaseEnvCredentials()) {
+        await this.testFirebaseCredentials(propertyId);
+      }
       savedPropertyId = propertyId;
     }
 
@@ -269,14 +289,23 @@ export class AnalyticsGoogleService {
     const config = await this.prisma.googleAnalyticsConfig.findFirst({
       orderBy: { createdAt: 'desc' },
     });
-    if (
-      !config ||
-      !config.isActive ||
-      !config.propertyId ||
-      !config.serviceAccountJsonEncrypted
-    ) {
+    if (!config || !config.isActive || !config.propertyId) {
       throw new NotFoundException(
-        'Google Analytics Data API не е конфигуриран. Моля задайте Property ID и Service Account JSON.',
+        'Google Analytics Data API не е конфигуриран. Моля задайте Property ID.',
+      );
+    }
+
+    const firebaseCreds = this.getFirebaseEnvCredentials();
+    if (firebaseCreds) {
+      return {
+        client: new BetaAnalyticsDataClient({ credentials: firebaseCreds }),
+        propertyId: config.propertyId,
+      };
+    }
+
+    if (!config.serviceAccountJsonEncrypted) {
+      throw new NotFoundException(
+        'Google Analytics Data API не е конфигуриран. Моля задайте Service Account JSON.',
       );
     }
     const json = decryptSecret(config.serviceAccountJsonEncrypted);
@@ -304,6 +333,25 @@ export class AnalyticsGoogleService {
       this.logger.error(`GA test failed: ${message}`);
       throw new BadRequestException(
         `Тестът на връзката с Google Analytics се провали: ${message}`,
+      );
+    }
+  }
+
+  private async testFirebaseCredentials(propertyId: string) {
+    const creds = this.getFirebaseEnvCredentials();
+    if (!creds) return;
+    try {
+      const client = new BetaAnalyticsDataClient({ credentials: creds });
+      await client.runReport({
+        property: `properties/${propertyId}`,
+        dateRanges: [{ startDate: '7daysAgo', endDate: 'today' }],
+        metrics: [{ name: 'activeUsers' }],
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`GA test (Firebase env) failed: ${message}`);
+      throw new BadRequestException(
+        `Тестът на връзката с Google Analytics (Firebase credentials) се провали: ${message}`,
       );
     }
   }
