@@ -130,6 +130,10 @@ export class CreateOrderDto {
   @IsOptional()
   currencyId?: string;
 
+  @IsString()
+  @IsOptional()
+  sourceOfferId?: string;
+
   @IsBoolean()
   @IsOptional()
   autoConfirm?: boolean;

@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 const mockPrisma = {
   ticket: { count: jest.fn() },
-  lead: { count: jest.fn(), findMany: jest.fn() },
+  customer: { count: jest.fn(), findMany: jest.fn() },
   deal: { count: jest.fn() },
   product: { count: jest.fn() },
   order: { count: jest.fn(), findMany: jest.fn() },
@@ -31,7 +31,7 @@ describe('DashboardService', () => {
     beforeEach(() => {
       // Default: all counts return 0
       mockPrisma.ticket.count.mockResolvedValue(0);
-      mockPrisma.lead.count.mockResolvedValue(0);
+      mockPrisma.customer.count.mockResolvedValue(0);
       mockPrisma.deal.count.mockResolvedValue(0);
       mockPrisma.product.count.mockResolvedValue(0);
       mockPrisma.order.count.mockResolvedValue(0);
@@ -61,7 +61,7 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(8);  // completedTicketsLastMonth
 
       // CRM
-      mockPrisma.lead.count.mockResolvedValue(0);
+      mockPrisma.customer.count.mockResolvedValue(0);
       mockPrisma.deal.count.mockResolvedValue(0);
 
       // ERP
@@ -90,7 +90,7 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(5)   // activeTicketsLastMonth
         .mockResolvedValueOnce(0);  // completedTicketsLastMonth
 
-      mockPrisma.lead.count.mockResolvedValue(0);
+      mockPrisma.customer.count.mockResolvedValue(0);
       mockPrisma.deal.count.mockResolvedValue(0);
       mockPrisma.product.count.mockResolvedValue(0);
       mockPrisma.order.count.mockResolvedValue(0);
@@ -110,7 +110,7 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0)   // activeTicketsLastMonth = 0
         .mockResolvedValueOnce(0);
 
-      mockPrisma.lead.count.mockResolvedValue(0);
+      mockPrisma.customer.count.mockResolvedValue(0);
       mockPrisma.deal.count.mockResolvedValue(0);
       mockPrisma.product.count.mockResolvedValue(0);
       mockPrisma.order.count.mockResolvedValue(0);
@@ -130,7 +130,7 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0)   // activeTicketsLastMonth = 0
         .mockResolvedValueOnce(0);
 
-      mockPrisma.lead.count.mockResolvedValue(0);
+      mockPrisma.customer.count.mockResolvedValue(0);
       mockPrisma.deal.count.mockResolvedValue(0);
       mockPrisma.product.count.mockResolvedValue(0);
       mockPrisma.order.count.mockResolvedValue(0);
@@ -143,7 +143,7 @@ describe('DashboardService', () => {
 
     it('should return correct ERP stats (products and orders)', async () => {
       mockPrisma.ticket.count.mockResolvedValue(0);
-      mockPrisma.lead.count.mockResolvedValue(0);
+      mockPrisma.customer.count.mockResolvedValue(0);
       mockPrisma.deal.count.mockResolvedValue(0);
       mockPrisma.product.count.mockResolvedValue(25);
       mockPrisma.order.count
@@ -161,7 +161,7 @@ describe('DashboardService', () => {
 
     it('should return correct CRM stats', async () => {
       mockPrisma.ticket.count.mockResolvedValue(0);
-      mockPrisma.lead.count
+      mockPrisma.customer.count
         .mockResolvedValueOnce(50)   // totalContacts
         .mockResolvedValueOnce(5);   // newContactsThisMonth
       mockPrisma.deal.count.mockResolvedValue(20);
@@ -172,14 +172,14 @@ describe('DashboardService', () => {
 
       const result = await service.getDashboardStats('c1', 'u1');
 
-      expect(result.modules.crm.contacts).toBe(50);
+      expect(result.modules.crm.leads).toBe(50);
       expect(result.modules.crm.deals).toBe(20);
-      expect(result.modules.crm.newContactsThisMonth).toBe(5);
+      expect(result.modules.crm.newLeadsThisMonth).toBe(5);
     });
 
     it('should return correct HR stats', async () => {
       mockPrisma.ticket.count.mockResolvedValue(0);
-      mockPrisma.lead.count.mockResolvedValue(0);
+      mockPrisma.customer.count.mockResolvedValue(0);
       mockPrisma.deal.count.mockResolvedValue(0);
       mockPrisma.product.count.mockResolvedValue(0);
       mockPrisma.order.count.mockResolvedValue(0);
@@ -201,7 +201,7 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
 
-      mockPrisma.lead.count.mockResolvedValue(0);
+      mockPrisma.customer.count.mockResolvedValue(0);
       mockPrisma.deal.count.mockResolvedValue(0);
       mockPrisma.product.count.mockResolvedValue(0);
       mockPrisma.order.count.mockResolvedValue(0);
@@ -224,7 +224,7 @@ describe('DashboardService', () => {
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(10); // completedTicketsLastMonth = 10
 
-      mockPrisma.lead.count.mockResolvedValue(0);
+      mockPrisma.customer.count.mockResolvedValue(0);
       mockPrisma.deal.count.mockResolvedValue(0);
       mockPrisma.product.count.mockResolvedValue(0);
       mockPrisma.order.count.mockResolvedValue(0);
@@ -242,7 +242,7 @@ describe('DashboardService', () => {
       const date2 = new Date('2026-02-21T10:00:00Z');
       const date3 = new Date('2026-02-19T10:00:00Z');
 
-      mockPrisma.lead.findMany.mockResolvedValue([
+      mockPrisma.customer.findMany.mockResolvedValue([
         { id: 'c1', firstName: 'John', lastName: 'Doe', createdAt: date1 },
       ]);
       mockPrisma.order.findMany.mockResolvedValue([
@@ -265,7 +265,7 @@ describe('DashboardService', () => {
     });
 
     it('should mark DELIVERED orders as order_completed', async () => {
-      mockPrisma.lead.findMany.mockResolvedValue([]);
+      mockPrisma.customer.findMany.mockResolvedValue([]);
       mockPrisma.order.findMany.mockResolvedValue([
         { id: 'o1', orderNumber: 'ORD-001', status: 'DELIVERED', createdAt: new Date() },
       ]);
@@ -276,7 +276,7 @@ describe('DashboardService', () => {
     });
 
     it('should mark tickets with assignee as ticket_assigned', async () => {
-      mockPrisma.lead.findMany.mockResolvedValue([]);
+      mockPrisma.customer.findMany.mockResolvedValue([]);
       mockPrisma.order.findMany.mockResolvedValue([]);
       mockPrisma.ticket.findMany.mockResolvedValue([
         { id: 't1', ticketNumber: 'T-001', title: 'Task', status: 'IN_PROGRESS', assignee: { firstName: 'A', lastName: 'B' }, createdAt: new Date() },
@@ -290,7 +290,7 @@ describe('DashboardService', () => {
       const items = Array.from({ length: 5 }, (_, i) => ({
         id: `c${i}`, firstName: 'F', lastName: 'L', createdAt: new Date(Date.now() - i * 1000),
       }));
-      mockPrisma.lead.findMany.mockResolvedValue(items);
+      mockPrisma.customer.findMany.mockResolvedValue(items);
       mockPrisma.order.findMany.mockResolvedValue([]);
       mockPrisma.ticket.findMany.mockResolvedValue([]);
 
@@ -299,7 +299,7 @@ describe('DashboardService', () => {
     });
 
     it('should handle empty results', async () => {
-      mockPrisma.lead.findMany.mockResolvedValue([]);
+      mockPrisma.customer.findMany.mockResolvedValue([]);
       mockPrisma.order.findMany.mockResolvedValue([]);
       mockPrisma.ticket.findMany.mockResolvedValue([]);
 

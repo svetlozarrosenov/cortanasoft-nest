@@ -101,16 +101,6 @@ export class CompanyOffersController {
     return this.offersService.cancel(companyId, id);
   }
 
-  @Post(':id/convert-to-order')
-  @RequireCreate('erp', 'orders')
-  convertToOrder(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-    @Request() req: any,
-  ) {
-    return this.offersService.convertToOrder(companyId, id, req.user.id);
-  }
-
   @Delete(':id')
   @RequireDelete('erp', 'offers')
   remove(

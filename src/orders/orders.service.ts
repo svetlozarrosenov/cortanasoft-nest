@@ -192,6 +192,7 @@ export class OrdersService {
           total,
           notes: dto.notes,
           currencyId,
+          sourceOfferId: dto.sourceOfferId,
           companyId,
           locationId: dto.locationId,
           createdById: userId,

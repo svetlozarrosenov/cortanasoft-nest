@@ -45,10 +45,6 @@ export class CreateDealDto {
 
   @IsOptional()
   @IsString()
-  leadId?: string;
-
-  @IsOptional()
-  @IsString()
   assignedToId?: string;
 
   @IsOptional()

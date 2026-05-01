@@ -62,16 +62,16 @@ export class DashboardService {
       }),
     ]);
 
-    // Get CRM stats
-    const [totalContacts, totalDeals, newContactsThisMonth] = await Promise.all(
-      [
-        this.prisma.lead.count({ where: { companyId } }),
-        this.prisma.deal.count({ where: { companyId } }),
-        this.prisma.lead.count({
-          where: { companyId, createdAt: { gte: startOfMonth } },
-        }),
-      ],
-    );
+    // Get CRM stats — leads = customers in LEAD stage; clients = CLIENT stage
+    const [totalLeads, totalDeals, newLeadsThisMonth] = await Promise.all([
+      this.prisma.customer.count({
+        where: { companyId, stage: 'LEAD' },
+      }),
+      this.prisma.deal.count({ where: { companyId } }),
+      this.prisma.customer.count({
+        where: { companyId, stage: 'LEAD', createdAt: { gte: startOfMonth } },
+      }),
+    ]);
 
     // Get ERP stats
     const [totalProducts, totalOrders, ordersThisMonth] = await Promise.all([
@@ -206,9 +206,9 @@ export class DashboardService {
       },
       modules: {
         crm: {
-          contacts: totalContacts,
+          leads: totalLeads,
           deals: totalDeals,
-          newContactsThisMonth,
+          newLeadsThisMonth,
         },
         erp: {
           products: totalProducts,
@@ -237,16 +237,17 @@ export class DashboardService {
 
   async getRecentActivity(companyId: string, limit = 10) {
     // Get recent activities from various sources
-    const [recentContacts, recentOrders, recentTickets] = await Promise.all([
-      // Recent contacts
-      this.prisma.lead.findMany({
-        where: { companyId },
+    const [recentLeads, recentOrders, recentTickets] = await Promise.all([
+      // Recent leads (customers in LEAD stage)
+      this.prisma.customer.findMany({
+        where: { companyId, stage: 'LEAD' },
         orderBy: { createdAt: 'desc' },
         take: 5,
         select: {
           id: true,
           firstName: true,
           lastName: true,
+          companyName: true,
           createdAt: true,
         },
       }),
@@ -287,10 +288,15 @@ export class DashboardService {
       data: Record<string, any>;
       createdAt: Date;
     }> = [
-      ...recentContacts.map((c) => ({
-        type: 'contact_created' as const,
+      ...recentLeads.map((c) => ({
+        type: 'lead_created' as const,
         id: c.id,
-        data: { name: `${c.firstName} ${c.lastName}` },
+        data: {
+          name:
+            c.companyName ||
+            [c.firstName, c.lastName].filter(Boolean).join(' ') ||
+            '—',
+        },
         createdAt: c.createdAt,
       })),
       ...recentOrders.map((o) => ({

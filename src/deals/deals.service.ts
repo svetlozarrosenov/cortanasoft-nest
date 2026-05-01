@@ -21,15 +21,6 @@ const DEAL_INCLUDE = {
       phone: true,
     },
   },
-  lead: {
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      phone: true,
-    },
-  },
   currency: true,
   assignedTo: {
     select: {
@@ -183,27 +174,6 @@ export class DealsService {
             vatNumber: true,
             molName: true,
             notes: true,
-          },
-        },
-        lead: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            phone: true,
-            mobile: true,
-            jobTitle: true,
-            department: true,
-            linkedIn: true,
-            customer: {
-              select: {
-                id: true,
-                companyName: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
           },
         },
         currency: true,

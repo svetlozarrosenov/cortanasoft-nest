@@ -16,6 +16,8 @@ import { InvoicesService } from './invoices.service';
 import {
   CreateInvoiceDto,
   CreateProformaDto,
+  CreateAdvanceInvoiceDto,
+  CreateFinalInvoiceDto,
   UpdateInvoiceDto,
   QueryInvoicesDto,
   RecordPaymentDto,
@@ -59,6 +61,26 @@ export class CompanyInvoicesController {
     @Body() dto: CreateProformaDto,
   ) {
     return this.invoicesService.createProforma(companyId, user.id, dto);
+  }
+
+  @Post('advance')
+  @RequireCreate('erp', 'invoices')
+  createAdvance(
+    @Param('companyId') companyId: string,
+    @CurrentUser() user: any,
+    @Body() dto: CreateAdvanceInvoiceDto,
+  ) {
+    return this.invoicesService.createAdvance(companyId, user.id, dto);
+  }
+
+  @Post('final')
+  @RequireCreate('erp', 'invoices')
+  createFinal(
+    @Param('companyId') companyId: string,
+    @CurrentUser() user: any,
+    @Body() dto: CreateFinalInvoiceDto,
+  ) {
+    return this.invoicesService.createFinal(companyId, user.id, dto);
   }
 
   @Get()

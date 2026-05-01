@@ -143,7 +143,6 @@ async function cleanup() {
     await prisma.chatRoom.deleteMany({ where: { companyId: c.id } });
     await prisma.dealTask.deleteMany({ where: { companyId: c.id } });
     await prisma.deal.deleteMany({ where: { companyId: c.id } });
-    await prisma.lead.deleteMany({ where: { companyId: c.id } });
     await prisma.customer.deleteMany({ where: { companyId: c.id } });
     await prisma.supplier.deleteMany({ where: { companyId: c.id } });
     await prisma.storageZone.deleteMany({ where: { location: { companyId: c.id } } });

@@ -94,14 +94,6 @@ export class CustomersService {
       },
     });
 
-    // Link the lead to the new customer
-    if (dto.leadId) {
-      await this.prisma.lead.updateMany({
-        where: { id: dto.leadId, companyId, customerId: null },
-        data: { customerId: customer.id },
-      });
-    }
-
     return customer;
   }
 
@@ -257,6 +249,14 @@ export class CustomersService {
         ...(dto.creditLimit !== undefined && { creditLimit: dto.creditLimit }),
         ...(dto.discount !== undefined && { discount: dto.discount }),
         ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+        ...(dto.stage !== undefined && { stage: dto.stage }),
+        ...(dto.source !== undefined && { source: dto.source }),
+        ...(dto.industry !== undefined && { industry: dto.industry }),
+        ...(dto.size !== undefined && { size: dto.size }),
+        ...(dto.website !== undefined && { website: dto.website }),
+        ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.tags !== undefined && { tags: dto.tags }),
+        ...(dto.assignedToId !== undefined && { assignedToId: dto.assignedToId }),
       },
       include: {
         country: true,

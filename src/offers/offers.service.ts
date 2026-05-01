@@ -397,10 +397,18 @@ export class OffersService {
         'Може да приемете само изпратени оферти',
       );
     }
-    return this.prisma.offer.update({
-      where: { id },
-      data: { status: 'ACCEPTED' },
-      include: OFFER_INCLUDE,
+    return this.prisma.$transaction(async (tx) => {
+      if (offer.customer && offer.customer.stage === 'LEAD') {
+        await tx.customer.update({
+          where: { id: offer.customer.id },
+          data: { stage: 'CLIENT' },
+        });
+      }
+      return tx.offer.update({
+        where: { id },
+        data: { status: 'ACCEPTED' },
+        include: OFFER_INCLUDE,
+      });
     });
   }
 
@@ -445,88 +453,4 @@ export class OffersService {
     return this.prisma.offer.delete({ where: { id } });
   }
 
-  async convertToOrder(companyId: string, id: string, userId: string) {
-    const offer = await this.findOne(companyId, id);
-
-    if (offer.status !== 'ACCEPTED' && offer.status !== 'SENT') {
-      throw new BadRequestException(
-        'Може да конвертирате само изпратени или приети оферти',
-      );
-    }
-
-    // Block duplicate order creation from the same offer (unique FK enforces this at DB level too)
-    const existing = await this.prisma.order.findUnique({
-      where: { sourceOfferId: id },
-      select: { id: true, orderNumber: true },
-    });
-    if (existing) {
-      throw new BadRequestException(
-        `Вече има поръчка (${existing.orderNumber}) от тази оферта`,
-      );
-    }
-
-    // Free-text offer items (no productId) cannot be mapped to order items — skip them.
-    // They are prose descriptions; the descriptive content is already in richDescription.
-    const convertibleItems = offer.items.filter((item) => item.productId);
-    if (convertibleItems.length === 0) {
-      throw new BadRequestException(
-        'Няма продукти с productId в офертата — не може да се създаде поръчка',
-      );
-    }
-
-    // Mark as accepted if it was sent
-    if (offer.status === 'SENT') {
-      await this.prisma.offer.update({
-        where: { id },
-        data: { status: 'ACCEPTED' },
-      });
-    }
-
-    // Generate order number (inside transaction below)
-    return this.prisma.$transaction(async (tx) => {
-      const year = new Date().getFullYear();
-      const prefix = `ORD-${year}-`;
-      const count = await tx.order.count({
-        where: { companyId, orderNumber: { startsWith: prefix } },
-      });
-      const orderNumber = `${prefix}${(count + 1).toString().padStart(5, '0')}`;
-
-      return tx.order.create({
-        data: {
-          orderNumber,
-          status: 'DRAFT',
-          customerId: offer.customerId,
-          customerName: offer.customerName,
-          customerEmail: offer.customerEmail,
-          customerPhone: offer.customerPhone,
-          shippingAddress: offer.customerAddress,
-          shippingCity: offer.customerCity,
-          shippingPostalCode: offer.customerPostalCode,
-          subtotal: offer.subtotal,
-          vatAmount: offer.vatAmount,
-          discount: offer.discount,
-          total: offer.total,
-          notes: `От оферта ${offer.offerNumber}`,
-          currencyId: offer.currencyId,
-          sourceOfferId: id,
-          companyId,
-          createdById: userId,
-          items: {
-            create: convertibleItems.map((item) => ({
-              productId: item.productId!,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              vatRate: item.vatRate,
-              discount: item.discount,
-              subtotal: item.total,
-            })),
-          },
-        },
-        include: {
-          items: { include: { product: true } },
-          customer: true,
-        },
-      });
-    });
-  }
 }

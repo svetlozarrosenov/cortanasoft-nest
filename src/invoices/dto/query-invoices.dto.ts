@@ -19,8 +19,12 @@ export class QueryInvoicesDto {
   status?: InvoiceStatus;
 
   @IsOptional()
-  @IsIn(['REGULAR', 'PROFORMA', 'CREDIT_NOTE'])
+  @IsIn(['REGULAR', 'PROFORMA', 'ADVANCE', 'FINAL', 'CREDIT_NOTE'])
   type?: InvoiceType;
+
+  @IsOptional()
+  @IsString()
+  types?: string;
 
   @IsOptional()
   @IsString()
