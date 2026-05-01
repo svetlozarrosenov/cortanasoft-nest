@@ -54,11 +54,7 @@ export class AnalyticsGoogleService {
 
     const existing = await this.prisma.googleAnalyticsConfig.findFirst();
 
-    const dataApiProvided = !!propertyId || !!serviceAccountJson;
-    const dataApiComplete = !!propertyId && !!serviceAccountJson;
-    const dataApiAlreadySaved = !!existing?.serviceAccountJsonEncrypted;
-
-    if (!measurementId && !propertyId && !dataApiAlreadySaved) {
+    if (!measurementId && !propertyId && !serviceAccountJson && !existing) {
       throw new BadRequestException(
         'Въведете поне Measurement ID или Data API конфигурация',
       );
@@ -68,47 +64,37 @@ export class AnalyticsGoogleService {
     let encryptedJson = existing?.serviceAccountJsonEncrypted ?? null;
     let savedPropertyId = existing?.propertyId ?? null;
 
-    if (dataApiProvided) {
-      if (!dataApiComplete && !dataApiAlreadySaved) {
+    if (serviceAccountJson) {
+      let parsed: ServiceAccountJson;
+      try {
+        parsed = JSON.parse(serviceAccountJson);
+      } catch {
+        throw new BadRequestException('Невалиден JSON за service account');
+      }
+      if (
+        !parsed.client_email ||
+        !parsed.private_key ||
+        parsed.type !== 'service_account'
+      ) {
         throw new BadRequestException(
-          'За Data API трябва и Property ID, и Service Account JSON',
+          'JSON-ът не изглежда като валиден Google service account ключ',
         );
       }
 
-      if (serviceAccountJson) {
-        let parsed: ServiceAccountJson;
-        try {
-          parsed = JSON.parse(serviceAccountJson);
-        } catch {
-          throw new BadRequestException('Невалиден JSON за service account');
-        }
-        if (
-          !parsed.client_email ||
-          !parsed.private_key ||
-          parsed.type !== 'service_account'
-        ) {
-          throw new BadRequestException(
-            'JSON-ът не изглежда като валиден Google service account ключ',
-          );
-        }
-
-        const propertyToTest = propertyId || existing?.propertyId;
-        if (!propertyToTest) {
-          throw new BadRequestException('Property ID е задължителен');
-        }
-
-        await this.testCredentials(propertyToTest, serviceAccountJson);
-
-        encryptedJson = encryptSecret(serviceAccountJson);
-        serviceAccountEmail = parsed.client_email;
-        savedPropertyId = propertyToTest;
-      } else if (propertyId) {
-        savedPropertyId = propertyId;
+      const propertyToTest = propertyId || existing?.propertyId;
+      if (!propertyToTest) {
+        throw new BadRequestException(
+          'За Service Account JSON трябва и Property ID',
+        );
       }
-    } else if (propertyId === null && !dataApiAlreadySaved) {
-      savedPropertyId = null;
-      encryptedJson = null;
-      serviceAccountEmail = null;
+
+      await this.testCredentials(propertyToTest, serviceAccountJson);
+
+      encryptedJson = encryptSecret(serviceAccountJson);
+      serviceAccountEmail = parsed.client_email;
+      savedPropertyId = propertyToTest;
+    } else if (propertyId) {
+      savedPropertyId = propertyId;
     }
 
     const data = {
