@@ -7,7 +7,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { WordPressService } from '../wordpress/wordpress.service';
 import { CloudCartService } from '../cloudcart/cloudcart.service';
 import { CreateProductDto, UpdateProductDto, QueryProductsDto } from './dto';
-import { Prisma } from '@prisma/client';
+import { Prisma, ProductType } from '@prisma/client';
+
+const SKU_PREFIX_BY_TYPE: Record<ProductType, string> = {
+  PRODUCT: 'PRD',
+  SERVICE: 'SRV',
+  BATCH: 'BAT',
+  SERIAL: 'SRL',
+};
 
 @Injectable()
 export class ProductsService {
@@ -17,77 +24,105 @@ export class ProductsService {
     private cloudCartService: CloudCartService,
   ) {}
 
-  async create(companyId: string, userId: string, dto: CreateProductDto) {
-    // Проверка за дублиран SKU в компанията
-    const existingProduct = await this.prisma.product.findUnique({
+  private async generateSku(
+    companyId: string,
+    type: ProductType,
+    tx?: Prisma.TransactionClient,
+  ): Promise<string> {
+    const client = tx || this.prisma;
+    const year = new Date().getFullYear();
+    const prefix = `${SKU_PREFIX_BY_TYPE[type]}-${year}-`;
+
+    const lastProduct = await client.product.findFirst({
       where: {
-        companyId_sku: {
-          companyId,
-          sku: dto.sku,
-        },
+        companyId,
+        sku: { startsWith: prefix },
       },
+      orderBy: { sku: 'desc' },
     });
 
-    if (existingProduct) {
-      throw new ConflictException(
-        `Продукт с артикулен номер "${dto.sku}" вече съществува`,
-      );
+    let nextNumber = 1;
+    if (lastProduct) {
+      const lastNumber = parseInt(lastProduct.sku.split('-').pop() || '0');
+      if (!isNaN(lastNumber)) {
+        nextNumber = lastNumber + 1;
+      }
     }
 
-    // Проверка дали категорията съществува и принадлежи на компанията
-    if (dto.categoryId) {
-      const category = await this.prisma.productCategory.findFirst({
+    return `${prefix}${nextNumber.toString().padStart(5, '0')}`;
+  }
+
+  async create(companyId: string, userId: string, dto: CreateProductDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const productType = dto.type ?? ProductType.PRODUCT;
+
+      const sku = dto.sku?.trim()
+        ? dto.sku.trim()
+        : await this.generateSku(companyId, productType, tx);
+
+      // Проверка за дублиран SKU в компанията (важи и за user-supplied, и за edge case на auto-generated)
+      const existingProduct = await tx.product.findUnique({
         where: {
-          id: dto.categoryId,
-          companyId,
+          companyId_sku: { companyId, sku },
         },
       });
 
-      if (!category) {
-        throw new NotFoundException('Категорията не е намерена');
+      if (existingProduct) {
+        throw new ConflictException(
+          `Продукт с артикулен номер "${sku}" вече съществува`,
+        );
       }
-    }
 
-    // Ако не е зададена ДДС ставка или валута, определяме по данните на компанията
-    if (
-      dto.vatRate === undefined ||
-      !dto.purchaseCurrencyId ||
-      !dto.saleCurrencyId
-    ) {
-      const company = await this.prisma.company.findUnique({
-        where: { id: companyId },
-        select: { vatNumber: true, currencyId: true },
-      });
-      if (dto.vatRate === undefined) {
-        dto.vatRate = company?.vatNumber ? 20 : 0;
-      }
-      if (!dto.purchaseCurrencyId && company?.currencyId) {
-        dto.purchaseCurrencyId = company.currencyId;
-      }
-      if (!dto.saleCurrencyId && company?.currencyId) {
-        dto.saleCurrencyId = company.currencyId;
-      }
-    }
+      // Проверка дали категорията съществува и принадлежи на компанията
+      if (dto.categoryId) {
+        const category = await tx.productCategory.findFirst({
+          where: { id: dto.categoryId, companyId },
+        });
 
-    return this.prisma.product.create({
-      data: {
-        ...dto,
-        companyId,
-        createdById: userId,
-      },
-      include: {
-        category: true,
-        warrantyTemplate: true,
-        purchaseCurrency: true,
-        saleCurrency: true,
-        createdBy: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
+        if (!category) {
+          throw new NotFoundException('Категорията не е намерена');
+        }
+      }
+
+      // Ако не е зададена ДДС ставка или валута, определяме по данните на компанията
+      if (
+        dto.vatRate === undefined ||
+        !dto.purchaseCurrencyId ||
+        !dto.saleCurrencyId
+      ) {
+        const company = await tx.company.findUnique({
+          where: { id: companyId },
+          select: { vatNumber: true, currencyId: true },
+        });
+        if (dto.vatRate === undefined) {
+          dto.vatRate = company?.vatNumber ? 20 : 0;
+        }
+        if (!dto.purchaseCurrencyId && company?.currencyId) {
+          dto.purchaseCurrencyId = company.currencyId;
+        }
+        if (!dto.saleCurrencyId && company?.currencyId) {
+          dto.saleCurrencyId = company.currencyId;
+        }
+      }
+
+      return tx.product.create({
+        data: {
+          ...dto,
+          sku,
+          type: productType,
+          companyId,
+          createdById: userId,
+        },
+        include: {
+          category: true,
+          warrantyTemplate: true,
+          purchaseCurrency: true,
+          saleCurrency: true,
+          createdBy: {
+            select: { id: true, firstName: true, lastName: true },
           },
         },
-      },
+      });
     });
   }
 

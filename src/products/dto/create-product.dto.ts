@@ -11,8 +11,9 @@ import { Unit, ProductType } from '@prisma/client';
 
 export class CreateProductDto {
   @IsString()
+  @IsOptional()
   @MaxLength(50)
-  sku: string;
+  sku?: string;
 
   @IsString()
   @IsOptional()
