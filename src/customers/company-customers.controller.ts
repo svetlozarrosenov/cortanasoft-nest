@@ -46,11 +46,11 @@ export class CompanyCustomersController {
 
   @Get()
   @RequireView('crm', 'customers')
-  findAll(
+  async findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryCustomersDto,
   ) {
-    return this.customersService.findAll(companyId, query);
+    return await this.customersService.findAll(companyId, query);
   }
 
   @Get('export')

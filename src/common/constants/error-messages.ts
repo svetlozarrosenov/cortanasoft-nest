@@ -100,19 +100,12 @@ export const ErrorMessages = {
   },
 
   // ==================== Приемо-предавателни протоколи ====================
-  handoverProtocols: {
+  acceptanceProtocols: {
     notFound: 'Приемо-предавателният протокол не е намерен',
     orderNotFound: 'Поръчката не е намерена',
-    canOnlyCreateFromConfirmed: 'Може да издавате протокол само за потвърдени поръчки',
     mustHaveItems: 'Протоколът трябва да съдържа поне един артикул',
-    quantityExceedsRemainder: (item: string) => `Количеството за "${item}" надвишава неприетото количество`,
     quantityMustBePositive: 'Количеството трябва да е положително число',
-    receivedByNameRequired: 'Името на приемащото лице е задължително',
-    orderItemNotFound: 'Артикул от поръчката не е намерен',
-    orderItemNotInOrder: 'Артикулът не принадлежи на тази поръчка',
     alreadyCancelled: 'Протоколът вече е анулиран',
-    serialCountMismatch: (item: string) => `Броят серийни номера за "${item}" трябва да съвпада с количеството`,
-    fullyDelivered: 'Поръчката вече е напълно предадена',
   },
 
   // ==================== Инвентар ====================

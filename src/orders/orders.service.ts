@@ -30,55 +30,19 @@ const ORDER_INCLUDE = {
       location: true,
     },
   },
-  handoverProtocols: {
+  acceptanceProtocols: {
     where: { status: { not: 'CANCELLED' as const } },
-    select: {
-      id: true,
-      items: { select: { orderItemId: true, quantity: true } },
-    },
+    select: { id: true, documentNumber: true },
   },
   _count: { select: { items: true, invoices: true } },
 } as const;
 
 type OrderForStatus = {
-  items: Array<{ id: string; quantity: any }>;
-  handoverProtocols?: Array<{
-    items: Array<{ orderItemId: string; quantity: any }>;
-  }>;
+  acceptanceProtocols?: Array<{ id: string }>;
 };
 
-/**
- * Computes delivery status based on non-cancelled handover protocols:
- * - NONE: no items delivered
- * - PARTIAL: some items delivered but not all
- * - FULL: all order items fully delivered
- */
-function computeDeliveryStatus(order: OrderForStatus): 'NONE' | 'PARTIAL' | 'FULL' {
-  const protocols = order.handoverProtocols || [];
-  if (protocols.length === 0) return 'NONE';
-
-  const deliveredByItem = new Map<string, number>();
-  for (const p of protocols) {
-    for (const it of p.items) {
-      deliveredByItem.set(
-        it.orderItemId,
-        (deliveredByItem.get(it.orderItemId) || 0) + Number(it.quantity),
-      );
-    }
-  }
-
-  let allFull = true;
-  let anyDelivered = false;
-  const EPSILON = 0.001;
-  for (const oi of order.items) {
-    const ordered = Number(oi.quantity);
-    const delivered = deliveredByItem.get(oi.id) || 0;
-    if (delivered > EPSILON) anyDelivered = true;
-    if (delivered + EPSILON < ordered) allFull = false;
-  }
-
-  if (!anyDelivered) return 'NONE';
-  return allFull ? 'FULL' : 'PARTIAL';
+function computeDeliveryStatus(order: OrderForStatus): 'NONE' | 'FULL' {
+  return (order.acceptanceProtocols?.length ?? 0) > 0 ? 'FULL' : 'NONE';
 }
 
 @Injectable()

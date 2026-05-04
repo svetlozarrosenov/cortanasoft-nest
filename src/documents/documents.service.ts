@@ -10,7 +10,9 @@ const ENTITY_TYPE_MAP = {
   goodsReceipt: 'goodsReceiptId',
   invoice: 'invoiceId',
   expense: 'expenseId',
-  stockDocument: 'stockDocumentId',
+  stockReceipt: 'stockReceiptId',
+  acceptanceProtocol: 'acceptanceProtocolId',
+  ascertainmentProtocol: 'ascertainmentProtocolId',
 } as const;
 
 type EntityType = keyof typeof ENTITY_TYPE_MAP;
@@ -19,7 +21,9 @@ const ENTITY_MODEL_MAP: Record<EntityType, string> = {
   goodsReceipt: 'goodsReceipt',
   invoice: 'invoice',
   expense: 'expense',
-  stockDocument: 'stockDocument',
+  stockReceipt: 'stockReceipt',
+  acceptanceProtocol: 'acceptanceProtocol',
+  ascertainmentProtocol: 'ascertainmentProtocol',
 };
 
 @Injectable()

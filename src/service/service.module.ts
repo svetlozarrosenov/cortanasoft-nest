@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
-import { StockDocumentsModule } from '../stock-documents/stock-documents.module';
+import { AcceptanceProtocolsModule } from '../acceptance-protocols/acceptance-protocols.module';
+import { AscertainmentProtocolsModule } from '../ascertainment-protocols/ascertainment-protocols.module';
 import { ServiceNumberingService } from './service-numbering.service';
 import { ServiceOrdersService } from './service-orders.service';
 import { ServiceAssetsService } from './service-assets.service';
@@ -14,7 +15,7 @@ import { CompanyServiceContractsController } from './company-service-contracts.c
 import { ServicePublicController } from './service-public.controller';
 
 @Module({
-  imports: [PrismaModule, StockDocumentsModule],
+  imports: [PrismaModule, AcceptanceProtocolsModule, AscertainmentProtocolsModule],
   controllers: [
     CompanyServiceOrdersController,
     CompanyServiceAssetsController,

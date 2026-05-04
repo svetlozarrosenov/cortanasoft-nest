@@ -34,7 +34,9 @@ import { ErpAnalyticsModule } from './erp-analytics/erp-analytics.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { DocumentsModule } from './documents/documents.module';
-import { StockDocumentsModule } from './stock-documents/stock-documents.module';
+import { StockReceiptsModule } from './stock-receipts/stock-receipts.module';
+import { AcceptanceProtocolsModule } from './acceptance-protocols/acceptance-protocols.module';
+import { AscertainmentProtocolsModule } from './ascertainment-protocols/ascertainment-protocols.module';
 import { ExportModule } from './common/export/export.module';
 import { BOMModule } from './bom/bom.module';
 import { ProductionModule } from './production/production.module';
@@ -51,7 +53,6 @@ import { PaymentsModule } from './payments/payments.module';
 import { AnalyticsGoogleModule } from './analytics-google/analytics-google.module';
 import { MetaPixelModule } from './meta-pixel/meta-pixel.module';
 import { ServiceModule } from './service/service.module';
-import { HandoverProtocolsModule } from './handover-protocols/handover-protocols.module';
 
 @Module({
   imports: [
@@ -104,7 +105,9 @@ import { HandoverProtocolsModule } from './handover-protocols/handover-protocols
     ExpensesModule,
     UploadsModule,
     DocumentsModule,
-    StockDocumentsModule,
+    StockReceiptsModule,
+    AcceptanceProtocolsModule,
+    AscertainmentProtocolsModule,
     ExportModule,
     BOMModule,
     ProductionModule,
@@ -121,7 +124,6 @@ import { HandoverProtocolsModule } from './handover-protocols/handover-protocols
     AnalyticsGoogleModule,
     MetaPixelModule,
     ServiceModule,
-    HandoverProtocolsModule,
   ],
   controllers: [],
   providers: [],

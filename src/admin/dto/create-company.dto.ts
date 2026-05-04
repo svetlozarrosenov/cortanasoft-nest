@@ -126,7 +126,15 @@ export class CreateCompanyDto {
 
   @IsString()
   @IsOptional()
-  stockDocumentTemplateKey?: string;
+  stockReceiptTemplateKey?: string;
+
+  @IsString()
+  @IsOptional()
+  acceptanceProtocolTemplateKey?: string;
+
+  @IsString()
+  @IsOptional()
+  ascertainmentProtocolTemplateKey?: string;
 
   // Системни полета
   @IsEnum(CompanyRole)

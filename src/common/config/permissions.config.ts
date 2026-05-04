@@ -273,13 +273,13 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
-        key: 'stockDocuments',
-        labelKey: 'modules.erp.stockDocuments',
+        key: 'protocols',
+        labelKey: 'modules.erp.protocols',
         actions: ['view', 'create', 'edit', 'delete'],
         tables: [
           {
-            key: 'stockDocumentsList',
-            labelKey: 'modules.erp.stockDocumentsList',
+            key: 'protocolsList',
+            labelKey: 'modules.erp.protocolsList',
             columns: [
               { key: 'documentNumber', labelKey: 'modules.erp.documentNumber' },
               { key: 'type', labelKey: 'common.type' },
@@ -290,11 +290,6 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
             ],
           },
         ],
-      },
-      {
-        key: 'handoverProtocols',
-        labelKey: 'modules.erp.handoverProtocols',
-        actions: ['view', 'create', 'edit', 'delete'],
       },
       {
         key: 'analytics',

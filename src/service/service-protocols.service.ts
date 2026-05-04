@@ -4,7 +4,8 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { StockDocumentsService } from '../stock-documents/stock-documents.service';
+import { AcceptanceProtocolsService } from '../acceptance-protocols/acceptance-protocols.service';
+import { AscertainmentProtocolsService } from '../ascertainment-protocols/ascertainment-protocols.service';
 
 type ProtocolKind = 'intake' | 'handover' | 'ascertainment';
 
@@ -12,7 +13,8 @@ type ProtocolKind = 'intake' | 'handover' | 'ascertainment';
 export class ServiceProtocolsService {
   constructor(
     private prisma: PrismaService,
-    private stockDocuments: StockDocumentsService,
+    private acceptanceProtocols: AcceptanceProtocolsService,
+    private ascertainmentProtocols: AscertainmentProtocolsService,
   ) {}
 
   async issue(
@@ -45,8 +47,7 @@ export class ServiceProtocolsService {
         );
       }
 
-      const doc = await this.stockDocuments.create(companyId, userId || '', {
-        type: 'ASCERTAINMENT_PROTOCOL',
+      return this.ascertainmentProtocols.create(companyId, userId || '', {
         customerId: customer.id,
         recipientName,
         recipientEik: customer.eik || undefined,
@@ -57,13 +58,9 @@ export class ServiceProtocolsService {
         conclusion,
         commissionMembers: extra?.commissionMembers || [],
         serviceOrderId: order.id,
-        items: [],
       });
-
-      return doc;
     }
 
-    // INTAKE / HANDOVER → ACCEPTANCE_PROTOCOL
     const isIntake = kind === 'intake';
     const assetLine = order.asset
       ? `${order.asset.name}${order.asset.brand ? ' ' + order.asset.brand : ''}${
@@ -106,32 +103,51 @@ export class ServiceProtocolsService {
           },
         ];
 
-    return this.stockDocuments.create(companyId, userId || '', {
-      type: 'ACCEPTANCE_PROTOCOL',
+    return this.acceptanceProtocols.create(companyId, userId || '', {
       customerId: customer.id,
       recipientName,
       recipientEik: customer.eik || undefined,
       recipientAddress: customer.address || undefined,
       recipientCity: customer.city || undefined,
-      subject: `${isIntake ? 'Приемен' : 'Предавателен'} протокол по сервизна заявка ${order.orderNumber}`,
       serviceOrderId: order.id,
+      notes: `${isIntake ? 'Приемен' : 'Предавателен'} протокол по сервизна заявка ${order.orderNumber}`,
       items,
     });
   }
 
   async listForOrder(companyId: string, serviceOrderId: string) {
-    return this.prisma.stockDocument.findMany({
-      where: { companyId, serviceOrderId },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        documentNumber: true,
-        documentDate: true,
-        type: true,
-        status: true,
-        subject: true,
-        createdAt: true,
-      },
-    });
+    const [acceptance, ascertainment] = await Promise.all([
+      this.prisma.acceptanceProtocol.findMany({
+        where: { companyId, serviceOrderId },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          documentNumber: true,
+          documentDate: true,
+          status: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.ascertainmentProtocol.findMany({
+        where: { companyId, serviceOrderId },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          documentNumber: true,
+          documentDate: true,
+          status: true,
+          subject: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    return [
+      ...acceptance.map((p) => ({ ...p, kind: 'acceptance' as const })),
+      ...ascertainment.map((p) => ({ ...p, kind: 'ascertainment' as const })),
+    ].sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
   }
 }

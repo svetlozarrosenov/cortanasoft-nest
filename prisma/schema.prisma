@@ -142,10 +142,12 @@ model Company {
 
   // PDF template keys — точка за lookup в template registry на frontend-а.
   // NULL = default. Задава се ръчно от superadmin при custom клиентски шаблон.
-  invoiceTemplateKey         String?
-  offerTemplateKey           String?
-  stockDocumentTemplateKey   String?
-  serviceProtocolTemplateKey String?
+  invoiceTemplateKey               String?
+  offerTemplateKey                 String?
+  stockReceiptTemplateKey          String?
+  acceptanceProtocolTemplateKey    String?
+  ascertainmentProtocolTemplateKey String?
+  serviceProtocolTemplateKey       String?
 
   // Контакти
   phone   String? // Телефон
@@ -181,49 +183,50 @@ model Company {
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
-  userCompanies       UserCompany[]
-  roles               Role[]
-  products            Product[]
-  productCategories   ProductCategory[]
-  suppliers           Supplier[]
-  locations           Location[]
-  goodsReceipts       GoodsReceipt[]
-  inventoryBatches    InventoryBatch[]
-  inventorySerials    InventorySerial[]
-  orders              Order[]
-  offers              Offer[]
-  customers           Customer[]
-  invoices            Invoice[]
-  handoverProtocols   HandoverProtocol[]
-  deals               Deal[]
-  dealTasks           DealTask[]
-  departments         Department[]
-  attendances         Attendance[]
-  payrolls            Payroll[]
-  performanceReviews  PerformanceReview[]
-  tickets             Ticket[]
-  sprints             Sprint[]
-  sprintMembers       SprintMember[]
-  timeLogs            TimeLog[]
-  chatRooms           ChatRoom[]
-  leaves              Leave[]
-  leaveBalances       LeaveBalance[]
-  companyPlans        CompanyPlan[]
-  expenses            Expense[]
-  documents           Document[]
-  stockDocuments      StockDocument[]
-  billOfMaterials     BillOfMaterial[]
-  productionOrders    ProductionOrder[]
-  productionIssuances ProductionMaterialIssuance[]
-  apiKeys             ApiKey[]
-  stockTransfers      StockTransfer[]
-  econtConfig         EcontConfig?
-  speedyConfig        SpeedyConfig?
-  shipments           Shipment[]
-  warrantyTemplates   WarrantyTemplate[]
-  issuedWarranties    IssuedWarranty[]
-  integrations        Integration[]
-  payments            Payment[]
+  userCompanies          UserCompany[]
+  roles                  Role[]
+  products               Product[]
+  productCategories      ProductCategory[]
+  suppliers              Supplier[]
+  locations              Location[]
+  goodsReceipts          GoodsReceipt[]
+  inventoryBatches       InventoryBatch[]
+  inventorySerials       InventorySerial[]
+  orders                 Order[]
+  offers                 Offer[]
+  customers              Customer[]
+  invoices               Invoice[]
+  deals                  Deal[]
+  dealTasks              DealTask[]
+  departments            Department[]
+  attendances            Attendance[]
+  payrolls               Payroll[]
+  performanceReviews     PerformanceReview[]
+  tickets                Ticket[]
+  sprints                Sprint[]
+  sprintMembers          SprintMember[]
+  timeLogs               TimeLog[]
+  chatRooms              ChatRoom[]
+  leaves                 Leave[]
+  leaveBalances          LeaveBalance[]
+  companyPlans           CompanyPlan[]
+  expenses               Expense[]
+  documents              Document[]
+  stockReceipts          StockReceipt[]
+  acceptanceProtocols    AcceptanceProtocol[]
+  ascertainmentProtocols AscertainmentProtocol[]
+  billOfMaterials        BillOfMaterial[]
+  productionOrders       ProductionOrder[]
+  productionIssuances    ProductionMaterialIssuance[]
+  apiKeys                ApiKey[]
+  stockTransfers         StockTransfer[]
+  econtConfig            EcontConfig?
+  speedyConfig           SpeedyConfig?
+  shipments              Shipment[]
+  warrantyTemplates      WarrantyTemplate[]
+  issuedWarranties       IssuedWarranty[]
+  integrations           Integration[]
+  payments               Payment[]
 
   // Сервиз
   serviceOrders    ServiceOrder[]
@@ -402,20 +405,21 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userCompanies         UserCompany[]
-  createdProducts       Product[]
-  createdGoodsReceipts  GoodsReceipt[]  @relation("GoodsReceiptCreator")
-  createdOrders         Order[]         @relation("OrderCreator")
-  createdOffers         Offer[]         @relation("OfferCreator")
-  createdInvoices       Invoice[]       @relation("InvoiceCreator")
-  createdHandoverProtocols HandoverProtocol[] @relation("HandoverProtocolCreator")
-  createdStockDocuments StockDocument[] @relation("StockDocumentCreator")
-  createdPlans          CompanyPlan[]   @relation("PlanCreator")
-  assignedCustomers     Customer[]      @relation("CustomerAssignee")
-  assignedDeals         Deal[]          @relation("DealAssignee")
-  createdDeals          Deal[]          @relation("DealCreator")
-  assignedDealTasks     DealTask[]      @relation("DealTaskAssignee")
-  createdDealTasks      DealTask[]      @relation("DealTaskCreator")
+  userCompanies                 UserCompany[]
+  createdProducts               Product[]
+  createdGoodsReceipts          GoodsReceipt[]          @relation("GoodsReceiptCreator")
+  createdOrders                 Order[]                 @relation("OrderCreator")
+  createdOffers                 Offer[]                 @relation("OfferCreator")
+  createdInvoices               Invoice[]               @relation("InvoiceCreator")
+  createdStockReceipts          StockReceipt[]          @relation("StockReceiptCreator")
+  createdAcceptanceProtocols    AcceptanceProtocol[]    @relation("AcceptanceProtocolCreator")
+  createdAscertainmentProtocols AscertainmentProtocol[] @relation("AscertainmentProtocolCreator")
+  createdPlans                  CompanyPlan[]           @relation("PlanCreator")
+  assignedCustomers             Customer[]              @relation("CustomerAssignee")
+  assignedDeals                 Deal[]                  @relation("DealAssignee")
+  createdDeals                  Deal[]                  @relation("DealCreator")
+  assignedDealTasks             DealTask[]              @relation("DealTaskAssignee")
+  createdDealTasks              DealTask[]              @relation("DealTaskCreator")
 
   // HR Performance
   performanceReviews   PerformanceReview[] @relation("UserPerformanceReviews")
@@ -898,15 +902,15 @@ model Product {
   createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   // Inventory релации
-  goodsReceiptItems     GoodsReceiptItem[]
-  inventoryBatches      InventoryBatch[]
-  inventorySerials      InventorySerial[]
-  orderItems            OrderItem[]
-  offerItems            OfferItem[]
-  invoiceItems          InvoiceItem[]
-  handoverProtocolItems HandoverProtocolItem[]
-  companyPlanItems      CompanyPlanItem[] // Елементи от планове
-  stockDocumentItems    StockDocumentItem[]
+  goodsReceiptItems       GoodsReceiptItem[]
+  inventoryBatches        InventoryBatch[]
+  inventorySerials        InventorySerial[]
+  orderItems              OrderItem[]
+  offerItems              OfferItem[]
+  invoiceItems            InvoiceItem[]
+  companyPlanItems        CompanyPlanItem[] // Елементи от планове
+  stockReceiptItems       StockReceiptItem[]
+  acceptanceProtocolItems AcceptanceProtocolItem[]
 
   // Производство
   bomAsProduct        BillOfMaterial[]             @relation("BOMProduct")
@@ -1191,17 +1195,18 @@ model Customer {
   assignedToId String?
   assignedTo   User?   @relation("CustomerAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
 
-  orders            Order[]
-  offers            Offer[]
-  invoices          Invoice[]
-  handoverProtocols HandoverProtocol[]
-  deals             Deal[]
-  stockDocuments    StockDocument[]
-  issuedWarranties  IssuedWarranty[]
-  productionOrders ProductionOrder[] @relation("ProductionOrderCustomer")
-  serviceOrders    ServiceOrder[]
-  serviceAssets    ServiceAsset[]
-  serviceContracts ServiceContract[]
+  orders                 Order[]
+  offers                 Offer[]
+  invoices               Invoice[]
+  deals                  Deal[]
+  stockReceipts          StockReceipt[]
+  acceptanceProtocols    AcceptanceProtocol[]
+  ascertainmentProtocols AscertainmentProtocol[]
+  issuedWarranties       IssuedWarranty[]
+  productionOrders       ProductionOrder[]       @relation("ProductionOrderCustomer")
+  serviceOrders          ServiceOrder[]
+  serviceAssets          ServiceAsset[]
+  serviceContracts       ServiceContract[]
 
   @@unique([companyId, eik])
   @@index([companyId, type])
@@ -1451,13 +1456,12 @@ model Order {
   sourceOfferId String? @unique
   sourceOffer   Offer?  @relation("OrderFromOffer", fields: [sourceOfferId], references: [id], onDelete: SetNull)
 
-  items             OrderItem[]
-  invoices          Invoice[]
-  handoverProtocols HandoverProtocol[]
-  stockDocuments    StockDocument[]
-  shipments         Shipment[]
-  issuedWarranties  IssuedWarranty[]
-  payments          Payment[]
+  items               OrderItem[]
+  invoices            Invoice[]
+  acceptanceProtocols AcceptanceProtocol[]
+  shipments           Shipment[]
+  issuedWarranties    IssuedWarranty[]
+  payments            Payment[]
 
   @@unique([companyId, orderNumber])
   @@index([companyId, status])
@@ -1493,8 +1497,7 @@ model OrderItem {
   locationId String?
   location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
-  invoiceItems          InvoiceItem[]
-  handoverProtocolItems HandoverProtocolItem[]
+  invoiceItems InvoiceItem[]
 
   @@map("order_items")
 }
@@ -1753,9 +1756,10 @@ model Invoice {
   documents Document[]
 
   // Връзка с план (ако е генерирана от план)
-  companyPlanInvoice CompanyPlanInvoice?
-  stockDocuments     StockDocument[]
-  serviceOrders      ServiceOrder[]
+  companyPlanInvoice  CompanyPlanInvoice?
+  stockReceipts       StockReceipt[]
+  acceptanceProtocols AcceptanceProtocol[]
+  serviceOrders       ServiceOrder[]
 
   // Само за FINAL: какви ADVANCE фактури са приспаднати в нея
   advanceDeductions InvoiceAdvanceDeduction[] @relation("FinalInvoice")
@@ -1822,77 +1826,9 @@ model InvoiceAdvanceDeduction {
   @@map("invoice_advance_deductions")
 }
 
-// ==================== Handover Protocols (Приемо-предавателни протоколи) ====================
-
-enum HandoverProtocolStatus {
-  ISSUED // Издаден
-  CANCELLED // Анулиран
-}
-
-// Приемо-предавателен протокол: документ за физическо предаване на стоки от поръчка.
-// Доказателство в съда за факта на предаване (фактурата доказва само сделката).
-model HandoverProtocol {
-  id             String                 @id @default(cuid())
-  protocolNumber String // Номер: PPP-0000000001
-  protocolDate   DateTime               @default(now()) // Дата на предаване
-  status         HandoverProtocolStatus @default(ISSUED)
-
-  // Поръчка
-  orderId String
-  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
-
-  // Клиент (snapshot за стабилност)
-  customerId   String?
-  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  customerName String
-
-  // Получаващото лице
-  receivedByName         String // Име на приемащия (задължително)
-  receivedByPosition     String? // Длъжност (за B2B)
-  receivedByIdCardNumber String? // Номер на ЛК (само номер, без ЕГН)
-
-  handoverLocation String? // Място на предаване
-  notes            String? // Бележки за състояние при предаване
-
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  items HandoverProtocolItem[]
-
-  createdById String?
-  createdBy   User?    @relation("HandoverProtocolCreator", fields: [createdById], references: [id], onDelete: SetNull)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@unique([companyId, protocolNumber])
-  @@index([companyId, status])
-  @@index([companyId, protocolDate])
-  @@index([orderId])
-  @@map("handover_protocols")
-}
-
-// Ред от приемо-предавателен протокол
-model HandoverProtocolItem {
-  id         String           @id @default(cuid())
-  protocolId String
-  protocol   HandoverProtocol @relation(fields: [protocolId], references: [id], onDelete: Cascade)
-
-  // Връзка към оригиналния ред от поръчката
-  orderItemId String
-  orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
-
-  // Snapshot на продукта (за стабилност на документа)
-  productId   String?
-  product     Product? @relation(fields: [productId], references: [id])
-  description String // Име на продукта/услугата
-  quantity    Decimal @db.Decimal(12, 3) // Количество предадено в този протокол
-
-  // Серийни номера на конкретно предадените единици (за SERIAL продукти)
-  serialNumbers String[] @default([])
-
-  @@index([protocolId])
-  @@map("handover_protocol_items")
-}
+// (Премахнати са старите HandoverProtocol* и StockDocument* модели —
+//  заменени са с три самостоятелни модула: StockReceipt, AcceptanceProtocol,
+//  AscertainmentProtocol. Виж блока по-долу „СТОКОВИ РАЗПИСКИ И ПРОТОКОЛИ".)
 
 // ==================== HR Performance ====================
 
@@ -2637,24 +2573,26 @@ model Document {
   expenseId String?
   expense   Expense? @relation(fields: [expenseId], references: [id], onDelete: Cascade)
 
-  stockDocumentId String?
-  stockDocument   StockDocument? @relation(fields: [stockDocumentId], references: [id], onDelete: Cascade)
+  stockReceiptId String?
+  stockReceipt   StockReceipt? @relation(fields: [stockReceiptId], references: [id], onDelete: Cascade)
+
+  acceptanceProtocolId String?
+  acceptanceProtocol   AcceptanceProtocol? @relation(fields: [acceptanceProtocolId], references: [id], onDelete: Cascade)
+
+  ascertainmentProtocolId String?
+  ascertainmentProtocol   AscertainmentProtocol? @relation(fields: [ascertainmentProtocolId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
   @@index([goodsReceiptId])
   @@index([invoiceId])
   @@index([expenseId])
-  @@index([stockDocumentId])
+  @@index([stockReceiptId])
+  @@index([acceptanceProtocolId])
+  @@index([ascertainmentProtocolId])
   @@map("documents")
 }
 
-// ==================== СТОКОВИ ДОКУМЕНТИ / ПРОТОКОЛИ ====================
-
-enum StockDocumentType {
-  STOCK_RECEIPT // Стокова разписка
-  ACCEPTANCE_PROTOCOL // Приемо-предавателен протокол
-  ASCERTAINMENT_PROTOCOL // Констативен протокол
-}
+// ==================== СТОКОВИ РАЗПИСКИ И ПРОТОКОЛИ ====================
 
 enum ProductionOrderStatus {
   DRAFT
@@ -2664,43 +2602,114 @@ enum ProductionOrderStatus {
   CANCELLED
 }
 
-enum StockDocumentStatus {
-  DRAFT // Чернова
-  ISSUED // Издаден
-  CANCELLED // Анулиран
+// Общ статус за трите типа документи (стокова разписка / приемо-предавателен / констативен).
+enum StockReceiptStatus {
+  DRAFT
+  ISSUED
+  CANCELLED
 }
 
-model StockDocument {
-  id             String              @id @default(cuid())
-  documentNumber String
-  documentDate   DateTime            @default(now())
-  type           StockDocumentType
-  status         StockDocumentStatus @default(DRAFT)
+enum AcceptanceProtocolStatus {
+  DRAFT
+  ISSUED
+  CANCELLED
+}
 
-  // Получател (клиент)
+enum AscertainmentProtocolStatus {
+  DRAFT
+  ISSUED
+  CANCELLED
+}
+
+// ---------- Стокова разписка (SR-YYYY-NNNNN) ----------
+model StockReceipt {
+  id             String             @id @default(cuid())
+  documentNumber String
+  documentDate   DateTime           @default(now())
+  status         StockReceiptStatus @default(ISSUED)
+
+  // Получател
   customerId       String?
   customer         Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  recipientName    String // Получател / Приемащ
+  recipientName    String
   recipientEik     String?
   recipientAddress String?
   recipientCity    String?
 
   // Представители (за подпис)
-  senderRepresentative   String? // Предал (от наша страна)
-  receiverRepresentative String? // Приел (от страна на получателя)
+  senderRepresentative   String?
+  receiverRepresentative String?
 
-  // За Констативен протокол
-  subject           String?  @db.Text // Относно / Предмет
-  findings          String?  @db.Text // Констатации
-  conclusion        String?  @db.Text // Заключение
-  commissionMembers String[] @default([]) // Членове на комисията
-
-  // Суми (за Стокова разписка и Приемо-предавателен)
+  // Суми
   subtotal  Decimal? @db.Decimal(12, 2)
   vatAmount Decimal? @db.Decimal(12, 2)
   total     Decimal? @db.Decimal(12, 2)
 
-  // Връзки с други документи (опционални)
+  // Опционални връзки
+  invoiceId      String?
+  invoice        Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  serviceOrderId String?
+  serviceOrder   ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
+
+  notes String? @db.Text
+
+  companyId   String
+  company     Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdById String?
+  createdBy   User?   @relation("StockReceiptCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  items     StockReceiptItem[]
+  documents Document[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, documentNumber])
+  @@index([companyId, status])
+  @@index([companyId, documentDate])
+  @@map("stock_receipts")
+}
+
+model StockReceiptItem {
+  id             String       @id @default(cuid())
+  stockReceiptId String
+  stockReceipt   StockReceipt @relation(fields: [stockReceiptId], references: [id], onDelete: Cascade)
+
+  productId   String?
+  product     Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  description String
+  quantity    Decimal  @db.Decimal(12, 3)
+  unitPrice   Decimal  @db.Decimal(12, 2)
+  vatRate     Decimal  @db.Decimal(5, 2)
+  total       Decimal  @db.Decimal(12, 2)
+
+  @@index([stockReceiptId])
+  @@map("stock_receipt_items")
+}
+
+// ---------- Приемо-предавателен протокол (AHP-YYYY-NNNNN) ----------
+model AcceptanceProtocol {
+  id             String                   @id @default(cuid())
+  documentNumber String
+  documentDate   DateTime                 @default(now())
+  status         AcceptanceProtocolStatus @default(ISSUED)
+
+  customerId       String?
+  customer         Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  recipientName    String
+  recipientEik     String?
+  recipientAddress String?
+  recipientCity    String?
+
+  senderRepresentative   String?
+  receiverRepresentative String?
+
+  // Суми
+  subtotal  Decimal? @db.Decimal(12, 2)
+  vatAmount Decimal? @db.Decimal(12, 2)
+  total     Decimal? @db.Decimal(12, 2)
+
+  // Опционални връзки — orderId позволява иконката в Sales да отваря същия протокол.
   orderId        String?
   order          Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
   invoiceId      String?
@@ -2713,24 +2722,25 @@ model StockDocument {
   companyId   String
   company     Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   createdById String?
-  createdBy   User?   @relation("StockDocumentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?   @relation("AcceptanceProtocolCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
-  items     StockDocumentItem[]
+  items     AcceptanceProtocolItem[]
   documents Document[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([companyId, documentNumber])
-  @@index([companyId, type])
   @@index([companyId, status])
-  @@map("stock_documents")
+  @@index([companyId, documentDate])
+  @@index([orderId])
+  @@map("acceptance_protocols")
 }
 
-model StockDocumentItem {
-  id              String        @id @default(cuid())
-  stockDocumentId String
-  stockDocument   StockDocument @relation(fields: [stockDocumentId], references: [id], onDelete: Cascade)
+model AcceptanceProtocolItem {
+  id                   String             @id @default(cuid())
+  acceptanceProtocolId String
+  acceptanceProtocol   AcceptanceProtocol @relation(fields: [acceptanceProtocolId], references: [id], onDelete: Cascade)
 
   productId   String?
   product     Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
@@ -2740,8 +2750,52 @@ model StockDocumentItem {
   vatRate     Decimal  @db.Decimal(5, 2)
   total       Decimal  @db.Decimal(12, 2)
 
-  @@index([stockDocumentId])
-  @@map("stock_document_items")
+  @@index([acceptanceProtocolId])
+  @@map("acceptance_protocol_items")
+}
+
+// ---------- Констативен протокол (AP-YYYY-NNNNN) ----------
+model AscertainmentProtocol {
+  id             String                      @id @default(cuid())
+  documentNumber String
+  documentDate   DateTime                    @default(now())
+  status         AscertainmentProtocolStatus @default(ISSUED)
+
+  customerId       String?
+  customer         Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  recipientName    String
+  recipientEik     String?
+  recipientAddress String?
+  recipientCity    String?
+
+  senderRepresentative   String?
+  receiverRepresentative String?
+
+  // Специфични за констативен
+  subject           String?  @db.Text
+  findings          String?  @db.Text
+  conclusion        String?  @db.Text
+  commissionMembers String[] @default([])
+
+  serviceOrderId String?
+  serviceOrder   ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
+
+  notes String? @db.Text
+
+  companyId   String
+  company     Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdById String?
+  createdBy   User?   @relation("AscertainmentProtocolCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  documents Document[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, documentNumber])
+  @@index([companyId, status])
+  @@index([companyId, documentDate])
+  @@map("ascertainment_protocols")
 }
 
 // ==================== ПРОИЗВОДСТВО ====================
@@ -3428,16 +3482,18 @@ model ServiceOrder {
   invoiceId String?
   invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
 
-  parts         ServiceOrderPart[]
-  labor         ServiceOrderLabor[]
-  timeLogs      ServiceOrderTimeLog[]
-  attachments   ServiceOrderAttachment[]
-  loaners       ServiceLoaner[]
-  statusHistory ServiceOrderStatusHistory[]
-  protocols     StockDocument[]
+  parts                  ServiceOrderPart[]
+  labor                  ServiceOrderLabor[]
+  timeLogs               ServiceOrderTimeLog[]
+  attachments            ServiceOrderAttachment[]
+  loaners                ServiceLoaner[]
+  statusHistory          ServiceOrderStatusHistory[]
+  acceptanceProtocols    AcceptanceProtocol[]
+  ascertainmentProtocols AscertainmentProtocol[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  StockReceipt StockReceipt[]
 
   @@unique([companyId, orderNumber])
   @@index([companyId, status])
