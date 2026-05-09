@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AdminService } from './admin.service';
+import { UploadsService } from '../uploads/uploads.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { SuperAdminGuard } from '../common/guards/super-admin.guard';
 import { CreateCompanyDto } from './dto/create-company.dto';
@@ -41,6 +42,7 @@ export class AdminController {
     private prisma: PrismaService,
     private companyPlansService: CompanyPlansService,
     private mailService: MailService,
+    private uploadsService: UploadsService,
   ) {}
 
   // ==================== Companies ====================
@@ -88,6 +90,75 @@ export class AdminController {
       success: true,
       message: 'Company deleted successfully',
     };
+  }
+
+  // ==================== Company Logo Upload ====================
+
+  @Post('companies/:id/logo')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadCompanyLogo(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Не е предоставен файл');
+    }
+    if (!file.mimetype.startsWith('image/')) {
+      throw new BadRequestException('Логото трябва да е изображение (PNG/JPEG/WebP)');
+    }
+
+    const existing = await this.prisma.company.findUnique({
+      where: { id },
+      select: { logoUrl: true },
+    });
+    if (!existing) throw new BadRequestException('Компанията не е намерена');
+
+    const { key } = await this.uploadsService.uploadFile(id, 'logos', file);
+    const logoUrl = `/api/public/files/${key}`;
+
+    // Стария логото — ако е сочило към наш R2 ключ, го трием.
+    if (existing.logoUrl) {
+      const oldKey = this.extractR2Key(existing.logoUrl);
+      if (oldKey && oldKey.startsWith('logos/')) {
+        await this.uploadsService.deleteFile(oldKey);
+      }
+    }
+
+    await this.prisma.company.update({
+      where: { id },
+      data: { logoUrl },
+    });
+
+    return { success: true, logoUrl };
+  }
+
+  @Delete('companies/:id/logo')
+  async deleteCompanyLogo(@Param('id') id: string) {
+    const company = await this.prisma.company.findUnique({
+      where: { id },
+      select: { logoUrl: true },
+    });
+    if (!company) throw new BadRequestException('Компанията не е намерена');
+
+    if (company.logoUrl) {
+      const key = this.extractR2Key(company.logoUrl);
+      if (key && key.startsWith('logos/')) {
+        await this.uploadsService.deleteFile(key);
+      }
+    }
+
+    await this.prisma.company.update({
+      where: { id },
+      data: { logoUrl: null },
+    });
+
+    return { success: true };
+  }
+
+  // Извлича R2 key-а от proxy URL `/api/public/files/<key>`. Връща null ако не е такъв URL.
+  private extractR2Key(logoUrl: string): string | null {
+    const match = logoUrl.match(/^\/api\/public\/files\/(.+)$/);
+    return match ? match[1] : null;
   }
 
   // ==================== Users ====================
