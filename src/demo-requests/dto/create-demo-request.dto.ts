@@ -25,4 +25,10 @@ export class CreateDemoRequestDto {
   @IsString()
   @MaxLength(1000)
   message?: string;
+
+  // UUID, генериран от browser-а; споделя се с fbq() през { eventID } за CAPI дедупликация.
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  metaEventId?: string;
 }

@@ -3306,12 +3306,15 @@ model GoogleAnalyticsConfig {
 // pixelId се извлича автоматично от script-а (само за UI display).
 
 model MetaPixelConfig {
-  id         String   @id @default(cuid())
-  scriptHtml String   @db.Text // Целият <script>...</script> blob от Meta
-  pixelId    String? // Извлечен автоматично от script-а — само за UI
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  scriptHtml           String   @db.Text // Целият <script>...</script> blob от Meta
+  pixelId              String? // Извлечен автоматично от script-а — само за UI
+  // Conversions API (CAPI) — server-side branch с дедупликация по event_id срещу browser Pixel-а.
+  accessTokenEncrypted String?  @db.Text // AES-256-GCM encrypted System User token от Events Manager
+  testEventCode        String? // Test Events Code за верификация (празно в production)
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   @@map("meta_pixel_config")
 }

@@ -1,4 +1,5 @@
-import { Controller, Post, Body, Logger } from '@nestjs/common';
+import { Controller, Post, Body, Logger, Req, Ip, Headers } from '@nestjs/common';
+import type { Request } from 'express';
 import { ContactSubmissionsService } from './contact-submissions.service';
 import { CreateContactSubmissionDto } from './dto';
 import { MailService } from '../mail/mail.service';
@@ -24,8 +25,20 @@ export class ContactSubmissionsController {
    * POST /api/contact-submissions
    */
   @Post()
-  async create(@Body() dto: CreateContactSubmissionDto) {
-    const submission = await this.contactSubmissionsService.create(dto);
+  async create(
+    @Body() dto: CreateContactSubmissionDto,
+    @Req() req: Request,
+    @Ip() ip: string,
+    @Headers('user-agent') userAgent: string | undefined,
+    @Headers('referer') referer: string | undefined,
+  ) {
+    const submission = await this.contactSubmissionsService.create(dto, {
+      ip,
+      userAgent,
+      fbp: req.cookies?.['_fbp'] as string | undefined,
+      fbc: req.cookies?.['_fbc'] as string | undefined,
+      eventSourceUrl: referer,
+    });
 
     // Fire-and-forget: send notifications without blocking the response
     this.sendNotifications(dto).catch((error) => {

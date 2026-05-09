@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushNotificationsService } from '../push-notifications/push-notifications.service';
 import { MailService } from '../mail/mail.service';
+import { MetaPixelEventsService } from '../meta-pixel/meta-pixel-events.service';
 import {
   CreateDemoRequestDto,
   UpdateDemoRequestDto,
@@ -13,6 +14,14 @@ import {
 } from './dto';
 import { Prisma, DemoRequestStatus } from '@prisma/client';
 
+export interface MetaPixelRequestContext {
+  ip?: string;
+  userAgent?: string;
+  fbp?: string;
+  fbc?: string;
+  eventSourceUrl?: string;
+}
+
 @Injectable()
 export class DemoRequestsService {
   private readonly logger = new Logger(DemoRequestsService.name);
@@ -21,12 +30,13 @@ export class DemoRequestsService {
     private prisma: PrismaService,
     private pushNotificationsService: PushNotificationsService,
     private mailService: MailService,
+    private metaPixelEvents: MetaPixelEventsService,
   ) {}
 
   /**
    * Create a new demo request (public endpoint, no auth required)
    */
-  async create(dto: CreateDemoRequestDto) {
+  async create(dto: CreateDemoRequestDto, meta?: MetaPixelRequestContext) {
     const demoRequest = await this.prisma.demoRequest.create({
       data: {
         name: dto.name,
@@ -43,6 +53,22 @@ export class DemoRequestsService {
     this.sendNotifications(dto).catch((error) => {
       this.logger.error('Unexpected error in demo request notifications', error);
     });
+
+    // Fire-and-forget: Meta CAPI Lead (deduplicates with browser fbq() on the same eventId).
+    if (dto.metaEventId) {
+      void this.metaPixelEvents.sendEvent({
+        eventName: 'Lead',
+        eventId: dto.metaEventId,
+        eventSourceUrl: meta?.eventSourceUrl,
+        ip: meta?.ip,
+        userAgent: meta?.userAgent,
+        fbp: meta?.fbp,
+        fbc: meta?.fbc,
+        email: dto.email,
+        phone: dto.phone,
+        contentName: 'demo_request',
+      });
+    }
 
     return demoRequest;
   }

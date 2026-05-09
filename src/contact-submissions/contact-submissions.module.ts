@@ -4,9 +4,10 @@ import { ContactSubmissionsController } from './contact-submissions.controller';
 import { AdminContactSubmissionsController } from './admin-contact-submissions.controller';
 import { PushNotificationsModule } from '../push-notifications/push-notifications.module';
 import { MailModule } from '../mail/mail.module';
+import { MetaPixelModule } from '../meta-pixel/meta-pixel.module';
 
 @Module({
-  imports: [PushNotificationsModule, MailModule],
+  imports: [PushNotificationsModule, MailModule, MetaPixelModule],
   controllers: [ContactSubmissionsController, AdminContactSubmissionsController],
   providers: [ContactSubmissionsService],
   exports: [ContactSubmissionsService],

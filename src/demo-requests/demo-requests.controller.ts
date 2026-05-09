@@ -1,4 +1,5 @@
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, Req, Ip, Headers } from '@nestjs/common';
+import type { Request } from 'express';
 import { DemoRequestsService } from './demo-requests.service';
 import { CreateDemoRequestDto } from './dto';
 
@@ -14,8 +15,20 @@ export class DemoRequestsController {
    * POST /api/demo-requests
    */
   @Post()
-  async create(@Body() dto: CreateDemoRequestDto) {
-    const demoRequest = await this.demoRequestsService.create(dto);
+  async create(
+    @Body() dto: CreateDemoRequestDto,
+    @Req() req: Request,
+    @Ip() ip: string,
+    @Headers('user-agent') userAgent: string | undefined,
+    @Headers('referer') referer: string | undefined,
+  ) {
+    const demoRequest = await this.demoRequestsService.create(dto, {
+      ip,
+      userAgent,
+      fbp: req.cookies?.['_fbp'] as string | undefined,
+      fbc: req.cookies?.['_fbc'] as string | undefined,
+      eventSourceUrl: referer,
+    });
     return {
       success: true,
       message: 'Заявката е изпратена успешно!',
@@ -26,5 +39,4 @@ export class DemoRequestsController {
       },
     };
   }
-
 }

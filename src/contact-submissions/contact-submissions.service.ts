@@ -2,12 +2,21 @@ import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushNotificationsService } from '../push-notifications/push-notifications.service';
 import { MailService } from '../mail/mail.service';
+import { MetaPixelEventsService } from '../meta-pixel/meta-pixel-events.service';
 import {
   CreateContactSubmissionDto,
   UpdateContactSubmissionDto,
   QueryContactSubmissionsDto,
 } from './dto';
 import { Prisma, ContactSubmissionStatus } from '@prisma/client';
+
+export interface MetaPixelRequestContext {
+  ip?: string;
+  userAgent?: string;
+  fbp?: string;
+  fbc?: string;
+  eventSourceUrl?: string;
+}
 
 @Injectable()
 export class ContactSubmissionsService {
@@ -17,12 +26,13 @@ export class ContactSubmissionsService {
     private prisma: PrismaService,
     private pushNotificationsService: PushNotificationsService,
     private mailService: MailService,
+    private metaPixelEvents: MetaPixelEventsService,
   ) {}
 
   /**
    * Create a new contact submission (public endpoint, no auth required)
    */
-  async create(dto: CreateContactSubmissionDto) {
+  async create(dto: CreateContactSubmissionDto, meta?: MetaPixelRequestContext) {
     const submission = await this.prisma.contactSubmission.create({
       data: {
         name: dto.name,
@@ -39,6 +49,22 @@ export class ContactSubmissionsService {
     this.sendNotifications(dto).catch((error) => {
       this.logger.error('Unexpected error in contact submission notifications', error);
     });
+
+    // Fire-and-forget: Meta CAPI Lead (deduplicates with browser fbq() on the same eventId).
+    if (dto.metaEventId) {
+      void this.metaPixelEvents.sendEvent({
+        eventName: 'Lead',
+        eventId: dto.metaEventId,
+        eventSourceUrl: meta?.eventSourceUrl,
+        ip: meta?.ip,
+        userAgent: meta?.userAgent,
+        fbp: meta?.fbp,
+        fbc: meta?.fbc,
+        email: dto.email,
+        phone: dto.phone,
+        contentName: 'contact_form',
+      });
+    }
 
     return submission;
   }
