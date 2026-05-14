@@ -42,6 +42,7 @@ import { BOMModule } from './bom/bom.module';
 import { ProductionModule } from './production/production.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { CustomWebsiteModule } from './custom-website/custom-website.module';
 import { StockTransfersModule } from './stock-transfers/stock-transfers.module';
 import { MailModule } from './mail/mail.module';
 import { ShippingModule } from './shipping/shipping.module';
@@ -114,6 +115,7 @@ import { ServiceModule } from './service/service.module';
     ProductionModule,
     IntegrationsModule,
     WebhooksModule,
+    CustomWebsiteModule,
     StockTransfersModule,
     MailModule,
     ShippingModule,
