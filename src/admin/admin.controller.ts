@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
@@ -25,6 +26,8 @@ import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { AssignUserToCompanyDto } from './dto/assign-user-to-company.dto';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
+import { CreateIntegrationWebhookDto } from './dto/create-integration-webhook.dto';
+import { UpdateIntegrationWebhookDto } from './dto/update-integration-webhook.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompanyPlansService } from '../company-plans/company-plans.service';
 import { MailService } from '../mail/mail.service';
@@ -487,6 +490,51 @@ export class AdminController {
       success: true,
       message: 'API key deleted successfully',
     };
+  }
+
+  // ==================== Integration Webhooks ====================
+
+  @Get('companies/:companyId/integration-webhooks')
+  async listIntegrationWebhooks(@Param('companyId') companyId: string) {
+    const webhooks = await this.adminService.findIntegrationWebhooksByCompany(companyId);
+    return { success: true, webhooks };
+  }
+
+  @Post('companies/:companyId/integration-webhooks')
+  async createIntegrationWebhook(
+    @Param('companyId') companyId: string,
+    @Body() dto: CreateIntegrationWebhookDto,
+  ) {
+    const webhook = await this.adminService.createIntegrationWebhook(companyId, dto);
+    return { success: true, webhook };
+  }
+
+  @Patch('companies/:companyId/integration-webhooks/:id')
+  async updateIntegrationWebhook(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateIntegrationWebhookDto,
+  ) {
+    const webhook = await this.adminService.updateIntegrationWebhook(companyId, id, dto);
+    return { success: true, webhook };
+  }
+
+  @Delete('companies/:companyId/integration-webhooks/:id')
+  async deleteIntegrationWebhook(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+  ) {
+    await this.adminService.deleteIntegrationWebhook(companyId, id);
+    return { success: true, message: 'Webhook deleted successfully' };
+  }
+
+  @Get('companies/:companyId/integration-webhooks/:id/deliveries')
+  async getIntegrationWebhookDeliveries(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+  ) {
+    const deliveries = await this.adminService.getIntegrationWebhookDeliveries(companyId, id);
+    return { success: true, deliveries };
   }
 
   // ==================== Welcome Email ====================

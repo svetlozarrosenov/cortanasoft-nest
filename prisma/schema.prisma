@@ -183,50 +183,52 @@ model Company {
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
-  userCompanies          UserCompany[]
-  roles                  Role[]
-  products               Product[]
-  productCategories      ProductCategory[]
-  suppliers              Supplier[]
-  locations              Location[]
-  goodsReceipts          GoodsReceipt[]
-  inventoryBatches       InventoryBatch[]
-  inventorySerials       InventorySerial[]
-  orders                 Order[]
-  offers                 Offer[]
-  customers              Customer[]
-  invoices               Invoice[]
-  deals                  Deal[]
-  dealTasks              DealTask[]
-  departments            Department[]
-  attendances            Attendance[]
-  payrolls               Payroll[]
-  performanceReviews     PerformanceReview[]
-  tickets                Ticket[]
-  sprints                Sprint[]
-  sprintMembers          SprintMember[]
-  timeLogs               TimeLog[]
-  chatRooms              ChatRoom[]
-  leaves                 Leave[]
-  leaveBalances          LeaveBalance[]
-  companyPlans           CompanyPlan[]
-  expenses               Expense[]
-  documents              Document[]
-  stockReceipts          StockReceipt[]
-  acceptanceProtocols    AcceptanceProtocol[]
-  ascertainmentProtocols AscertainmentProtocol[]
-  billOfMaterials        BillOfMaterial[]
-  productionOrders       ProductionOrder[]
-  productionIssuances    ProductionMaterialIssuance[]
-  apiKeys                ApiKey[]
-  stockTransfers         StockTransfer[]
-  econtConfig            EcontConfig?
-  speedyConfig           SpeedyConfig?
-  shipments              Shipment[]
-  warrantyTemplates      WarrantyTemplate[]
-  issuedWarranties       IssuedWarranty[]
-  integrations           Integration[]
-  payments               Payment[]
+  userCompanies                UserCompany[]
+  roles                        Role[]
+  products                     Product[]
+  productCategories            ProductCategory[]
+  suppliers                    Supplier[]
+  locations                    Location[]
+  goodsReceipts                GoodsReceipt[]
+  inventoryBatches             InventoryBatch[]
+  inventorySerials             InventorySerial[]
+  orders                       Order[]
+  offers                       Offer[]
+  customers                    Customer[]
+  invoices                     Invoice[]
+  deals                        Deal[]
+  dealTasks                    DealTask[]
+  departments                  Department[]
+  attendances                  Attendance[]
+  payrolls                     Payroll[]
+  performanceReviews           PerformanceReview[]
+  tickets                      Ticket[]
+  sprints                      Sprint[]
+  sprintMembers                SprintMember[]
+  timeLogs                     TimeLog[]
+  chatRooms                    ChatRoom[]
+  leaves                       Leave[]
+  leaveBalances                LeaveBalance[]
+  companyPlans                 CompanyPlan[]
+  expenses                     Expense[]
+  documents                    Document[]
+  stockReceipts                StockReceipt[]
+  acceptanceProtocols          AcceptanceProtocol[]
+  ascertainmentProtocols       AscertainmentProtocol[]
+  billOfMaterials              BillOfMaterial[]
+  productionOrders             ProductionOrder[]
+  productionIssuances          ProductionMaterialIssuance[]
+  apiKeys                      ApiKey[]
+  stockTransfers               StockTransfer[]
+  econtConfig                  EcontConfig?
+  speedyConfig                 SpeedyConfig?
+  shipments                    Shipment[]
+  warrantyTemplates            WarrantyTemplate[]
+  issuedWarranties             IssuedWarranty[]
+  integrations                 Integration[]
+  integrationWebhooks          IntegrationWebhook[]
+  integrationWebhookDeliveries IntegrationWebhookDelivery[]
+  payments                     Payment[]
 
   // Сервиз
   serviceOrders    ServiceOrder[]
@@ -279,6 +281,54 @@ model Integration {
   @@unique([companyId, provider])
   @@index([companyId])
   @@map("integrations")
+}
+
+// Outbound webhook subscription — points cortana at an external shop's
+// receiver URL for live events (stock changes, order status updates, …).
+// One row per (company, target shop). The shop's HMAC verifier shares the
+// `secret` column to validate every delivery.
+model IntegrationWebhook {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  provider   String // "shop", "electric-express", custom string — same identifier as inbound Integration if there is one
+  webhookUrl String // Full URL on the target system to POST events to
+  secret     String // HMAC-SHA256 shared secret (also configured on the shop side)
+  events     String[] @default([]) // Event names to dispatch: ["stock.changed", "order.status_changed"]; empty = none
+  isActive   Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deliveries IntegrationWebhookDelivery[]
+
+  @@index([companyId])
+  @@index([companyId, isActive])
+  @@map("integration_webhooks")
+}
+
+// Audit log of every webhook attempt. Cleared by a periodic prune (keep
+// last ~30 days). Lets admin see which deliveries failed and why before
+// retrying or fixing the destination.
+model IntegrationWebhookDelivery {
+  id             String             @id @default(cuid())
+  webhookId      String
+  webhook        IntegrationWebhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  companyId      String
+  company        Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  event          String // Event name, e.g. "stock.changed"
+  payload        Json // Body POSTed to the receiver
+  attempt        Int                @default(1)
+  succeeded      Boolean            @default(false)
+  responseStatus Int?
+  responseBody   String? // Truncated body returned by the receiver
+  errorMessage   String? // Set when fetch() threw (network/timeout)
+  deliveredAt    DateTime?
+  createdAt      DateTime           @default(now())
+
+  @@index([webhookId, createdAt(sort: Desc)])
+  @@index([companyId, createdAt(sort: Desc)])
+  @@map("integration_webhook_deliveries")
 }
 
 // Абонаментен план / Договор за компания

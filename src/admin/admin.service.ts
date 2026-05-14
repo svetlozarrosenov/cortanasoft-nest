@@ -15,6 +15,8 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
+import { CreateIntegrationWebhookDto } from './dto/create-integration-webhook.dto';
+import { UpdateIntegrationWebhookDto } from './dto/update-integration-webhook.dto';
 import { CompanyRole, Prisma } from '@prisma/client';
 import {
   createEmptyPermissions,
@@ -949,6 +951,94 @@ export class AdminService {
     }
 
     await this.prisma.apiKey.delete({ where: { id: apiKeyId } });
+  }
+
+  // ==================== Integration Webhooks ====================
+  // Manage outbound webhook subscriptions — cortana POSTs events
+  // (stock.changed, order.status_changed, …) to external shop receivers
+  // signed with HMAC-SHA256. The `secret` column is the shared HMAC
+  // secret; the shop side stores the same value to verify deliveries.
+
+  async findIntegrationWebhooksByCompany(companyId: string) {
+    return this.prisma.integrationWebhook.findMany({
+      where: { companyId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        _count: { select: { deliveries: true } },
+      },
+    });
+  }
+
+  async createIntegrationWebhook(companyId: string, dto: CreateIntegrationWebhookDto) {
+    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
+    // (provider, companyId) pair is unique by convention — one webhook
+    // per external system. We don't enforce it at schema level because
+    // a shop might want test + prod subscriptions with different URLs.
+    return this.prisma.integrationWebhook.create({
+      data: {
+        companyId,
+        provider: dto.provider,
+        webhookUrl: dto.webhookUrl,
+        secret: dto.secret,
+        events: dto.events,
+        isActive: dto.isActive ?? true,
+      },
+    });
+  }
+
+  async updateIntegrationWebhook(
+    companyId: string,
+    id: string,
+    dto: UpdateIntegrationWebhookDto,
+  ) {
+    const webhook = await this.prisma.integrationWebhook.findFirst({
+      where: { id, companyId },
+    });
+    if (!webhook) {
+      throw new NotFoundException('Webhook not found');
+    }
+    return this.prisma.integrationWebhook.update({
+      where: { id },
+      data: {
+        ...(dto.provider !== undefined && { provider: dto.provider }),
+        ...(dto.webhookUrl !== undefined && { webhookUrl: dto.webhookUrl }),
+        ...(dto.secret !== undefined && { secret: dto.secret }),
+        ...(dto.events !== undefined && { events: dto.events }),
+        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+      },
+    });
+  }
+
+  async deleteIntegrationWebhook(companyId: string, id: string) {
+    const webhook = await this.prisma.integrationWebhook.findFirst({
+      where: { id, companyId },
+    });
+    if (!webhook) {
+      throw new NotFoundException('Webhook not found');
+    }
+    await this.prisma.integrationWebhook.delete({ where: { id } });
+  }
+
+  async getIntegrationWebhookDeliveries(
+    companyId: string,
+    webhookId: string,
+    limit = 50,
+  ) {
+    const webhook = await this.prisma.integrationWebhook.findFirst({
+      where: { id: webhookId, companyId },
+    });
+    if (!webhook) {
+      throw new NotFoundException('Webhook not found');
+    }
+    return this.prisma.integrationWebhookDelivery.findMany({
+      where: { webhookId },
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(limit, 500),
+    });
   }
 
   // ==================== Welcome Email ====================

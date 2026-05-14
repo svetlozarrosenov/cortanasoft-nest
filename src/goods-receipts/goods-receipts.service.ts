@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { WordPressService } from '../wordpress/wordpress.service';
 import { CloudCartService } from '../cloudcart/cloudcart.service';
+import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import {
   CreateGoodsReceiptDto,
   UpdateGoodsReceiptDto,
@@ -54,6 +55,7 @@ export class GoodsReceiptsService {
     private prisma: PrismaService,
     private wordPressService: WordPressService,
     private cloudCartService: CloudCartService,
+    private webhookDispatcher: WebhookDispatcherService,
   ) {}
 
   private async generateReceiptNumber(
@@ -615,16 +617,47 @@ export class GoodsReceiptsService {
       });
     });
 
-    // Sync inventory to integrations (fire-and-forget)
+    // Sync inventory to integrations (fire-and-forget). Each provider is
+    // wrapped in its own .catch — one failing must never block the others.
     if (isDelivering || isCancellingDelivered) {
       const productIds = [...new Set(receipt.items.map((item) => item.productId))];
       for (const productId of productIds) {
         this.wordPressService.syncProduct(companyId, productId).catch(() => {});
         this.cloudCartService.syncProductToCloudCart(companyId, productId).catch(() => {});
       }
+      this.dispatchStockChanged(companyId, productIds).catch(() => {});
     }
 
     return result;
+  }
+
+  // Build the `stock.changed` event payload for a batch of products and
+  // hand it off to the webhook dispatcher. Reads current inventory from
+  // InventoryBatch totals so subscribers get the post-update number.
+  private async dispatchStockChanged(companyId: string, productIds: string[]): Promise<void> {
+    if (productIds.length === 0) return;
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: productIds }, companyId },
+      select: {
+        id: true,
+        sku: true,
+        name: true,
+        trackInventory: true,
+        inventoryBatches: {
+          where: { quantity: { gt: 0 } },
+          select: { quantity: true },
+        },
+      },
+    });
+    const items = products.map((p) => ({
+      productId: p.id,
+      sku: p.sku,
+      name: p.name,
+      stock: p.trackInventory
+        ? p.inventoryBatches.reduce((sum, b) => sum + Number(b.quantity), 0)
+        : null,
+    }));
+    await this.webhookDispatcher.dispatch(companyId, 'stock.changed', { items });
   }
 
   async cancel(companyId: string, id: string) {
