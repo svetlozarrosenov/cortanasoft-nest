@@ -54,6 +54,17 @@ export class CompanyOrdersController {
     return this.ordersService.findAll(companyId, query);
   }
 
+  // Order items that still need a serial / batch allocation. Used by the
+  // ERP "Очакват изписване" dashboard so the admin can see at a glance
+  // which paid pre-orders are ready to be fulfilled the moment a goods
+  // receipt lands. Returns one row per pending OrderItem with current
+  // stock numbers joined in.
+  @Get('unfulfilled')
+  @RequireView('erp', 'orders')
+  unfulfilled(@Param('companyId') companyId: string) {
+    return this.ordersService.findUnfulfilledItems(companyId);
+  }
+
   @Get('export')
   @RequireView('erp', 'orders')
   async export(

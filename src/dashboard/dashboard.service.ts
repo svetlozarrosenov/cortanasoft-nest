@@ -161,10 +161,12 @@ export class DashboardService {
       ) sub
     `;
 
-    // Recent orders for dashboard table
+    // Recent orders for dashboard table — sort by the user-entered sale date
+    // (orderDate), not the row's createdAt. Backfilled / backdated entries need
+    // to appear at the right place in the timeline.
     const recentOrders = await this.prisma.order.findMany({
       where: { companyId, status: { not: 'CANCELLED' } },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ orderDate: 'desc' }, { createdAt: 'desc' }],
       take: 5,
       select: {
         id: true,

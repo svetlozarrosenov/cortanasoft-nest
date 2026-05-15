@@ -317,6 +317,189 @@ export class OrdersService {
     return { ...order, deliveryStatus: computeDeliveryStatus(order) };
   }
 
+  // Walk every order in an open state (not CANCELLED / DELIVERED / DRAFT)
+  // and surface each OrderItem whose product is inventory-tracked but
+  // hasn't yet had a serial / batch assigned. The frontend tags each row
+  // RED / AMBER / GRAY based on stock availability + payment status so
+  // the admin sees the queue of "ready to fulfil" sales at a glance.
+  async findUnfulfilledItems(companyId: string) {
+    const orders = await this.prisma.order.findMany({
+      where: {
+        companyId,
+        status: { notIn: ['CANCELLED', 'DELIVERED', 'DRAFT'] },
+      },
+      orderBy: { orderDate: 'asc' },
+      select: {
+        id: true,
+        orderNumber: true,
+        orderDate: true,
+        status: true,
+        paymentStatus: true,
+        total: true,
+        paidAmount: true,
+        currency: { select: { code: true } },
+        customerName: true,
+        customerEmail: true,
+        items: {
+          select: {
+            id: true,
+            quantity: true,
+            unitPrice: true,
+            inventorySerialId: true,
+            inventoryBatchId: true,
+            product: {
+              select: {
+                id: true,
+                sku: true,
+                name: true,
+                type: true,
+                trackInventory: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Collect every product we need to know live stock for.
+    const productIds = new Set<string>();
+    for (const o of orders) {
+      for (const it of o.items) {
+        if (it.product.trackInventory) productIds.add(it.product.id);
+      }
+    }
+
+    // Build a stock map: productId → available units (IN_STOCK + unassigned)
+    const stockMap = new Map<string, number>();
+    if (productIds.size > 0) {
+      // SERIAL products: count InventorySerial rows with status IN_STOCK
+      // and no orderItem assigned.
+      const serialCounts = await this.prisma.inventorySerial.groupBy({
+        by: ['productId'],
+        where: {
+          companyId,
+          productId: { in: Array.from(productIds) },
+          status: 'IN_STOCK',
+          orderItems: { none: {} },
+        },
+        _count: { _all: true },
+      });
+      for (const r of serialCounts) {
+        stockMap.set(r.productId, r._count._all);
+      }
+
+      // BATCH / PRODUCT: sum InventoryBatch.quantity (assumes batches are
+      // already net of consumed; cortana decrements on order
+      // confirmation).
+      const batchSums = await this.prisma.inventoryBatch.groupBy({
+        by: ['productId'],
+        where: {
+          companyId,
+          productId: { in: Array.from(productIds) },
+          quantity: { gt: 0 },
+        },
+        _sum: { quantity: true },
+      });
+      for (const r of batchSums) {
+        const prev = stockMap.get(r.productId) || 0;
+        stockMap.set(r.productId, prev + Number(r._sum.quantity || 0));
+      }
+    }
+
+    // Build one output row per OrderItem that needs allocation.
+    const rows: Array<{
+      orderId: string;
+      orderNumber: string;
+      orderDate: string;
+      orderStatus: string;
+      paymentStatus: string;
+      total: number;
+      paidAmount: number;
+      currency: string | null;
+      customerName: string;
+      customerEmail: string | null;
+      item: {
+        id: string;
+        productId: string;
+        productName: string;
+        productSku: string;
+        productType: string;
+        quantity: number;
+        unitPrice: number;
+        hasAllocation: boolean;
+      };
+      stockAvailable: number;
+      readiness: 'ready' | 'awaiting-stock' | 'allocated' | 'no-stock-tracked';
+    }> = [];
+
+    for (const o of orders) {
+      for (const it of o.items) {
+        // Items whose product doesn't track inventory (services etc.)
+        // don't belong in the dashboard.
+        if (!it.product.trackInventory) continue;
+
+        const hasAllocation = Boolean(it.inventorySerialId || it.inventoryBatchId);
+        const stockAvailable = stockMap.get(it.product.id) || 0;
+
+        let readiness: 'ready' | 'awaiting-stock' | 'allocated' | 'no-stock-tracked';
+        if (hasAllocation) {
+          readiness = 'allocated';
+        } else if (stockAvailable >= Number(it.quantity)) {
+          readiness = 'ready';
+        } else {
+          readiness = 'awaiting-stock';
+        }
+
+        // Hide already-allocated rows by default — they're not "unfulfilled".
+        if (readiness === 'allocated') continue;
+
+        rows.push({
+          orderId: o.id,
+          orderNumber: o.orderNumber,
+          orderDate: o.orderDate.toISOString(),
+          orderStatus: o.status,
+          paymentStatus: o.paymentStatus,
+          total: Number(o.total),
+          paidAmount: Number(o.paidAmount),
+          currency: o.currency?.code || null,
+          customerName: o.customerName,
+          customerEmail: o.customerEmail,
+          item: {
+            id: it.id,
+            productId: it.product.id,
+            productName: it.product.name,
+            productSku: it.product.sku,
+            productType: it.product.type,
+            quantity: Number(it.quantity),
+            unitPrice: Number(it.unitPrice),
+            hasAllocation,
+          },
+          stockAvailable,
+          readiness,
+        });
+      }
+    }
+
+    // Sort: "ready to ship" (red) first, then "awaiting stock" (amber),
+    // each sorted by order date ascending (oldest first).
+    rows.sort((a, b) => {
+      if (a.readiness !== b.readiness) {
+        if (a.readiness === 'ready') return -1;
+        if (b.readiness === 'ready') return 1;
+      }
+      return a.orderDate.localeCompare(b.orderDate);
+    });
+
+    return {
+      items: rows,
+      summary: {
+        total: rows.length,
+        ready: rows.filter((r) => r.readiness === 'ready').length,
+        awaitingStock: rows.filter((r) => r.readiness === 'awaiting-stock').length,
+      },
+    };
+  }
+
   async update(companyId: string, id: string, dto: UpdateOrderDto) {
     const order = await this.findOne(companyId, id);
 
