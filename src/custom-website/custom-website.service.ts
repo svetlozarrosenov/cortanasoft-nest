@@ -214,13 +214,17 @@ export class CustomWebsiteService {
       const data = await this.signedFetch<{
         customers: Array<{
           id: string;
-          firstName: string;
-          lastName: string;
+          firstName: string | null;
+          lastName: string | null;
           email: string;
           phone?: string | null;
           address?: string | null;
           city?: string | null;
+          postalCode?: string | null;
+          country?: string | null;
           createdAt: string;
+          orderCount?: number;
+          source?: 'registered' | 'guest';
         }>;
         pagination: { page: number; hasNextPage: boolean };
       }>(integration, `/api/integrations/cortana/customers?page=${page}&limit=100`);
@@ -230,6 +234,11 @@ export class CustomWebsiteService {
         const existing = await this.prisma.customer.findFirst({
           where: { companyId, email: c.email.toLowerCase() },
         });
+        // Registered users come back from shop tagged source='registered';
+        // anyone with at least one order is a CLIENT (not LEAD). Pure
+        // guests with zero matching orders shouldn't reach us since the
+        // shop endpoint filters them out.
+        const stage = (c.orderCount ?? 0) > 0 || c.source === 'registered' ? 'CLIENT' : 'LEAD';
         if (existing) {
           await this.prisma.customer.update({
             where: { id: existing.id },
@@ -239,6 +248,10 @@ export class CustomWebsiteService {
               phone: c.phone || existing.phone,
               address: c.address || existing.address,
               city: c.city || existing.city,
+              postalCode: c.postalCode || existing.postalCode,
+              // Only ever upgrade LEAD → CLIENT; never demote a manually
+              // promoted record.
+              stage: existing.stage === 'CLIENT' ? 'CLIENT' : stage,
             },
           });
           updated++;
@@ -246,12 +259,15 @@ export class CustomWebsiteService {
           await this.prisma.customer.create({
             data: {
               companyId,
-              firstName: c.firstName || '',
-              lastName: c.lastName || '',
+              firstName: c.firstName || null,
+              lastName: c.lastName || null,
               email: c.email.toLowerCase(),
               phone: c.phone || null,
               address: c.address || null,
               city: c.city || null,
+              postalCode: c.postalCode || null,
+              stage,
+              source: 'WEBSITE',
             },
           });
           imported++;
