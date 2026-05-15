@@ -5,6 +5,7 @@ import {
   ValidateNested,
   IsString,
   IsNotEmpty,
+  IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { GoodsReceiptStatus } from '@prisma/client';
@@ -28,4 +29,10 @@ export class UpdateGoodsReceiptStatusDto {
   @ValidateNested({ each: true })
   @Type(() => ItemSerialNumbersDto)
   itemSerials?: ItemSerialNumbersDto[];
+
+  // Дата на плащане — използва се само при transition към DELIVERED_PAID.
+  // Когато е празно, backend-ът използва текущия момент.
+  @IsOptional()
+  @IsDateString()
+  paidAt?: string;
 }

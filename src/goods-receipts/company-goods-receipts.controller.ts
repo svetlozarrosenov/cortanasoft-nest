@@ -79,6 +79,7 @@ export class CompanyGoodsReceiptsController {
       id,
       dto.status,
       dto.itemSerials,
+      dto.paidAt,
     );
   }
 

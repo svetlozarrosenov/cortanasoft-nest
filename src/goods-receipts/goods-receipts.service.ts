@@ -428,6 +428,7 @@ export class GoodsReceiptsService {
     id: string,
     targetStatus: GoodsReceiptStatus,
     itemSerials?: { goodsReceiptItemId: string; serialNumbers: string[] }[],
+    paidAtOverride?: string,
   ) {
     const receipt = await this.findOne(companyId, id);
 
@@ -605,7 +606,9 @@ export class GoodsReceiptsService {
         where: { goodsReceiptId: id },
         data: {
           status: expenseStatus,
-          ...(targetStatus === 'DELIVERED_PAID' ? { paidAt: new Date() } : {}),
+          ...(targetStatus === 'DELIVERED_PAID'
+            ? { paidAt: paidAtOverride ? new Date(paidAtOverride) : new Date() }
+            : {}),
         },
       });
 
