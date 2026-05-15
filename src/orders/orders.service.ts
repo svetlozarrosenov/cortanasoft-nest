@@ -657,7 +657,10 @@ export class OrdersService {
       throw new BadRequestException(ErrorMessages.orders.cannotConfirmWithoutItems);
     }
 
-    // Validate stock availability and deduct inventory in a transaction
+    // Deduct inventory where possible; items without stock/serial become
+    // backorders (stockDeducted=false) and stay listed in the "Awaiting
+    // fulfilment" dashboard until stock arrives. The order still becomes
+    // CONFIRMED so the user can collect payment and issue invoices.
     return this.prisma.$transaction(
       async (tx) => {
         for (const item of order.items) {
@@ -673,9 +676,13 @@ export class OrdersService {
           // Handle SERIAL products
           if (product.type === 'SERIAL') {
             if (!item.inventorySerialId) {
-              throw new BadRequestException(
-                ErrorMessages.inventory.serialRequired(product.name),
-              );
+              // Backorder: no serial assigned yet. Leave stockDeducted=false
+              // so cancel() won't restore something that was never deducted.
+              await tx.orderItem.update({
+                where: { id: item.id },
+                data: { stockDeducted: false },
+              });
+              continue;
             }
 
             const serial = await tx.inventorySerial.findFirst({
@@ -701,6 +708,10 @@ export class OrdersService {
             await tx.inventorySerial.update({
               where: { id: item.inventorySerialId },
               data: { status: 'SOLD' },
+            });
+            await tx.orderItem.update({
+              where: { id: item.id },
+              data: { stockDeducted: true },
             });
 
             continue;
@@ -731,6 +742,10 @@ export class OrdersService {
               where: { id: item.inventoryBatchId },
               data: { quantity: { decrement: quantity } },
             });
+            await tx.orderItem.update({
+              where: { id: item.id },
+              data: { stockDeducted: true },
+            });
           } else {
             // Auto-deduct using FIFO (oldest batches first)
             // Prefer item-level locationId, fall back to order-level
@@ -751,10 +766,13 @@ export class OrdersService {
             );
 
             if (totalAvailable < quantity) {
-              throw new BadRequestException(
-                `${ErrorMessages.inventory.insufficientStock}: "${product.name}" - ` +
-                  `налични: ${totalAvailable}, заявени: ${quantity}`,
-              );
+              // Backorder: insufficient stock. Skip deduction; the row stays
+              // in "Awaiting fulfilment" until a goods receipt arrives.
+              await tx.orderItem.update({
+                where: { id: item.id },
+                data: { stockDeducted: false },
+              });
+              continue;
             }
 
             let remaining = quantity;
@@ -771,6 +789,10 @@ export class OrdersService {
 
               remaining -= deduct;
             }
+            await tx.orderItem.update({
+              where: { id: item.id },
+              data: { stockDeducted: true },
+            });
           }
         }
 
@@ -813,11 +835,20 @@ export class OrdersService {
             continue;
           }
 
+          // Backorder items never had their stock decremented at confirm — nothing to restore.
+          if (!item.stockDeducted) {
+            continue;
+          }
+
           // Restore SERIAL products
           if (product.type === 'SERIAL' && item.inventorySerialId) {
             await tx.inventorySerial.update({
               where: { id: item.inventorySerialId },
               data: { status: 'IN_STOCK' },
+            });
+            await tx.orderItem.update({
+              where: { id: item.id },
+              data: { stockDeducted: false },
             });
             continue;
           }
@@ -849,6 +880,10 @@ export class OrdersService {
               });
             }
           }
+          await tx.orderItem.update({
+            where: { id: item.id },
+            data: { stockDeducted: false },
+          });
         }
       }
 

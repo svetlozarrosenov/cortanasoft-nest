@@ -1549,6 +1549,13 @@ model OrderItem {
   locationId String?
   location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
+  // Маркира дали наличността е била декрементирана при confirm().
+  // При backorder items (без stock/serial към момента на confirm) остава false,
+  // което позволява поръчката да продължи към CONFIRMED (плащане + фактура),
+  // а stock-ът да се "изпише" по-късно когато доставката пристигне.
+  // Cancel() възстановява само items с stockDeducted = true.
+  stockDeducted Boolean @default(true)
+
   invoiceItems InvoiceItem[]
 
   @@map("order_items")
