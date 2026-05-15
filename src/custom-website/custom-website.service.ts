@@ -26,6 +26,7 @@ export interface CustomWebsiteIntegrationView {
     customers: string | null;
     categories: string | null;
     products: string | null;
+    orders: string | null;
   };
   createdAt: string | null;
   updatedAt: string | null;
@@ -70,6 +71,7 @@ export class CustomWebsiteService {
         customers: lastPull.customers || null,
         categories: lastPull.categories || null,
         products: lastPull.products || null,
+        orders: lastPull.orders || null,
       },
       createdAt: integration.createdAt.toISOString(),
       updatedAt: integration.updatedAt.toISOString(),
@@ -383,6 +385,235 @@ export class CustomWebsiteService {
     return { imported, updated };
   }
 
+  // Pull historical orders from the shop into cortana. Idempotent by
+  // orderNumber — re-running just updates the status / payment status
+  // of orders that have changed. New orders are created with Customer
+  // (matched/created by email) and OrderItems (matched by SKU; items
+  // whose SKU we don't know yet are skipped with a log warning so the
+  // user can re-pull after pulling products).
+  async pullOrders(companyId: string) {
+    const integration = await this.requireIntegration(companyId);
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+    let page = 1;
+
+    while (true) {
+      const data = await this.signedFetch<{
+        orders: Array<{
+          id: string;
+          orderNumber: string;
+          status: string;
+          paymentMethod: string;
+          paymentStatus: string;
+          customer: { email: string; phone: string; firstName: string; lastName: string };
+          shipping: {
+            address: string;
+            city: string;
+            postalCode: string;
+            country: string;
+            method: string | null;
+            econtData: unknown;
+          };
+          totals: { subtotal: number; shippingCost: number; discount: number; total: number; currency: string };
+          items: Array<{ productId: string; sku: string; name: string; quantity: number; unitPrice: number; lineTotal: number }>;
+          notes: string | null;
+          createdAt: string;
+          updatedAt: string;
+        }>;
+        pagination: { page: number; hasNextPage: boolean };
+      }>(integration, `/api/integrations/cortana/orders?page=${page}&limit=50`);
+
+      for (const o of data.orders) {
+        const result = await this.upsertImportedOrder(companyId, o);
+        if (result === 'created') imported++;
+        else if (result === 'updated') updated++;
+        else skipped++;
+      }
+
+      if (!data.pagination?.hasNextPage) break;
+      page++;
+      if (page > 1000) break;
+    }
+
+    await this.recordLastPull(companyId, 'orders');
+    return { imported, updated, skipped };
+  }
+
+  // Translate shop's enums to cortana's. Shop has FINANCING + REVOLUT
+  // which cortana doesn't model separately — we fold them into the
+  // closest analogue and rely on Order.notes for the original method.
+  private mapShopPaymentMethod(method: string): 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'COD' {
+    switch ((method || '').toUpperCase()) {
+      case 'COD': return 'COD';
+      case 'CARD': return 'CARD';
+      case 'REVOLUT': return 'CARD';
+      case 'BANK': return 'BANK_TRANSFER';
+      case 'FINANCING': return 'BANK_TRANSFER';
+      default: return 'CASH';
+    }
+  }
+
+  private mapShopOrderStatus(status: string): 'DRAFT' | 'PENDING' | 'CONFIRMED' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' {
+    switch ((status || '').toUpperCase()) {
+      case 'PENDING': return 'PENDING';
+      case 'PROCESSING': return 'PROCESSING';
+      case 'SHIPPED': return 'SHIPPED';
+      case 'DELIVERED': return 'DELIVERED';
+      case 'CANCELLED':
+      case 'REJECTED_BY_BANK': return 'CANCELLED';
+      default: return 'PENDING';
+    }
+  }
+
+  private mapShopPaymentStatus(status: string): 'PENDING' | 'PARTIAL' | 'PAID' | 'REFUNDED' {
+    switch ((status || '').toUpperCase()) {
+      case 'PAID': return 'PAID';
+      case 'REFUNDED': return 'REFUNDED';
+      // shop's FAILED / CANCELLED have no direct cortana equivalent; we
+      // leave the payment status as PENDING and rely on Order.status to
+      // signal that the order itself was cancelled.
+      default: return 'PENDING';
+    }
+  }
+
+  // Create or refresh a cortana Order from a single shop payload. Returns
+  // 'created' | 'updated' | 'skipped' so the caller can report counts.
+  private async upsertImportedOrder(
+    companyId: string,
+    shopOrder: {
+      orderNumber: string;
+      status: string;
+      paymentMethod: string;
+      paymentStatus: string;
+      customer: { email: string; phone: string; firstName: string; lastName: string };
+      shipping: { address: string; city: string; postalCode: string; country: string; method: string | null };
+      totals: { subtotal: number; shippingCost: number; discount: number; total: number };
+      items: Array<{ sku: string; name: string; quantity: number; unitPrice: number; lineTotal: number }>;
+      notes: string | null;
+      createdAt: string;
+    },
+  ): Promise<'created' | 'updated' | 'skipped'> {
+    // Skip if no items at all — broken shop order, nothing useful to import.
+    if (!shopOrder.items || shopOrder.items.length === 0) return 'skipped';
+
+    const status = this.mapShopOrderStatus(shopOrder.status);
+    const paymentStatus = this.mapShopPaymentStatus(shopOrder.paymentStatus);
+    const paymentMethod = this.mapShopPaymentMethod(shopOrder.paymentMethod);
+
+    // Look up or create the Customer record for this email.
+    const email = (shopOrder.customer.email || '').toLowerCase();
+    let customerId: string | null = null;
+    if (email) {
+      const existingCustomer = await this.prisma.customer.findFirst({
+        where: { companyId, email },
+        select: { id: true },
+      });
+      if (existingCustomer) {
+        customerId = existingCustomer.id;
+      } else {
+        const created = await this.prisma.customer.create({
+          data: {
+            companyId,
+            firstName: shopOrder.customer.firstName || null,
+            lastName: shopOrder.customer.lastName || null,
+            email,
+            phone: shopOrder.customer.phone || null,
+            stage: 'CLIENT',
+            source: 'WEBSITE',
+            address: shopOrder.shipping.address || null,
+            city: shopOrder.shipping.city || null,
+            postalCode: shopOrder.shipping.postalCode || null,
+          },
+        });
+        customerId = created.id;
+      }
+    }
+
+    // Idempotency — if an Order with this number exists, just refresh
+    // status/payment fields. We do NOT rewrite OrderItems on update,
+    // since the admin may have already assigned inventorySerials.
+    const existing = await this.prisma.order.findFirst({
+      where: { companyId, orderNumber: shopOrder.orderNumber },
+      select: { id: true },
+    });
+    if (existing) {
+      await this.prisma.order.update({
+        where: { id: existing.id },
+        data: {
+          status,
+          paymentStatus,
+          paymentMethod,
+        },
+      });
+      return 'updated';
+    }
+
+    // Build OrderItem rows — skip items whose SKU we can't match yet,
+    // so the rest of the order still imports cleanly. The admin can
+    // re-pull after pulling products to fix those.
+    const skuList = shopOrder.items.map((i) => i.sku).filter(Boolean);
+    const products = await this.prisma.product.findMany({
+      where: { companyId, sku: { in: skuList } },
+      select: { id: true, sku: true, vatRate: true },
+    });
+    const productBySku = new Map(products.map((p) => [p.sku, p]));
+
+    const itemsData = shopOrder.items
+      .map((i) => {
+        const product = productBySku.get(i.sku);
+        if (!product) return null;
+        const vatRate = product.vatRate ?? 20;
+        // Shop prices are VAT-inclusive. Back out the net price so
+        // cortana's subtotal + vat math reconciles cleanly.
+        const vatMultiplier = 1 + Number(vatRate) / 100;
+        const unitNet = Number(i.unitPrice) / vatMultiplier;
+        const subtotal = unitNet * i.quantity;
+        return {
+          productId: product.id,
+          quantity: i.quantity,
+          unitPrice: Number(unitNet.toFixed(2)),
+          vatRate,
+          discount: 0,
+          subtotal: Number(subtotal.toFixed(2)),
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+
+    if (itemsData.length === 0) return 'skipped';
+
+    const subtotalNoVat = itemsData.reduce((sum, r) => sum + Number(r.subtotal), 0);
+    const vatAmount = Number((shopOrder.totals.total - subtotalNoVat - Number(shopOrder.totals.shippingCost) + Number(shopOrder.totals.discount)).toFixed(2));
+
+    await this.prisma.order.create({
+      data: {
+        companyId,
+        orderNumber: shopOrder.orderNumber,
+        orderDate: new Date(shopOrder.createdAt),
+        status,
+        customerId,
+        customerName: `${shopOrder.customer.firstName || ''} ${shopOrder.customer.lastName || ''}`.trim() || email || 'Unknown',
+        customerEmail: email || null,
+        customerPhone: shopOrder.customer.phone || null,
+        deliveryMethod: shopOrder.shipping.method === 'econt' ? 'econt_office' : (shopOrder.shipping.address ? 'manual' : 'none'),
+        shippingAddress: shopOrder.shipping.address || null,
+        shippingCity: shopOrder.shipping.city || null,
+        shippingPostalCode: shopOrder.shipping.postalCode || null,
+        paymentMethod,
+        paymentStatus,
+        subtotal: Number(subtotalNoVat.toFixed(2)),
+        vatAmount: Math.max(0, vatAmount),
+        shippingCost: Number(shopOrder.totals.shippingCost) || 0,
+        discount: Number(shopOrder.totals.discount) || 0,
+        total: Number(shopOrder.totals.total),
+        notes: shopOrder.notes,
+        items: { create: itemsData },
+      },
+    });
+
+    return 'created';
+  }
+
   // ----- helpers -----
 
   private async requireIntegration(companyId: string) {
@@ -440,7 +671,7 @@ export class CustomWebsiteService {
     return (integration?.settings as Record<string, unknown>) || {};
   }
 
-  private async recordLastPull(companyId: string, kind: 'customers' | 'categories' | 'products') {
+  private async recordLastPull(companyId: string, kind: 'customers' | 'categories' | 'products' | 'orders') {
     const settings = await this.readIntegrationSettings(companyId);
     const lastPull = (settings.lastPull as Record<string, string>) || {};
     lastPull[kind] = new Date().toISOString();
