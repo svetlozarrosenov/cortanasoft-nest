@@ -1098,7 +1098,8 @@ model StorageZone {
 model GoodsReceipt {
   id            String             @id @default(cuid())
   receiptNumber String // Номер на документа
-  receiptDate   DateTime           @default(now()) // Дата на приемане
+  receiptDate   DateTime           @default(now()) // Дата на поръчката (когато сме поръчали при доставчика)
+  deliveredAt   DateTime? // Дата на реалната доставка — попълва се при EXPECTED → DELIVERED_*
   status        GoodsReceiptStatus @default(EXPECTED)
   notes         String? // Бележки
   invoiceNumber String? // Номер на фактура от доставчик
@@ -1413,7 +1414,8 @@ enum PaymentMethod {
   CASH // В брой
   CARD // С карта
   BANK_TRANSFER // Банков превод
-  COD // Наложен платеж
+  COD // Наложен платеж (Еконт/Спиди и др. куриери)
+  POSTAL_MONEY_TRANSFER // Пощенски паричен превод (Български пощи)
 }
 
 // Статус на плащане

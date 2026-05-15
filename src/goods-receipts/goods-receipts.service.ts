@@ -429,6 +429,7 @@ export class GoodsReceiptsService {
     targetStatus: GoodsReceiptStatus,
     itemSerials?: { goodsReceiptItemId: string; serialNumbers: string[] }[],
     paidAtOverride?: string,
+    deliveredAtOverride?: string,
   ) {
     const receipt = await this.findOne(companyId, id);
 
@@ -613,9 +614,19 @@ export class GoodsReceiptsService {
       });
 
       // === Update receipt status ===
+      // При EXPECTED → DELIVERED_* записваме реалната дата на доставка.
+      const receiptUpdateData: {
+        status: GoodsReceiptStatus;
+        deliveredAt?: Date;
+      } = { status: targetStatus };
+      if (isDelivering) {
+        receiptUpdateData.deliveredAt = deliveredAtOverride
+          ? new Date(deliveredAtOverride)
+          : new Date();
+      }
       return tx.goodsReceipt.update({
         where: { id },
-        data: { status: targetStatus },
+        data: receiptUpdateData,
         include: RECEIPT_INCLUDE,
       });
     });

@@ -80,6 +80,7 @@ export class CompanyGoodsReceiptsController {
       dto.status,
       dto.itemSerials,
       dto.paidAt,
+      dto.deliveredAt,
     );
   }
 

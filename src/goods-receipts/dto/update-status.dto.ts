@@ -35,4 +35,10 @@ export class UpdateGoodsReceiptStatusDto {
   @IsOptional()
   @IsDateString()
   paidAt?: string;
+
+  // Дата на реалната доставка — попълва се при transition EXPECTED → DELIVERED_*.
+  // Когато е празно, backend-ът използва текущия момент.
+  @IsOptional()
+  @IsDateString()
+  deliveredAt?: string;
 }
