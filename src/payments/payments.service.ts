@@ -212,7 +212,7 @@ export class PaymentsService {
     orderId: string,
     externalStatus: 'PENDING' | 'PARTIAL' | 'PAID' | 'REFUNDED',
     total: number,
-    method: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'COD' = 'CASH',
+    method: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'COD' | 'POSTAL_MONEY_TRANSFER' = 'CASH',
   ) {
     if (externalStatus === 'PAID') {
       const existing = await tx.payment.aggregate({

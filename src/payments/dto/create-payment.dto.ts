@@ -14,6 +14,7 @@ enum PaymentMethodEnum {
   CARD = 'CARD',
   BANK_TRANSFER = 'BANK_TRANSFER',
   COD = 'COD',
+  POSTAL_MONEY_TRANSFER = 'POSTAL_MONEY_TRANSFER',
 }
 
 export class CreatePaymentDto {
