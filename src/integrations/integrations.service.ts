@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
-import { PaymentMethod } from '@prisma/client';
+import { PaymentMethod, CreditBank } from '@prisma/client';
 
 @Injectable()
 export class IntegrationsService {
@@ -13,7 +13,7 @@ export class IntegrationsService {
   ) {}
 
   async processOrder(companyId: string, payload: any) {
-    const { source, order, billing, shipping, totals, items } = payload;
+    const { source, order, billing, shipping, totals, items, financing } = payload;
 
     if (!items || items.length === 0) {
       throw new BadRequestException('Order must have at least one item');
@@ -110,10 +110,112 @@ export class IntegrationsService {
       `Order created from ${source || 'integration'}: ${createdOrder.orderNumber} (company: ${companyId})`,
     );
 
+    // Ако купувачът е избрал "На изплащане", shop праща и `financing`
+    // обект (структурата зависи от провайдъра — POSTBANK/TBI има различни
+    // полета). Създаваме CreditApplication със status=REQUESTED и
+    // нормализирани полета. Грешка тук не трябва да блокира поръчката —
+    // ERP-ът ще покаже поръчката, кредитът може да се въведе ръчно.
+    if (financing && typeof financing === 'object') {
+      try {
+        await this.createCreditApplicationFromFinancing(
+          companyId,
+          createdOrder.id,
+          customerId,
+          Number(createdOrder.total),
+          financing,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Could not create CreditApplication for order ${createdOrder.orderNumber}: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    }
+
     return {
       orderId: createdOrder.id,
       orderNumber: createdOrder.orderNumber,
     };
+  }
+
+  // Map shop's `financing.provider` string to our CreditBank enum. Unknown
+  // / missing providers fall back to OTHER so we still record the request.
+  private mapCreditBank(provider: unknown): CreditBank {
+    const key = String(provider || '').toLowerCase().trim();
+    const map: Record<string, CreditBank> = {
+      postbank: CreditBank.POSTBANK,
+      tbi: CreditBank.TBI,
+      unicredit: CreditBank.UNICREDIT,
+      ubb: CreditBank.UBB,
+      dsk: CreditBank.DSK,
+      bnp: CreditBank.BNP_PARIBAS,
+      bnp_paribas: CreditBank.BNP_PARIBAS,
+      profi: CreditBank.PROFI_CREDIT,
+      profi_credit: CreditBank.PROFI_CREDIT,
+      fibank: CreditBank.FIBANK,
+      raiffeisen: CreditBank.RAIFFEISEN,
+      ccb: CreditBank.CCB,
+      allianz: CreditBank.ALLIANZ,
+      bacb: CreditBank.BACB,
+    };
+    return map[key] || CreditBank.OTHER;
+  }
+
+  private async createCreditApplicationFromFinancing(
+    companyId: string,
+    orderId: string,
+    customerId: string | undefined,
+    orderTotal: number,
+    financing: any,
+  ): Promise<void> {
+    const bank = this.mapCreditBank(financing.provider);
+
+    // POSTBANK uses `maturity` + `installmentAmount`; TBI nests its detail
+    // under a `tbi` key with `period` / `creditApplicationId`. Pull what
+    // each provider exposes and leave the rest null.
+    const termMonths =
+      typeof financing.maturity === 'number'
+        ? financing.maturity
+        : typeof financing.period === 'number'
+        ? financing.period
+        : typeof financing.tbi?.period === 'number'
+        ? financing.tbi.period
+        : undefined;
+    const monthlyPayment =
+      typeof financing.installmentAmount === 'number'
+        ? financing.installmentAmount
+        : undefined;
+    const bankRef =
+      typeof financing.tbi?.creditApplicationId === 'string'
+        ? financing.tbi.creditApplicationId
+        : undefined;
+
+    // Capture the rate / total-repayment details in `notes` so the
+    // merchant still has them without us adding ten optional columns.
+    const noteParts: string[] = [];
+    if (typeof financing.aprPercent === 'number') noteParts.push(`APR: ${financing.aprPercent}%`);
+    if (typeof financing.nirPercent === 'number') noteParts.push(`NIR: ${financing.nirPercent}%`);
+    if (typeof financing.totalRepayment === 'number') noteParts.push(`Total repayment: ${financing.totalRepayment} BGN`);
+    if (typeof financing.downPayment === 'number' && financing.downPayment > 0) noteParts.push(`Down payment: ${financing.downPayment} BGN`);
+    const notes = noteParts.length > 0 ? noteParts.join(' / ') : undefined;
+
+    await this.prisma.creditApplication.create({
+      data: {
+        companyId,
+        orderId,
+        customerId,
+        bank,
+        bankRef,
+        requestedAmount: orderTotal,
+        termMonths,
+        monthlyPayment,
+        status: 'REQUESTED',
+        notes,
+      },
+    });
+
+    this.logger.log(
+      `Auto-created CreditApplication (bank=${bank}, term=${termMonths || '—'}) for order ${orderId}`,
+    );
   }
 
   async getStock(companyId: string, skus?: string[]) {
