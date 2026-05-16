@@ -19,16 +19,35 @@ export class IntegrationsService {
       throw new BadRequestException('Order must have at least one item');
     }
 
-    // Match products and build order items
-    const orderItems: { productId: string; quantity: number; unitPrice: number }[] = [];
+    // Match products and build order items. Shop integrations send GROSS
+    // prices (the amount the customer pays). cortana stores net unitPrice +
+    // vatRate, so back the VAT out before saving — otherwise the order
+    // recomputes VAT on top of the gross and inflates the total.
+    const orderItems: { productId: string; quantity: number; unitPrice: number; vatRate: number }[] = [];
+    const matchedProductIds: string[] = [];
     for (const item of items) {
       const productId = await this.matchOrCreateProduct(companyId, item);
+      matchedProductIds.push(productId);
+    }
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: matchedProductIds } },
+      select: { id: true, vatRate: true },
+    });
+    const vatByProduct = new Map(
+      products.map((p) => [p.id, Number(p.vatRate ?? 0)]),
+    );
+    items.forEach((item: any, idx: number) => {
+      const productId = matchedProductIds[idx];
+      const vatRate = vatByProduct.get(productId) ?? 0;
+      const gross = Number(item.unitPrice);
+      const net = vatRate > 0 ? gross / (1 + vatRate / 100) : gross;
       orderItems.push({
         productId,
         quantity: item.quantity,
-        unitPrice: item.unitPrice,
+        unitPrice: Number(net.toFixed(2)),
+        vatRate,
       });
-    }
+    });
 
     // Build customer name
     const customerName = [billing?.firstName, billing?.lastName]
@@ -43,6 +62,20 @@ export class IntegrationsService {
       .filter(Boolean)
       .join(', ') || undefined;
 
+    // Match or create a Customer record so orders from the online shop
+    // populate the cortana CRM/ERP customer list (otherwise the order
+    // would only carry denormalized customer fields and the customer
+    // wouldn't appear in /crm/customers or /erp/customers).
+    const customerId = await this.matchOrCreateCustomer(companyId, {
+      firstName: billing?.firstName,
+      lastName: billing?.lastName,
+      email: billing?.email,
+      phone: billing?.phone,
+      address: shippingAddress,
+      city: shipping?.city,
+      postalCode: shipping?.postcode,
+    });
+
     // Get a user for createdBy (first user of the company)
     const userId = await this.getCompanyUserId(companyId);
 
@@ -55,6 +88,7 @@ export class IntegrationsService {
       : undefined;
 
     const createdOrder = await this.ordersService.create(companyId, userId, {
+      customerId,
       customerName,
       customerEmail: billing?.email || undefined,
       customerPhone: billing?.phone || undefined,
@@ -107,6 +141,66 @@ export class IntegrationsService {
         ? p.inventoryBatches.reduce((sum, b) => sum + Number(b.quantity), 0)
         : null,
     }));
+  }
+
+  // Find an existing CRM customer by email (preferred) or phone, otherwise
+  // create one. Buyers from the online shop are individuals who've already
+  // placed an order → stage=CLIENT, source=WEBSITE. Returns undefined only
+  // if the payload has no contact info at all.
+  private async matchOrCreateCustomer(
+    companyId: string,
+    data: {
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      phone?: string;
+      address?: string;
+      city?: string;
+      postalCode?: string;
+    },
+  ): Promise<string | undefined> {
+    const email = data.email?.trim().toLowerCase() || undefined;
+    const phone = data.phone?.trim() || undefined;
+    if (!email && !phone) return undefined;
+
+    if (email) {
+      const byEmail = await this.prisma.customer.findFirst({
+        where: { companyId, email: { equals: email, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (byEmail) return byEmail.id;
+    }
+
+    if (phone) {
+      const byPhone = await this.prisma.customer.findFirst({
+        where: { companyId, phone },
+        select: { id: true },
+      });
+      if (byPhone) return byPhone.id;
+    }
+
+    const customer = await this.prisma.customer.create({
+      data: {
+        companyId,
+        type: 'INDIVIDUAL',
+        stage: 'CLIENT',
+        source: 'WEBSITE',
+        firstName: data.firstName || null,
+        lastName: data.lastName || null,
+        email: email || null,
+        phone: phone || null,
+        address: data.address || null,
+        city: data.city || null,
+        postalCode: data.postalCode || null,
+      },
+      select: { id: true },
+    });
+
+    this.logger.log(
+      `Auto-created customer "${data.firstName || ''} ${data.lastName || ''}".trim() (${email || phone}) for company ${companyId}`,
+    );
+
+    return customer.id;
   }
 
   private async matchOrCreateProduct(
