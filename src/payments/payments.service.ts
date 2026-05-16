@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import {
   CreatePaymentDto,
   UpdatePaymentDto,
@@ -22,7 +23,10 @@ const PAYMENT_INCLUDE = {
 
 @Injectable()
 export class PaymentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private webhookDispatcher: WebhookDispatcherService,
+  ) {}
 
   async findAll(companyId: string, query: QueryPaymentsDto) {
     const page = Number(query.page) || 1;
@@ -68,7 +72,7 @@ export class PaymentsService {
   }
 
   async create(companyId: string, userId: string, dto: CreatePaymentDto) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findFirst({
         where: { id: dto.orderId, companyId },
         select: { id: true, total: true, currencyId: true, paymentStatus: true },
@@ -95,10 +99,12 @@ export class PaymentsService {
 
       return payment;
     });
+    await this.webhookDispatcher.emitOrderChanged(companyId, dto.orderId);
+    return result;
   }
 
   async update(companyId: string, id: string, dto: UpdatePaymentDto) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findFirst({
         where: { id, companyId },
       });
@@ -120,10 +126,12 @@ export class PaymentsService {
 
       return updated;
     });
+    await this.webhookDispatcher.emitOrderChanged(companyId, result.orderId);
+    return result;
   }
 
   async remove(companyId: string, id: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const { orderId } = await this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findFirst({
         where: { id, companyId },
       });
@@ -132,8 +140,10 @@ export class PaymentsService {
       await tx.payment.delete({ where: { id } });
       await this.recalculateOrderState(tx, payment.orderId);
 
-      return { success: true };
+      return { orderId: payment.orderId };
     });
+    await this.webhookDispatcher.emitOrderChanged(companyId, orderId);
+    return { success: true };
   }
 
   /**

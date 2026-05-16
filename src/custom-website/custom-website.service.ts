@@ -113,6 +113,13 @@ export class CustomWebsiteService {
       });
 
       // Outbound webhook subscription used by WebhookDispatcherService.
+      // Default-subscribe to both stock and order events; existing
+      // subscriptions get the missing events back-filled idempotently
+      // (set union, no removals).
+      const DEFAULT_EVENTS = ['stock.changed', 'order.changed'];
+      const mergedEvents = existingWebhook
+        ? Array.from(new Set([...existingWebhook.events, ...DEFAULT_EVENTS]))
+        : DEFAULT_EVENTS;
       const webhookSecret = dto.secret?.trim() || existingWebhook?.secret;
       const webhook = existingWebhook
         ? await tx.integrationWebhook.update({
@@ -121,7 +128,7 @@ export class CustomWebsiteService {
               webhookUrl,
               ...(dto.secret?.trim() ? { secret: dto.secret.trim() } : {}),
               isActive: dto.isActive ?? true,
-              events: existingWebhook.events.length > 0 ? existingWebhook.events : ['stock.changed'],
+              events: mergedEvents,
             },
           })
         : await tx.integrationWebhook.create({
@@ -130,7 +137,7 @@ export class CustomWebsiteService {
               provider: PROVIDER,
               webhookUrl,
               secret: webhookSecret!,
-              events: ['stock.changed'],
+              events: mergedEvents,
               isActive: dto.isActive ?? true,
             },
           });

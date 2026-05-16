@@ -1480,6 +1480,11 @@ enum CreditBank {
 model Order {
   id          String      @id @default(cuid())
   orderNumber String // Номер на поръчката
+  // ID на същата поръчка в свързаната custom-website система (например
+  // shop-а на electric-express). NULL за поръчки, въведени директно в
+  // cortana — интеграцията е изцяло опционална и компании без shop
+  // никога не я виждат. Уникалност в рамките на компания.
+  externalId  String?
   orderDate   DateTime    @default(now()) // Дата на поръчката
   status      OrderStatus @default(DRAFT)
 
@@ -1549,6 +1554,7 @@ model Order {
   creditApplication   CreditApplication?
 
   @@unique([companyId, orderNumber])
+  @@unique([companyId, externalId])
   @@index([companyId, status])
   @@index([companyId, orderDate])
   @@map("orders")

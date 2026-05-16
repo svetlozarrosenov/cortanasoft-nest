@@ -36,6 +36,41 @@ export class WebhookDispatcherService {
       .digest('hex');
   }
 
+  // Emit an `order.changed` event for the shop side, but ONLY when the
+  // order has an externalId — meaning it's anchored to a shop record. Pure
+  // cortana orders (no shop link) silently skip this; we don't want to
+  // notify nobody and we don't want to leak cortana-only ids to the
+  // outside world. Safe to call from any service that mutated an order;
+  // the dispatcher reads fresh state before sending.
+  async emitOrderChanged(companyId: string, orderId: string): Promise<void> {
+    try {
+      const order = await this.prisma.order.findFirst({
+        where: { id: orderId, companyId },
+        select: {
+          id: true,
+          orderNumber: true,
+          externalId: true,
+          status: true,
+          paymentStatus: true,
+          paidAmount: true,
+          total: true,
+        },
+      });
+      if (!order || !order.externalId) return;
+      await this.dispatch(companyId, 'order.changed', {
+        externalId: order.externalId,
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        paidAmount: Number(order.paidAmount),
+        total: Number(order.total),
+      });
+    } catch (err) {
+      this.logger.warn(`emitOrderChanged(${orderId}) failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
   // Fire-and-forget dispatch of an event to every active subscription on
   // the company that asked for it. Resolves AFTER all deliveries finish
   // logging, but callers usually `void this.dispatch(...)` so they don't

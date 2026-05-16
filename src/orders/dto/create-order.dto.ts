@@ -52,6 +52,12 @@ export class CreateOrderDto {
   @IsOptional()
   orderNumber?: string;
 
+  // ID на същата поръчка в свързаната custom-website / shop система.
+  // Optional — позволено е cortana да създаде поръчка без shop връзка.
+  @IsString()
+  @IsOptional()
+  externalId?: string;
+
   @IsString()
   @IsOptional()
   orderDate?: string;

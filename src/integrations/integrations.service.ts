@@ -92,6 +92,9 @@ export class IntegrationsService {
       customerName,
       customerEmail: billing?.email || undefined,
       customerPhone: billing?.phone || undefined,
+      // externalId анкорира тази cortana поръчка към същата поръчка в
+      // shop-а; ползва се после за двупосочни webhook-и (status sync).
+      externalId: order?.externalId || undefined,
       shippingAddress,
       shippingCity: shipping?.city || undefined,
       shippingPostalCode: shipping?.postcode || undefined,

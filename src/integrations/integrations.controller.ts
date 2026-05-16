@@ -60,14 +60,38 @@ export class IntegrationsController {
   // shop never updates payment/invoice data here, just displays it.
   // Authenticated by the same ApiKeyGuard as the other /integrations
   // endpoints, so the shop's cs_live_ key is enough.
+  //
+  // Two routes are exposed because shop and cortana use different
+  // identifiers: shop knows its own order id (saved as externalId on
+  // cortana), cortana labels them with its own generated orderNumber.
+  // Prefer the by-external-id route — it's stable against orderNumber
+  // renumbering on the cortana side.
+  @Get('orders/by-external-id/:externalId/financials')
+  async getOrderFinancialsByExternalId(
+    @Req() req: any,
+    @Param('externalId') externalId: string,
+  ) {
+    return this.financialsFor(req.apiKeyCompanyId, { externalId });
+  }
+
   @Get('orders/by-number/:orderNumber/financials')
   async getOrderFinancials(
     @Req() req: any,
     @Param('orderNumber') orderNumber: string,
   ) {
-    const companyId = req.apiKeyCompanyId;
+    return this.financialsFor(req.apiKeyCompanyId, { orderNumber });
+  }
+
+  private async financialsFor(
+    companyId: string,
+    lookup: { externalId?: string; orderNumber?: string },
+  ) {
     const order = await this.prisma.order.findFirst({
-      where: { companyId, orderNumber },
+      where: {
+        companyId,
+        ...(lookup.externalId !== undefined && { externalId: lookup.externalId }),
+        ...(lookup.orderNumber !== undefined && { orderNumber: lookup.orderNumber }),
+      },
       select: {
         id: true,
         orderNumber: true,

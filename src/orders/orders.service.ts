@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
 import { WarrantiesService } from '../warranties/warranties.service';
 import { PaymentsService } from '../payments/payments.service';
+import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 
 /** Round a number to 2 decimal places to avoid floating-point drift */
 function round2(n: number): number {
@@ -68,6 +69,7 @@ export class OrdersService {
     private prisma: PrismaService,
     private warrantiesService: WarrantiesService,
     private paymentsService: PaymentsService,
+    private webhookDispatcher: WebhookDispatcherService,
   ) {}
 
   private async generateOrderNumber(
@@ -198,6 +200,7 @@ export class OrdersService {
       const createdOrder = await tx.order.create({
         data: {
           orderNumber,
+          externalId: dto.externalId,
           orderDate: dto.orderDate ? new Date(dto.orderDate) : new Date(),
           status: 'DRAFT',
           paymentStatus: 'PENDING',
@@ -595,7 +598,7 @@ export class OrdersService {
       const shippingCost = dto.shippingCost ?? Number(order.shippingCost);
       const total = round2(subtotal + vatAmount + shippingCost - orderDiscount);
 
-      return this.prisma.$transaction(async (tx) => {
+      const updated = await this.prisma.$transaction(async (tx) => {
         // Delete existing items
         await tx.orderItem.deleteMany({
           where: { orderId: id },
@@ -633,10 +636,12 @@ export class OrdersService {
           include: ORDER_INCLUDE,
         });
       });
+      await this.webhookDispatcher.emitOrderChanged(companyId, id);
+      return updated;
     }
 
     // Update metadata only (no items change)
-    return this.prisma.order.update({
+    const updated = await this.prisma.order.update({
       where: { id },
       data: {
         ...(dto.orderDate && { orderDate: new Date(dto.orderDate) }),
@@ -661,6 +666,8 @@ export class OrdersService {
       },
       include: ORDER_INCLUDE,
     });
+    await this.webhookDispatcher.emitOrderChanged(companyId, id);
+    return updated;
   }
 
   async confirm(companyId: string, id: string) {
@@ -678,7 +685,7 @@ export class OrdersService {
     // backorders (stockDeducted=false) and stay listed in the "Awaiting
     // fulfilment" dashboard until stock arrives. The order still becomes
     // CONFIRMED so the user can collect payment and issue invoices.
-    return this.prisma.$transaction(
+    const result = await this.prisma.$transaction(
       async (tx) => {
         for (const item of order.items) {
           const product = await tx.product.findUnique({
@@ -822,6 +829,8 @@ export class OrdersService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+    await this.webhookDispatcher.emitOrderChanged(companyId, id);
+    return result;
   }
 
   async cancel(companyId: string, id: string) {
@@ -840,7 +849,7 @@ export class OrdersService {
       order.status,
     );
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       if (needsRestore) {
         for (const item of order.items) {
           const product = await tx.product.findUnique({
@@ -910,6 +919,8 @@ export class OrdersService {
         include: ORDER_INCLUDE,
       });
     });
+    await this.webhookDispatcher.emitOrderChanged(companyId, id);
+    return result;
   }
 
   async remove(companyId: string, id: string) {
