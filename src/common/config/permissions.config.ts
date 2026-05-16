@@ -208,6 +208,8 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
               { key: 'total', labelKey: 'modules.erp.total' },
               { key: 'status', labelKey: 'common.status' },
               { key: 'paymentStatus', labelKey: 'modules.erp.paymentStatus' },
+              // Видима само за роли с erp.credits.view — отделна гард в UI-а.
+              { key: 'credit', labelKey: 'modules.erp.credits.panelTitle' },
             ],
           },
         ],
