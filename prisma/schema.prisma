@@ -229,6 +229,7 @@ model Company {
   integrationWebhooks          IntegrationWebhook[]
   integrationWebhookDeliveries IntegrationWebhookDelivery[]
   payments                     Payment[]
+  creditApplications           CreditApplication[]
 
   // Сервиз
   serviceOrders    ServiceOrder[]
@@ -465,6 +466,7 @@ model User {
   createdAcceptanceProtocols    AcceptanceProtocol[]    @relation("AcceptanceProtocolCreator")
   createdAscertainmentProtocols AscertainmentProtocol[] @relation("AscertainmentProtocolCreator")
   createdPlans                  CompanyPlan[]           @relation("PlanCreator")
+  createdCreditApplications     CreditApplication[]     @relation("CreditApplicationCreator")
   assignedCustomers             Customer[]              @relation("CustomerAssignee")
   assignedDeals                 Deal[]                  @relation("DealAssignee")
   createdDeals                  Deal[]                  @relation("DealCreator")
@@ -1258,6 +1260,7 @@ model Customer {
   serviceOrders          ServiceOrder[]
   serviceAssets          ServiceAsset[]
   serviceContracts       ServiceContract[]
+  creditApplications     CreditApplication[]
 
   @@unique([companyId, eik])
   @@index([companyId, type])
@@ -1444,6 +1447,35 @@ enum InvoiceType {
   CREDIT_NOTE // Кредитно известие
 }
 
+// Статус на заявка за потребителски кредит / стоков кредит
+enum CreditApplicationStatus {
+  REQUESTED // Подадена; чакаме решение от банката
+  APPROVED // Одобрена; чакаме подпис на договор
+  SIGNED // Договор подписан; чакаме банката да преведе
+  PAID // Банката преведе средствата към търговеца
+  REJECTED // Банката отказа
+  CANCELLED // Клиент или търговец оттегли заявката
+}
+
+// Банки в България, които често предлагат потребителски/стоков кредит.
+// Hardcoded enum, защото списъкът се променя бавно и така отчетите по
+// банка са тривиални; добавяне на нов елемент = миграция.
+enum CreditBank {
+  UNICREDIT // УниКредит Кънсюмър Файненсинг
+  POSTBANK // Пощенска банка / Eurobank
+  UBB // ОББ
+  DSK // ДСК (включително бившия SG Експресбанк)
+  TBI // TBI Bank
+  BNP_PARIBAS // БНП Париба Лични финанси
+  PROFI_CREDIT // Profi Credit
+  FIBANK // Първа Инвестиционна Банка
+  RAIFFEISEN // Райфайзенбанк
+  CCB // Централна Кооперативна Банка
+  ALLIANZ // Алианц Банк
+  BACB // Българо-Американска Кредитна Банка
+  OTHER // Друга / неуказана
+}
+
 // Клиентска поръчка (продажба)
 model Order {
   id          String      @id @default(cuid())
@@ -1514,6 +1546,7 @@ model Order {
   shipments           Shipment[]
   issuedWarranties    IssuedWarranty[]
   payments            Payment[]
+  creditApplication   CreditApplication?
 
   @@unique([companyId, orderNumber])
   @@index([companyId, status])
@@ -1559,6 +1592,54 @@ model OrderItem {
   invoiceItems InvoiceItem[]
 
   @@map("order_items")
+}
+
+// Заявка за потребителски / стоков кредит, придружаваща поръчка.
+// Поръчката си остава с нормален жизнен цикъл (DRAFT → DELIVERED) —
+// кредитът е отделен paralel state machine. На една поръчка може да
+// има най-много една активна заявка (unique на orderId).
+model CreditApplication {
+  id        String                  @id @default(cuid())
+  status    CreditApplicationStatus @default(REQUESTED)
+  bank      CreditBank // Банка / финансова институция
+  bankRef   String? // Външен референтен номер от банката (договор / заявка)
+
+  // Сума, която клиентът иска да финансира (gross). Не е задължително
+  // равна на order.total — може да има капаро или такси.
+  requestedAmount Decimal  @db.Decimal(12, 2)
+  // Срок в месеци (12, 24, 36...). Незадължителен преди одобрение.
+  termMonths      Int?
+  monthlyPayment  Decimal? @db.Decimal(10, 2) // Попълва се след одобрение от банката
+
+  // Жизнен цикъл — кога е минал през всеки етап.
+  appliedAt  DateTime  @default(now())
+  decisionAt DateTime? // Кога банката е решила (APPROVED или REJECTED)
+  signedAt   DateTime? // Кога клиентът е подписал договора
+  paidAt     DateTime? // Кога банката е превела парите към търговеца
+  cancelledAt DateTime?
+
+  notes String? // Бележки от търговеца (защо е отказана, особени условия, ...)
+
+  // Релации
+  orderId String  @unique // Една заявка на поръчка
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdById String?
+  createdBy   User?   @relation("CreditApplicationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, status])
+  @@index([companyId, bank])
+  @@index([companyId, appliedAt])
+  @@map("credit_applications")
 }
 
 // Плащане по поръчка (история на реални плащания)

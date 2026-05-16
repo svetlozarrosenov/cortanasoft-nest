@@ -11,6 +11,7 @@ import { LocationsModule } from './locations/locations.module';
 import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { OrdersModule } from './orders/orders.module';
+import { CreditApplicationsModule } from './credit-applications/credit-applications.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { CurrenciesModule } from './currencies/currencies.module';
 import { CountriesModule } from './countries/countries.module';
@@ -84,6 +85,7 @@ import { ServiceModule } from './service/service.module';
     GoodsReceiptsModule,
     InventoryModule,
     OrdersModule,
+    CreditApplicationsModule,
     InvoicesModule,
     CurrenciesModule,
     CountriesModule,

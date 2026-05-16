@@ -213,6 +213,25 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
+        key: 'credits',
+        labelKey: 'modules.erp.credits',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'creditsList',
+            labelKey: 'modules.erp.creditsList',
+            columns: [
+              { key: 'orderNumber', labelKey: 'modules.erp.orderNumber' },
+              { key: 'customer', labelKey: 'modules.erp.customer' },
+              { key: 'bank', labelKey: 'modules.erp.creditBank' },
+              { key: 'requestedAmount', labelKey: 'modules.erp.creditAmount' },
+              { key: 'status', labelKey: 'common.status' },
+              { key: 'appliedAt', labelKey: 'modules.erp.creditAppliedAt' },
+            ],
+          },
+        ],
+      },
+      {
         key: 'offers',
         labelKey: 'modules.erp.offers',
         actions: ['view', 'create', 'edit', 'delete'],

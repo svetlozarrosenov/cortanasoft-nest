@@ -34,6 +34,23 @@ const ORDER_INCLUDE = {
     where: { status: { not: 'CANCELLED' as const } },
     select: { id: true, documentNumber: true },
   },
+  creditApplication: {
+    select: {
+      id: true,
+      status: true,
+      bank: true,
+      bankRef: true,
+      requestedAmount: true,
+      termMonths: true,
+      monthlyPayment: true,
+      appliedAt: true,
+      decisionAt: true,
+      signedAt: true,
+      paidAt: true,
+      cancelledAt: true,
+      notes: true,
+    },
+  },
   _count: { select: { items: true, invoices: true } },
 } as const;
 
