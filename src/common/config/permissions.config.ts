@@ -214,7 +214,7 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
       },
       {
         key: 'credits',
-        labelKey: 'modules.erp.credits',
+        labelKey: 'modules.erp.credits.title',
         actions: ['view', 'create', 'edit', 'delete'],
         tables: [
           {
