@@ -73,12 +73,14 @@ export class DashboardService {
       }),
     ]);
 
-    // Get ERP stats
+    // Get ERP stats. "ordersThisMonth" filters by orderDate (the user-entered
+    // sale date), not createdAt — otherwise backfilled / backdated orders all
+    // bunch into the month they were keyed in.
     const [totalProducts, totalOrders, ordersThisMonth] = await Promise.all([
       this.prisma.product.count({ where: { companyId } }),
       this.prisma.order.count({ where: { companyId } }),
       this.prisma.order.count({
-        where: { companyId, createdAt: { gte: startOfMonth } },
+        where: { companyId, orderDate: { gte: startOfMonth } },
       }),
     ]);
 
@@ -96,11 +98,13 @@ export class DashboardService {
       unpaidInvoices,
       unpaidInvoiceAmount,
     ] = await Promise.all([
-      // Revenue this month (confirmed+ orders)
+      // Revenue this month (confirmed+ orders). Filter by orderDate so
+      // backfilled historical orders show up in the right month, not the
+      // month they were entered into the system.
       this.prisma.order.aggregate({
         where: {
           companyId,
-          createdAt: { gte: startOfMonth },
+          orderDate: { gte: startOfMonth },
           status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
         },
         _sum: { total: true },
@@ -109,7 +113,7 @@ export class DashboardService {
       this.prisma.order.aggregate({
         where: {
           companyId,
-          createdAt: { gte: startOfLastMonth, lte: endOfLastMonth },
+          orderDate: { gte: startOfLastMonth, lte: endOfLastMonth },
           status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
         },
         _sum: { total: true },
@@ -118,7 +122,7 @@ export class DashboardService {
       this.prisma.order.count({
         where: {
           companyId,
-          createdAt: { gte: startOfLastMonth, lte: endOfLastMonth },
+          orderDate: { gte: startOfLastMonth, lte: endOfLastMonth },
           status: { not: 'CANCELLED' },
         },
       }),
