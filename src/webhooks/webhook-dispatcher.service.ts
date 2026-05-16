@@ -71,6 +71,37 @@ export class WebhookDispatcherService {
     }
   }
 
+  // Emit a `credit.changed` event when a CreditApplication transitions
+  // between statuses (REQUESTED → APPROVED / REJECTED → SIGNED → PAID …).
+  // Shop side listens for REJECTED and flips the order into the
+  // REJECTED_BY_BANK status; other transitions are informational. We
+  // only fire when the linked order has an externalId — pure cortana
+  // credits without a shop counterpart have nobody to notify.
+  async emitCreditChanged(companyId: string, creditId: string): Promise<void> {
+    try {
+      const credit = await this.prisma.creditApplication.findFirst({
+        where: { id: creditId, companyId },
+        select: {
+          id: true,
+          status: true,
+          bank: true,
+          order: { select: { id: true, orderNumber: true, externalId: true } },
+        },
+      });
+      if (!credit || !credit.order?.externalId) return;
+      await this.dispatch(companyId, 'credit.changed', {
+        externalId: credit.order.externalId,
+        orderId: credit.order.id,
+        orderNumber: credit.order.orderNumber,
+        creditId: credit.id,
+        status: credit.status,
+        bank: credit.bank,
+      });
+    } catch (err) {
+      this.logger.warn(`emitCreditChanged(${creditId}) failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
   // Fire-and-forget dispatch of an event to every active subscription on
   // the company that asked for it. Resolves AFTER all deliveries finish
   // logging, but callers usually `void this.dispatch(...)` so they don't

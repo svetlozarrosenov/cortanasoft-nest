@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, CreditApplicationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import {
   CreateCreditApplicationDto,
   UpdateCreditApplicationDto,
@@ -39,7 +40,10 @@ const CREDIT_INCLUDE = {
 
 @Injectable()
 export class CreditApplicationsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private webhookDispatcher: WebhookDispatcherService,
+  ) {}
 
   async create(
     companyId: string,
@@ -64,7 +68,7 @@ export class CreditApplicationsService {
       );
     }
 
-    return this.prisma.creditApplication.create({
+    const created = await this.prisma.creditApplication.create({
       data: {
         orderId: dto.orderId,
         companyId,
@@ -80,6 +84,8 @@ export class CreditApplicationsService {
       },
       include: CREDIT_INCLUDE,
     });
+    await this.webhookDispatcher.emitCreditChanged(companyId, created.id);
+    return created;
   }
 
   async findAll(companyId: string, query: QueryCreditApplicationsDto) {
@@ -158,7 +164,7 @@ export class CreditApplicationsService {
         ? this.timestampsForStatus(dto.status)
         : {};
 
-    return this.prisma.creditApplication.update({
+    const updated = await this.prisma.creditApplication.update({
       where: { id },
       data: {
         ...(dto.bank !== undefined && { bank: dto.bank }),
@@ -180,6 +186,12 @@ export class CreditApplicationsService {
       },
       include: CREDIT_INCLUDE,
     });
+    // Only emit when the status actually changed — bank/notes/amount
+    // updates don't carry meaningful info for the shop.
+    if (dto.status !== undefined && dto.status !== existing.status) {
+      await this.webhookDispatcher.emitCreditChanged(companyId, id);
+    }
+    return updated;
   }
 
   async remove(companyId: string, id: string) {

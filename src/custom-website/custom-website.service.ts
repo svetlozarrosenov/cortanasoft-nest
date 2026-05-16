@@ -113,10 +113,10 @@ export class CustomWebsiteService {
       });
 
       // Outbound webhook subscription used by WebhookDispatcherService.
-      // Default-subscribe to both stock and order events; existing
+      // Default-subscribe to stock + order + credit events; existing
       // subscriptions get the missing events back-filled idempotently
       // (set union, no removals).
-      const DEFAULT_EVENTS = ['stock.changed', 'order.changed'];
+      const DEFAULT_EVENTS = ['stock.changed', 'order.changed', 'credit.changed'];
       const mergedEvents = existingWebhook
         ? Array.from(new Set([...existingWebhook.events, ...DEFAULT_EVENTS]))
         : DEFAULT_EVENTS;
