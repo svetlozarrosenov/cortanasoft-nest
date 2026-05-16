@@ -23,6 +23,18 @@ export class IntegrationsService {
     // prices (the amount the customer pays). cortana stores net unitPrice +
     // vatRate, so back the VAT out before saving — otherwise the order
     // recomputes VAT on top of the gross and inflates the total.
+    //
+    // VAT-registered guard: if the cortana company has no vatNumber, the
+    // merchant isn't ДДС-registered and may not charge VAT regardless of
+    // what the product defaults say. Force vatRate=0 in that case so the
+    // imported order lands at the gross figure with everything in
+    // subtotal (matching how the merchant actually books the sale).
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { vatNumber: true },
+    });
+    const companyChargesVat = Boolean(company?.vatNumber);
+
     const orderItems: { productId: string; quantity: number; unitPrice: number; vatRate: number }[] = [];
     const matchedProductIds: string[] = [];
     for (const item of items) {
@@ -38,7 +50,7 @@ export class IntegrationsService {
     );
     items.forEach((item: any, idx: number) => {
       const productId = matchedProductIds[idx];
-      const vatRate = vatByProduct.get(productId) ?? 0;
+      const vatRate = companyChargesVat ? (vatByProduct.get(productId) ?? 0) : 0;
       const gross = Number(item.unitPrice);
       const net = vatRate > 0 ? gross / (1 + vatRate / 100) : gross;
       orderItems.push({

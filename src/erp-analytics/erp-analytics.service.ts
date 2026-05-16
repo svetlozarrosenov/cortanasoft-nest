@@ -318,6 +318,19 @@ export class ErpAnalyticsService {
     let totalItemsSold = 0;
 
     for (const order of orders) {
+      // Top-level revenue uses Order.total so it matches the Dashboard
+      // "Приходи за месеца" KPI (which sums order.total too). Per-product
+      // revenue below stays at the net item level because there is no
+      // sane way to allocate shipping / VAT / order-level discounts to
+      // individual products.
+      // Skip when a category filter is active and the order has no
+      // matching items, otherwise the totals would include unrelated
+      // orders' shipping.
+      const hasMatchingItem = !query.categoryId
+        || order.items.some((it) => it.product.categoryId === query.categoryId);
+      if (hasMatchingItem) {
+        totalRevenue += Number(order.total);
+      }
       for (const item of order.items) {
         // Filter by category if specified
         if (query.categoryId && item.product.categoryId !== query.categoryId) {
@@ -341,7 +354,6 @@ export class ErpAnalyticsService {
         }
         const itemCost = quantity * unitCost;
 
-        totalRevenue += itemRevenue;
         totalCost += itemCost;
         totalItemsSold += quantity;
 
@@ -443,10 +455,11 @@ export class ErpAnalyticsService {
     let previousCost = 0;
 
     for (const order of previousOrders) {
+      // Mirror the current-period change above: revenue = Σ order.total so
+      // the period-over-period delta matches dashboard semantics.
+      previousRevenue += Number(order.total);
       for (const item of order.items) {
         const quantity = Number(item.quantity);
-        const unitPrice = Number(item.unitPrice);
-        previousRevenue += quantity * unitPrice;
 
         let unitCost = 0;
         if (item.inventoryBatch) {
