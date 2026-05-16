@@ -19,45 +19,25 @@ export class IntegrationsService {
       throw new BadRequestException('Order must have at least one item');
     }
 
-    // Match products and build order items. Shop integrations send GROSS
-    // prices (the amount the customer pays). cortana stores net unitPrice +
-    // vatRate, so back the VAT out before saving — otherwise the order
-    // recomputes VAT on top of the gross and inflates the total.
-    //
-    // VAT-registered guard: if the cortana company has no vatNumber, the
-    // merchant isn't ДДС-registered and may not charge VAT regardless of
-    // what the product defaults say. Force vatRate=0 in that case so the
-    // imported order lands at the gross figure with everything in
-    // subtotal (matching how the merchant actually books the sale).
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { vatNumber: true },
-    });
-    const companyChargesVat = Boolean(company?.vatNumber);
-
+    // Match products and build order items. The shop is the source of
+    // truth for what the customer is paying — the prices it sends are
+    // FINAL (gross). We store them verbatim with vatRate=0 so cortana
+    // never re-computes VAT on top of the gross and inflates the total.
+    // VAT splitting, if required for an invoice, is a separate concern
+    // handled at invoice-generation time based on company.vatNumber.
     const orderItems: { productId: string; quantity: number; unitPrice: number; vatRate: number }[] = [];
     const matchedProductIds: string[] = [];
     for (const item of items) {
       const productId = await this.matchOrCreateProduct(companyId, item);
       matchedProductIds.push(productId);
     }
-    const products = await this.prisma.product.findMany({
-      where: { id: { in: matchedProductIds } },
-      select: { id: true, vatRate: true },
-    });
-    const vatByProduct = new Map(
-      products.map((p) => [p.id, Number(p.vatRate ?? 0)]),
-    );
     items.forEach((item: any, idx: number) => {
       const productId = matchedProductIds[idx];
-      const vatRate = companyChargesVat ? (vatByProduct.get(productId) ?? 0) : 0;
-      const gross = Number(item.unitPrice);
-      const net = vatRate > 0 ? gross / (1 + vatRate / 100) : gross;
       orderItems.push({
         productId,
         quantity: item.quantity,
-        unitPrice: Number(net.toFixed(2)),
-        vatRate,
+        unitPrice: Number(Number(item.unitPrice).toFixed(2)),
+        vatRate: 0,
       });
     });
 
