@@ -183,11 +183,16 @@ export class PushNotificationsService implements OnModuleInit {
   }
 
   /**
-   * Send push notification to all users in a company
+   * Send push notification to users in a company.
+   *
+   * `onlyRolesWith` filters by a per-event-type opt-in flag on Role. Without
+   * it, every user in the company receives the push. The company-wide
+   * `pushNotificationsEnabled` toggle gates both paths.
    */
   async sendToCompany(
     companyId: string,
     payload: PushPayload,
+    options?: { onlyRolesWith?: 'notifyOnNewOrder' },
   ): Promise<{ success: number; failed: number }> {
     if (!this.isConfigured) {
       this.logger.warn('Firebase not configured');
@@ -205,9 +210,13 @@ export class PushNotificationsService implements OnModuleInit {
       return { success: 0, failed: 0 };
     }
 
-    // Get all users in the company
     const userCompanies = await this.prisma.userCompany.findMany({
-      where: { companyId },
+      where: {
+        companyId,
+        ...(options?.onlyRolesWith && {
+          role: { [options.onlyRolesWith]: true },
+        }),
+      },
       select: { userId: true },
     });
 

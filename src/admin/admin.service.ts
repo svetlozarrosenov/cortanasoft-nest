@@ -578,6 +578,7 @@ export class AdminService {
         description: dto.description,
         permissions: permissions as unknown as Prisma.InputJsonValue,
         isDefault: dto.isDefault ?? false,
+        notifyOnNewOrder: dto.notifyOnNewOrder ?? false,
         companyId: dto.companyId,
       },
     });
@@ -627,6 +628,7 @@ export class AdminService {
         description: dto.description,
         permissions: permissions as unknown as Prisma.InputJsonValue,
         isDefault: dto.isDefault,
+        notifyOnNewOrder: dto.notifyOnNewOrder,
       },
     });
   }

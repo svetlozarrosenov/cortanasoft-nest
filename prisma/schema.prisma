@@ -105,6 +105,9 @@ model Role {
   description String? // Описание на ролята
   permissions Json     @default("{}") // JSON с подробни права: модули, страници, таблици, колони
   isDefault   Boolean  @default(false) // Дали е роля по подразбиране за нови потребители
+  // Push нотификации по тип събитие — потребител с тази роля получава push само ако флагът е true.
+  // Гейтът е освен Company.pushNotificationsEnabled, не вместо него.
+  notifyOnNewOrder Boolean @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

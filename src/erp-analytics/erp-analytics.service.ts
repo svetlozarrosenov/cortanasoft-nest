@@ -37,6 +37,7 @@ export interface PeriodComparison {
 export interface ProfitAnalyticsResult {
   summary: {
     totalRevenue: number;
+    totalPaid: number;
     totalCost: number;
     grossProfit: number;
     profitMargin: number;
@@ -96,13 +97,16 @@ export interface PayrollSummary {
 
 export interface SalesReportResult {
   revenue: number;
+  paid: number;
   orderCount: number;
   avgOrderValue: number;
   periodComparison?: {
     previousRevenue: number;
+    previousPaid: number;
     previousOrderCount: number;
     previousAvgOrderValue: number;
     revenueGrowth: number;
+    paidGrowth: number;
     orderGrowth: number;
     avgOrderValueGrowth: number;
   };
@@ -314,12 +318,13 @@ export class ErpAnalyticsService {
     const productMap = new Map<string, ProductProfitData>();
 
     let totalRevenue = 0;
+    let totalPaid = 0;
     let totalCost = 0;
     let totalItemsSold = 0;
 
     for (const order of orders) {
       // Top-level revenue uses Order.total so it matches the Dashboard
-      // "Приходи за месеца" KPI (which sums order.total too). Per-product
+      // "Продажби за месеца" KPI (which sums order.total too). Per-product
       // revenue below stays at the net item level because there is no
       // sane way to allocate shipping / VAT / order-level discounts to
       // individual products.
@@ -330,6 +335,8 @@ export class ErpAnalyticsService {
         || order.items.some((it) => it.product.categoryId === query.categoryId);
       if (hasMatchingItem) {
         totalRevenue += Number(order.total);
+        // Cash-basis: how much has actually been collected on these orders.
+        totalPaid += Number(order.paidAmount ?? 0);
       }
       for (const item of order.items) {
         // Filter by category if specified
@@ -486,6 +493,7 @@ export class ErpAnalyticsService {
     return {
       summary: {
         totalRevenue,
+        totalPaid,
         totalCost,
         grossProfit,
         profitMargin,
@@ -798,12 +806,14 @@ export class ErpAnalyticsService {
 
     // Calculate totals
     let revenue = 0;
+    let paid = 0;
     const productMap = new Map<string, { productId: string; productName: string; productSku: string; quantitySold: number; revenue: number }>();
     const customerMap = new Map<string, { customerId: string; customerName: string; orderCount: number; totalSpent: number }>();
     const trendMap = new Map<string, { revenue: number; orderCount: number }>();
 
     for (const order of orders) {
       let orderTotal = 0;
+      paid += Number(order.paidAmount ?? 0);
       for (const item of order.items) {
         const qty = Number(item.quantity);
         const price = Number(item.unitPrice);
@@ -867,7 +877,9 @@ export class ErpAnalyticsService {
     });
 
     let previousRevenue = 0;
+    let previousPaid = 0;
     for (const order of previousOrders) {
+      previousPaid += Number(order.paidAmount ?? 0);
       for (const item of order.items) {
         previousRevenue += Number(item.quantity) * Number(item.unitPrice);
       }
@@ -880,13 +892,16 @@ export class ErpAnalyticsService {
 
     return {
       revenue,
+      paid,
       orderCount,
       avgOrderValue,
       periodComparison: {
         previousRevenue,
+        previousPaid,
         previousOrderCount,
         previousAvgOrderValue,
         revenueGrowth: calcGrowth(revenue, previousRevenue),
+        paidGrowth: calcGrowth(paid, previousPaid),
         orderGrowth: calcGrowth(orderCount, previousOrderCount),
         avgOrderValueGrowth: calcGrowth(avgOrderValue, previousAvgOrderValue),
       },

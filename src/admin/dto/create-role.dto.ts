@@ -24,6 +24,10 @@ export class CreateRoleDto {
   @IsOptional()
   isDefault?: boolean;
 
+  @IsBoolean()
+  @IsOptional()
+  notifyOnNewOrder?: boolean;
+
   @IsString()
   @IsNotEmpty()
   companyId: string;

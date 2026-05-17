@@ -97,6 +97,8 @@ export class DashboardService {
       ordersLastMonth,
       unpaidInvoices,
       unpaidInvoiceAmount,
+      paidThisMonth,
+      paidLastMonth,
     ] = await Promise.all([
       // Revenue this month (confirmed+ orders). Filter by orderDate so
       // backfilled historical orders show up in the right month, not the
@@ -140,6 +142,25 @@ export class DashboardService {
           status: { in: ['ISSUED', 'PARTIALLY_PAID'] },
         },
         _sum: { total: true },
+      }),
+      // Cash collected this month (cash-basis, by payment paidAt).
+      // Excludes payments tied to CANCELLED orders.
+      this.prisma.payment.aggregate({
+        where: {
+          companyId,
+          paidAt: { gte: startOfMonth },
+          order: { status: { not: 'CANCELLED' } },
+        },
+        _sum: { amount: true },
+      }),
+      // Cash collected last month
+      this.prisma.payment.aggregate({
+        where: {
+          companyId,
+          paidAt: { gte: startOfLastMonth, lte: endOfLastMonth },
+          order: { status: { not: 'CANCELLED' } },
+        },
+        _sum: { amount: true },
       }),
     ]);
 
@@ -191,12 +212,18 @@ export class DashboardService {
 
     const revenue = Number(revenueThisMonth._sum.total ?? 0);
     const prevRevenue = Number(revenueLastMonth._sum.total ?? 0);
+    const paid = Number(paidThisMonth._sum.amount ?? 0);
+    const prevPaid = Number(paidLastMonth._sum.amount ?? 0);
 
     return {
       quickStats: {
         revenue: {
           value: revenue,
           change: calculateChange(revenue, prevRevenue),
+        },
+        paid: {
+          value: paid,
+          change: calculateChange(paid, prevPaid),
         },
         ordersThisMonth: {
           value: ordersThisMonth,

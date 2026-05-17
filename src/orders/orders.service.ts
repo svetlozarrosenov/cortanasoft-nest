@@ -10,6 +10,7 @@ import { ErrorMessages } from '../common/constants/error-messages';
 import { WarrantiesService } from '../warranties/warranties.service';
 import { PaymentsService } from '../payments/payments.service';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
+import { PushNotificationsService } from '../push-notifications/push-notifications.service';
 
 /** Round a number to 2 decimal places to avoid floating-point drift */
 function round2(n: number): number {
@@ -70,6 +71,7 @@ export class OrdersService {
     private warrantiesService: WarrantiesService,
     private paymentsService: PaymentsService,
     private webhookDispatcher: WebhookDispatcherService,
+    private pushNotifications: PushNotificationsService,
   ) {}
 
   private async generateOrderNumber(
@@ -256,6 +258,24 @@ export class OrdersService {
     } catch {
       // Non-blocking: warranty creation failure should not fail the order
     }
+
+    // Fire-and-forget push to users whose role has notifyOnNewOrder=true.
+    // Gated by Company.pushNotificationsEnabled inside sendToCompany().
+    const currencyCode = order.currency?.code || '';
+    this.pushNotifications
+      .sendToCompany(
+        companyId,
+        {
+          title: 'Нова поръчка',
+          body: `${order.orderNumber} — ${order.customerName} (${Number(order.total).toFixed(2)} ${currencyCode})`,
+          url: `/dashboard/${companyId}/erp/orders?view=${order.id}`,
+          tag: `order-${order.id}`,
+        },
+        { onlyRolesWith: 'notifyOnNewOrder' },
+      )
+      .catch(() => {
+        // Non-blocking: push delivery failures must not break order creation.
+      });
 
     // Auto-confirm: deduct inventory and set to CONFIRMED
     if (dto.autoConfirm) {
