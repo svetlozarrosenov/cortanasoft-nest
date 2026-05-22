@@ -176,13 +176,14 @@ export interface ProductsReportResult {
 export interface FinancialSummaryResult {
   // Приходи
   revenue: number;
+  paid: number; // Реално събрани пари (cash-basis) за същите поръчки
   orderCount: number;
   itemsSold: number;
 
   // Себестойност на продадени стоки
   costOfGoodsSold: number;
 
-  // Брутна печалба
+  // Брутна печалба (accrual)
   grossProfit: number;
   grossMargin: number;
 
@@ -191,9 +192,14 @@ export interface FinancialSummaryResult {
   payroll: PayrollSummary;
   totalOperatingExpenses: number;
 
-  // Нетна печалба
+  // Нетна печалба (accrual — върху всички booked продажби)
   netProfit: number;
   netMargin: number;
+
+  // Касова нетна печалба (cash-basis — пропорционално на събраното)
+  // netProfitCash = paid − (cost × paid/revenue) − totalOperatingExpenses
+  netProfitCash: number;
+  netMarginCash: number;
 
   // Допълнителни данни
   totalPurchases: number;
@@ -737,16 +743,33 @@ export class ErpAnalyticsService {
       payrollSummary.totalSalaries +
       payrollSummary.totalInsurance;
 
-    // Изчисляване на нетна печалба
+    // Изчисляване на нетна печалба (accrual — върху booked-нати продажби)
     const netProfit = profitData.summary.grossProfit - totalOperatingExpenses;
     const netMargin =
       profitData.summary.totalRevenue > 0
         ? (netProfit / profitData.summary.totalRevenue) * 100
         : 0;
 
+    // Касова нетна печалба: какво реално е останало в банката.
+    // Cost-ът се прилага пропорционално на колекшън ratio-то — ако сме
+    // събрали 60% от продажбите, отчитаме 60% от cost-а. Opex-ът е изцяло
+    // изваден (реално платени разходи).
+    const collectionRatio =
+      profitData.summary.totalRevenue > 0
+        ? profitData.summary.totalPaid / profitData.summary.totalRevenue
+        : 0;
+    const cashCostOfGoods = profitData.summary.totalCost * collectionRatio;
+    const netProfitCash =
+      profitData.summary.totalPaid - cashCostOfGoods - totalOperatingExpenses;
+    const netMarginCash =
+      profitData.summary.totalPaid > 0
+        ? (netProfitCash / profitData.summary.totalPaid) * 100
+        : 0;
+
     return {
       // Приходи
       revenue: profitData.summary.totalRevenue,
+      paid: profitData.summary.totalPaid,
       orderCount: profitData.summary.orderCount,
       itemsSold: profitData.summary.itemsSold,
 
@@ -762,9 +785,13 @@ export class ErpAnalyticsService {
       payroll: payrollSummary,
       totalOperatingExpenses,
 
-      // Нетна печалба
+      // Нетна печалба (accrual)
       netProfit,
       netMargin,
+
+      // Касова нетна печалба (cash basis)
+      netProfitCash,
+      netMarginCash,
 
       // Допълнителни данни
       totalPurchases: purchaseData.summary.totalPurchaseCost,
