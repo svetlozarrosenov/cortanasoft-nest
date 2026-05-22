@@ -143,24 +143,28 @@ export class DashboardService {
         },
         _sum: { total: true },
       }),
-      // Cash collected this month (cash-basis, by payment paidAt).
-      // Excludes payments tied to CANCELLED orders.
-      this.prisma.payment.aggregate({
+      // Paid this month — sum of paidAmount on orders WHERE orderDate is in
+      // the current month and status is not CANCELLED. Mirrors the BI Sales
+      // report methodology so "Платени" and "Продажби" reference the same
+      // pool of orders. Filtering payments by paidAt instead would let late
+      // collections from prior-month orders inflate this number above
+      // current-month sales, which broke the operator's mental model.
+      this.prisma.order.aggregate({
         where: {
           companyId,
-          paidAt: { gte: startOfMonth },
-          order: { status: { not: 'CANCELLED' } },
+          orderDate: { gte: startOfMonth },
+          status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
         },
-        _sum: { amount: true },
+        _sum: { paidAmount: true },
       }),
-      // Cash collected last month
-      this.prisma.payment.aggregate({
+      // Paid last month — same methodology over the prior month
+      this.prisma.order.aggregate({
         where: {
           companyId,
-          paidAt: { gte: startOfLastMonth, lte: endOfLastMonth },
-          order: { status: { not: 'CANCELLED' } },
+          orderDate: { gte: startOfLastMonth, lte: endOfLastMonth },
+          status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
         },
-        _sum: { amount: true },
+        _sum: { paidAmount: true },
       }),
     ]);
 
@@ -212,8 +216,8 @@ export class DashboardService {
 
     const revenue = Number(revenueThisMonth._sum.total ?? 0);
     const prevRevenue = Number(revenueLastMonth._sum.total ?? 0);
-    const paid = Number(paidThisMonth._sum.amount ?? 0);
-    const prevPaid = Number(paidLastMonth._sum.amount ?? 0);
+    const paid = Number(paidThisMonth._sum.paidAmount ?? 0);
+    const prevPaid = Number(paidLastMonth._sum.paidAmount ?? 0);
 
     return {
       quickStats: {

@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, CreditApplicationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PaymentsService } from '../payments/payments.service';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import {
   CreateCreditApplicationDto,
@@ -43,6 +44,7 @@ export class CreditApplicationsService {
   constructor(
     private prisma: PrismaService,
     private webhookDispatcher: WebhookDispatcherService,
+    private paymentsService: PaymentsService,
   ) {}
 
   async create(
@@ -190,6 +192,22 @@ export class CreditApplicationsService {
     // updates don't carry meaningful info for the shop.
     if (dto.status !== undefined && dto.status !== existing.status) {
       await this.webhookDispatcher.emitCreditChanged(companyId, id);
+    }
+
+    // When credit is rejected or cancelled, resync the order's paidAmount
+    // against the actual Payment rows. If anything had bumped paidAmount in
+    // anticipation of the credit going through (e.g. external integration,
+    // manual paidAmount overwrite, future credit→PAID hook) without a
+    // backing Payment record, this clears the phantom value so "Платени за
+    // месеца" doesn't include money that never arrived.
+    if (
+      dto.status !== undefined &&
+      dto.status !== existing.status &&
+      (dto.status === 'REJECTED' || dto.status === 'CANCELLED')
+    ) {
+      await this.prisma.$transaction(async (tx) => {
+        await this.paymentsService.recalculateOrderState(tx, existing.orderId);
+      });
     }
     return updated;
   }
