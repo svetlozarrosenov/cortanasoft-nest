@@ -6,6 +6,7 @@ import {
 import { Prisma, CreditApplicationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PaymentsService } from '../payments/payments.service';
+import { OrdersService } from '../orders/orders.service';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import {
   CreateCreditApplicationDto,
@@ -45,6 +46,7 @@ export class CreditApplicationsService {
     private prisma: PrismaService,
     private webhookDispatcher: WebhookDispatcherService,
     private paymentsService: PaymentsService,
+    private ordersService: OrdersService,
   ) {}
 
   async create(
@@ -208,6 +210,24 @@ export class CreditApplicationsService {
       await this.prisma.$transaction(async (tx) => {
         await this.paymentsService.recalculateOrderState(tx, existing.orderId);
       });
+    }
+
+    // When the bank rejects the credit, the order itself is dead — there's no
+    // money path. Cascade the cancellation so the user doesn't have to click
+    // twice. Skip if the order is already cancelled or delivered (cancel()
+    // throws on those, and we don't want to break the credit update).
+    if (
+      dto.status !== undefined &&
+      dto.status !== existing.status &&
+      dto.status === 'REJECTED'
+    ) {
+      const order = await this.prisma.order.findUnique({
+        where: { id: existing.orderId },
+        select: { status: true },
+      });
+      if (order && order.status !== 'CANCELLED' && order.status !== 'DELIVERED') {
+        await this.ordersService.cancel(companyId, existing.orderId);
+      }
     }
     return updated;
   }
