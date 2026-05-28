@@ -170,10 +170,12 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
             columns: [
               { key: 'sku', labelKey: 'modules.erp.sku' },
               { key: 'name', labelKey: 'common.name' },
+              { key: 'createdAt', labelKey: 'modules.erp.createdAt' },
               { key: 'category', labelKey: 'modules.erp.category' },
               { key: 'price', labelKey: 'modules.erp.price' },
               { key: 'stock', labelKey: 'modules.erp.stock' },
               { key: 'status', labelKey: 'common.status' },
+              { key: 'createdBy', labelKey: 'modules.erp.createdBy' },
             ],
           },
         ],
@@ -984,6 +986,17 @@ export function normalizePermissions(permissions: RolePermissions): RolePermissi
               enabled: true,
               columns: table.columns.map((col) => col.key),
             };
+          } else {
+            // Таблицата съществува, но конфигът може да е получил нови
+            // колони от последното запазване на ролята. Добавяме липсващите,
+            // за да не "изчезват" нови UI колони при стари роли.
+            const stored = pg.tables[table.key].columns || [];
+            const missing = table.columns
+              .map((col) => col.key)
+              .filter((key) => !stored.includes(key));
+            if (missing.length > 0) {
+              pg.tables[table.key].columns = [...stored, ...missing];
+            }
           }
         }
       }
