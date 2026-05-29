@@ -618,13 +618,68 @@ export class OrdersService {
       const shippingCost = dto.shippingCost ?? Number(order.shippingCost);
       const total = round2(subtotal + vatAmount + shippingCost - orderDiscount);
 
+      // Build a quick lookup so the apply step below knows each new item's
+      // product type without an extra DB round-trip.
+      const productById = new Map(products.map((p) => [p.id, p]));
+
       const updated = await this.prisma.$transaction(async (tx) => {
-        // Delete existing items
+        // 1. Revert inventory side effects of items that previously consumed
+        //    stock. Mirrors cancel()'s restore logic so update() is reversible.
+        //    Without this, replacing an item silently leaves the old serial as
+        //    SOLD or the old batch decremented forever.
+        for (const oldItem of order.items) {
+          if (!oldItem.stockDeducted) continue;
+          const oldProduct = oldItem.product;
+          if (
+            !oldProduct ||
+            oldProduct.type === 'SERVICE' ||
+            !oldProduct.trackInventory
+          ) {
+            continue;
+          }
+
+          if (oldProduct.type === 'SERIAL' && oldItem.inventorySerialId) {
+            await tx.inventorySerial.update({
+              where: { id: oldItem.inventorySerialId },
+              data: { status: 'IN_STOCK' },
+            });
+            continue;
+          }
+
+          const oldQty = Number(oldItem.quantity);
+          if (oldItem.inventoryBatchId) {
+            await tx.inventoryBatch.update({
+              where: { id: oldItem.inventoryBatchId },
+              data: { quantity: { increment: oldQty } },
+            });
+          } else {
+            // FIFO-deducted at confirm time — restore to oldest batch at the
+            // item/order location, same fallback cancel() uses.
+            const restoreLocationId = oldItem.locationId || order.locationId;
+            const batch = await tx.inventoryBatch.findFirst({
+              where: {
+                companyId,
+                productId: oldItem.productId,
+                ...(restoreLocationId && { locationId: restoreLocationId }),
+              },
+              orderBy: { createdAt: 'asc' },
+            });
+            if (batch) {
+              await tx.inventoryBatch.update({
+                where: { id: batch.id },
+                data: { quantity: { increment: oldQty } },
+              });
+            }
+          }
+        }
+
+        // 2. Delete existing items
         await tx.orderItem.deleteMany({
           where: { orderId: id },
         });
 
-        return tx.order.update({
+        // 3. Update order + recreate items
+        const updatedOrder = await tx.order.update({
           where: { id },
           data: {
             ...(dto.orderDate && { orderDate: new Date(dto.orderDate) }),
@@ -653,6 +708,84 @@ export class OrdersService {
               create: itemsData,
             },
           },
+          include: ORDER_INCLUDE,
+        });
+
+        // 4. Apply inventory deduction for new items that carry an explicit
+        //    allocation (inventorySerialId / inventoryBatchId). Items without
+        //    allocation stay as backorder. Mirrors confirm()'s SERIAL/BATCH
+        //    branches; FIFO auto-allocation is intentionally NOT done here —
+        //    that's confirm()'s responsibility, not update()'s.
+        for (const newItem of updatedOrder.items) {
+          const newProduct = productById.get(newItem.productId);
+          if (
+            !newProduct ||
+            newProduct.type === 'SERVICE' ||
+            !newProduct.trackInventory
+          ) {
+            continue;
+          }
+
+          if (newProduct.type === 'SERIAL') {
+            if (!newItem.inventorySerialId) continue;
+            const serial = await tx.inventorySerial.findFirst({
+              where: {
+                id: newItem.inventorySerialId,
+                companyId,
+                productId: newItem.productId,
+              },
+            });
+            if (!serial) {
+              throw new BadRequestException(
+                ErrorMessages.inventory.serialNotFound,
+              );
+            }
+            if (serial.status !== 'IN_STOCK') {
+              throw new BadRequestException(
+                `${ErrorMessages.inventory.serialNotInStock}: "${newProduct.name}" - SN: ${serial.serialNumber}`,
+              );
+            }
+            await tx.inventorySerial.update({
+              where: { id: newItem.inventorySerialId },
+              data: { status: 'SOLD' },
+            });
+            await tx.orderItem.update({
+              where: { id: newItem.id },
+              data: { stockDeducted: true },
+            });
+            continue;
+          }
+
+          if (newItem.inventoryBatchId) {
+            const newQty = Number(newItem.quantity);
+            const batch = await tx.inventoryBatch.findUnique({
+              where: { id: newItem.inventoryBatchId },
+            });
+            if (!batch) {
+              throw new BadRequestException(
+                `Партидата за продукт "${newProduct.name}" не е намерена`,
+              );
+            }
+            if (Number(batch.quantity) < newQty) {
+              throw new BadRequestException(
+                `${ErrorMessages.inventory.insufficientStock}: "${newProduct.name}" - ` +
+                  `налични: ${Number(batch.quantity)}, заявени: ${newQty}`,
+              );
+            }
+            await tx.inventoryBatch.update({
+              where: { id: batch.id },
+              data: { quantity: { decrement: newQty } },
+            });
+            await tx.orderItem.update({
+              where: { id: newItem.id },
+              data: { stockDeducted: true },
+            });
+          }
+        }
+
+        // Re-fetch so stockDeducted updates land in the returned payload.
+        return tx.order.findFirst({
+          where: { id },
           include: ORDER_INCLUDE,
         });
       });
