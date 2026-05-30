@@ -252,12 +252,10 @@ export class OrdersService {
       return createdOrder;
     });
 
-    // Auto-create issued warranties for products with warranty templates
-    try {
-      await this.warrantiesService.createWarrantiesForOrder(companyId, order.id);
-    } catch {
-      // Non-blocking: warranty creation failure should not fail the order
-    }
+    // Warranties are intentionally NOT auto-created at order creation.
+    // Most shop orders here are credit-financed and get cancelled when the
+    // bank rejects; creating warranties up front means orphaned ACTIVE rows.
+    // Warranty issuance moved to the DELIVERED status transition in update().
 
     // Fire-and-forget push to users whose role has notifyOnNewOrder=true.
     // Gated by Company.pushNotificationsEnabled inside sendToCompany().
@@ -546,11 +544,24 @@ export class OrdersService {
     // Status change
     if (dto.status && dto.status !== order.status) {
       // Simple status transitions (CONFIRMED→PROCESSING, PROCESSING→SHIPPED, SHIPPED→DELIVERED)
-      return this.prisma.order.update({
+      const updated = await this.prisma.order.update({
         where: { id },
         data: { status: dto.status },
         include: ORDER_INCLUDE,
       });
+
+      // Issue warranties on DELIVERED — this is when the customer actually
+      // takes possession of the goods, so it's the correct moment to start
+      // the warranty clock. createWarrantiesForOrder is idempotent.
+      if (dto.status === 'DELIVERED') {
+        try {
+          await this.warrantiesService.createWarrantiesForOrder(companyId, id);
+        } catch {
+          // Non-blocking: warranty failure should not block the status flip.
+        }
+      }
+
+      return updated;
     }
 
     // Allow payment status updates for confirmed+ orders.
@@ -1065,6 +1076,12 @@ export class OrdersService {
           });
         }
       }
+
+      // Void any warranties this order had issued. After today only DELIVERED
+      // orders get warranties, so usually nothing to void; the cascade exists
+      // so legacy CONFIRMED-with-warranty orders are also cleaned up the
+      // moment they are cancelled.
+      await this.warrantiesService.voidWarrantiesForOrder(companyId, id, tx);
 
       return tx.order.update({
         where: { id },

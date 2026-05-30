@@ -323,6 +323,13 @@ export class WarrantiesService {
 
     if (!order) return;
 
+    // Idempotency: skip if this order already has warranties. Avoids dupes
+    // when a status bounces DELIVERED → SHIPPED → DELIVERED.
+    const existingCount = await client.issuedWarranty.count({
+      where: { orderId, companyId },
+    });
+    if (existingCount > 0) return;
+
     const warrantiesToCreate: Prisma.IssuedWarrantyCreateManyInput[] = [];
 
     for (const item of order.items) {
@@ -351,6 +358,22 @@ export class WarrantiesService {
     if (warrantiesToCreate.length > 0) {
       await client.issuedWarranty.createMany({ data: warrantiesToCreate });
     }
+  }
+
+  // Marks all ACTIVE warranties for an order as VOIDED. Called when the
+  // order is cancelled — keeping ACTIVE warranties for a cancelled sale is
+  // both wrong (no contract with the customer) and visually misleading.
+  // We void instead of delete to preserve audit trail.
+  async voidWarrantiesForOrder(
+    companyId: string,
+    orderId: string,
+    tx?: Prisma.TransactionClient,
+  ) {
+    const client = tx || this.prisma;
+    await client.issuedWarranty.updateMany({
+      where: { orderId, companyId, status: 'ACTIVE' },
+      data: { status: 'VOIDED' },
+    });
   }
 
   private calculateEndDate(
