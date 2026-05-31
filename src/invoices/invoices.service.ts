@@ -341,7 +341,7 @@ export class InvoicesService {
     const effectiveVatRate = this.effectiveVatRateForOrder(order);
 
     return this.prisma.$transaction(async (tx) => {
-      const invoiceNumber = await this.generateInvoiceNumber(companyId, 'AVN', tx);
+      const invoiceNumber = await this.generateInvoiceNumber(companyId, 'INV', tx);
 
       const invoice = await tx.invoice.create({
         data: {
@@ -509,7 +509,7 @@ export class InvoicesService {
       total: -Number(adv.subtotal),
     }));
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const invoiceNumber = await this.generateInvoiceNumber(companyId, 'INV', tx);
 
       // Inherit paid amount from advances (they're already paid in real money)
@@ -576,8 +576,16 @@ export class InvoicesService {
         },
       });
 
+      // Reallocate order.paidAmount across all non-cancelled invoices (FIFO by
+      // createdAt). Without this, FINAL inherits only the advance's paidAmount
+      // and ignores order payments made after the advance was issued.
+      await this.paymentsService.recalculateOrderState(tx, order.id);
+
       return invoice;
     });
+
+    // Re-fetch after transaction — recalculateOrderState mutated paidAmount/status.
+    return this.findOne(companyId, created.id);
   }
 
   async createProforma(

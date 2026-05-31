@@ -127,13 +127,13 @@ describe('InvoicesService', () => {
       await expect(service.createFromOrder('c1', 'u1', { orderId: 'ord1' } as any)).resolves.toBeDefined();
     });
 
-    it('should generate invoice number with correct format', async () => {
+    it('should generate fiscal invoice number as 10-digit only (ЗДДС чл. 114, ал. 1, т. 4)', async () => {
       mockPrisma.order.findFirst.mockResolvedValue(makeOrder('CONFIRMED'));
-      mockPrisma.invoice.findFirst.mockResolvedValue({ invoiceNumber: `INV-${new Date().getFullYear()}-00007` });
+      mockPrisma.invoice.findFirst.mockResolvedValue({ invoiceNumber: '0000000007' });
       mockPrisma.invoice.create.mockImplementation(({ data }) => Promise.resolve({ id: 'inv1', ...data }));
 
       const result = await service.createFromOrder('c1', 'u1', { orderId: 'ord1' } as any);
-      expect(result.invoiceNumber).toBe(`INV-${new Date().getFullYear()}-00008`);
+      expect(result.invoiceNumber).toBe('0000000008');
     });
   });
 
@@ -279,7 +279,7 @@ describe('InvoicesService', () => {
       ...overrides,
     });
 
-    it('should create proforma with correct PRO- prefix number', async () => {
+    it('should create proforma with PRO- prefix and 10-digit sequence', async () => {
       mockPrisma.company.findUnique.mockResolvedValue(companyWithVat);
       mockPrisma.invoice.findFirst.mockResolvedValue(null); // no existing proforma
       mockPrisma.invoice.create.mockImplementation(({ data }) =>
@@ -288,14 +288,13 @@ describe('InvoicesService', () => {
 
       const result = await service.createProforma('c1', 'u1', baseDto as any);
 
-      const year = new Date().getFullYear();
-      expect(result.invoiceNumber).toBe(`PRO-${year}-00001`);
+      expect(result.invoiceNumber).toBe('PRO-0000000001');
     });
 
     it('should increment proforma number when previous exists', async () => {
       mockPrisma.company.findUnique.mockResolvedValue(companyWithVat);
       mockPrisma.invoice.findFirst.mockResolvedValue({
-        invoiceNumber: `PRO-${new Date().getFullYear()}-00003`,
+        invoiceNumber: 'PRO-0000000003',
       });
       mockPrisma.invoice.create.mockImplementation(({ data }) =>
         Promise.resolve({ id: 'inv1', ...data }),
@@ -303,8 +302,7 @@ describe('InvoicesService', () => {
 
       const result = await service.createProforma('c1', 'u1', baseDto as any);
 
-      const year = new Date().getFullYear();
-      expect(result.invoiceNumber).toBe(`PRO-${year}-00004`);
+      expect(result.invoiceNumber).toBe('PRO-0000000004');
     });
 
     it('should calculate totals correctly (subtotal, VAT, total)', async () => {
@@ -718,11 +716,11 @@ describe('InvoicesService', () => {
       customer: { eik: '123', vatNumber: 'BG123', address: null, city: null, postalCode: null },
     };
 
-    it('should create ADVANCE invoice with AVN- prefix and update order.advancedAmount', async () => {
+    it('should create ADVANCE invoice on unified fiscal sequence and update order.advancedAmount', async () => {
       mockPrisma.order.findFirst.mockResolvedValue(baseOrder);
       mockPrisma.invoice.count
         .mockResolvedValueOnce(0) // conflicting REGULAR/FINAL guard
-        .mockResolvedValueOnce(0); // numbering count for AVN
+        .mockResolvedValueOnce(0); // numbering count for fiscal sequence
       mockPrisma.invoice.create.mockResolvedValue({ id: 'avn1', type: 'ADVANCE' });
       mockPrisma.order.update.mockResolvedValue({});
 
@@ -731,7 +729,8 @@ describe('InvoicesService', () => {
       expect(mockPrisma.invoice.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            invoiceNumber: expect.stringMatching(/^AVN-/),
+            // ЗДДС чл. 114, ал. 1, т. 4 — десетразряден номер, само арабски цифри
+            invoiceNumber: expect.stringMatching(/^\d{10}$/),
             type: 'ADVANCE',
             status: 'ISSUED',
             total: 360,
@@ -815,6 +814,9 @@ describe('InvoicesService', () => {
       mockPrisma.invoice.findMany.mockResolvedValue([advance({ subtotal: 1000, vatAmount: 200, total: 1200 })]);
       mockPrisma.invoice.count.mockResolvedValue(0); // numbering
       mockPrisma.invoice.create.mockResolvedValue({ id: 'final1', type: 'FINAL' });
+      mockPrisma.invoice.findFirst
+        .mockResolvedValueOnce(null) // generateInvoiceNumber — no prior fiscal invoice
+        .mockResolvedValueOnce({ id: 'final1', type: 'FINAL', status: 'PAID', total: 0 }); // findOne re-fetch
       mockPrisma.order.update.mockResolvedValue({});
 
       await service.createFinal('c1', 'u1', {
@@ -839,6 +841,9 @@ describe('InvoicesService', () => {
       mockPrisma.invoice.findMany.mockResolvedValue([advance()]); // 300 advance on 1200 order → 900 remainder
       mockPrisma.invoice.count.mockResolvedValue(0);
       mockPrisma.invoice.create.mockResolvedValue({ id: 'final1' });
+      mockPrisma.invoice.findFirst
+        .mockResolvedValueOnce(null) // generateInvoiceNumber
+        .mockResolvedValueOnce({ id: 'final1', type: 'FINAL', total: 900 }); // findOne re-fetch
       mockPrisma.order.update.mockResolvedValue({});
 
       await service.createFinal('c1', 'u1', {
