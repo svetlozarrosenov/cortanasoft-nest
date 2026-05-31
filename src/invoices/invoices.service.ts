@@ -370,7 +370,8 @@ export class InvoicesService {
           items: {
             create: [
               {
-                description: `Авансово плащане по поръчка ${order.orderNumber}`,
+                description: dto.itemDescription?.trim()
+                  || `Авансово плащане по поръчка ${order.orderNumber}`,
                 quantity: 1,
                 unitPrice: partialSubtotal,
                 vatRate: effectiveVatRate,
@@ -500,8 +501,11 @@ export class InvoicesService {
       orderItemId: item.id,
     }));
 
+    const deductionTemplate = dto.deductionDescriptionTemplate?.trim();
     const deductionLineItems = advances.map((adv) => ({
-      description: `Приспадане на авансова фактура ${adv.invoiceNumber}`,
+      description: deductionTemplate
+        ? deductionTemplate.replace(/\{invoiceNumber\}/g, adv.invoiceNumber)
+        : `Приспадане на авансово плащане по фактура ${adv.invoiceNumber}`,
       quantity: 1,
       unitPrice: -Number(adv.subtotal),
       vatRate: effectiveVatRate,

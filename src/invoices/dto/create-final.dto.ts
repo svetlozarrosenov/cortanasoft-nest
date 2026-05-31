@@ -27,4 +27,11 @@ export class CreateFinalInvoiceDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  // Optional template for the per-advance deduction line description.
+  // Placeholder {invoiceNumber} is substituted with each advance's invoice number.
+  // Defaults to "Приспадане на авансово плащане по фактура {invoiceNumber}".
+  @IsOptional()
+  @IsString()
+  deductionDescriptionTemplate?: string;
 }
