@@ -288,12 +288,11 @@ export class ServiceOrdersService {
 
     if (order.status === dto.status) return order;
 
-    const allowed = ALLOWED_TRANSITIONS[order.status] || [];
-    if (!allowed.includes(dto.status)) {
-      throw new BadRequestException(
-        `Невалиден преход от "${order.status}" към "${dto.status}"`,
-      );
-    }
+    // State machine restriction lifted at user request — workshop owners want
+    // full flexibility to override status (re-open a cancelled order, move back
+    // from READY to IN_REPAIR, etc.). The status_history audit log + per-change
+    // note preserve intent if anything goes wrong. ALLOWED_TRANSITIONS is kept
+    // in code as documentation of the "happy-path" flow.
 
     return this.prisma.$transaction(async (tx) => {
       const data: Prisma.ServiceOrderUpdateInput = { status: dto.status };
@@ -309,9 +308,13 @@ export class ServiceOrdersService {
         data.completedAt = now;
       }
       if (dto.status === 'DELIVERED') {
-        data.deliveredAt = now;
-        // Изписваме частите от склада при предаване
-        await this.stock.deductPartsForOrder(tx, id, companyId);
+        // Only set deliveredAt and deduct stock the FIRST time we enter DELIVERED —
+        // otherwise re-DELIVERING (e.g. after a bounce back to IN_REPAIR) would
+        // double-deduct BATCH inventory.
+        if (!order.deliveredAt) {
+          data.deliveredAt = now;
+          await this.stock.deductPartsForOrder(tx, id, companyId);
+        }
       }
 
       const updated = await tx.serviceOrder.update({
