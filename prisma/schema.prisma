@@ -100,16 +100,16 @@ model Settlement {
 
 // Custom роли за компания - всички права се определят чрез permissions
 model Role {
-  id          String   @id @default(cuid())
-  name        String // Име на ролята (напр. "Счетоводител", "Мениджър продажби")
-  description String? // Описание на ролята
-  permissions Json     @default("{}") // JSON с подробни права: модули, страници, таблици, колони
-  isDefault   Boolean  @default(false) // Дали е роля по подразбиране за нови потребители
+  id               String   @id @default(cuid())
+  name             String // Име на ролята (напр. "Счетоводител", "Мениджър продажби")
+  description      String? // Описание на ролята
+  permissions      Json     @default("{}") // JSON с подробни права: модули, страници, таблици, колони
+  isDefault        Boolean  @default(false) // Дали е роля по подразбиране за нови потребители
   // Push нотификации по тип събитие — потребител с тази роля получава push само ако флагът е true.
   // Гейтът е освен Company.pushNotificationsEnabled, не вместо него.
-  notifyOnNewOrder Boolean @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  notifyOnNewOrder Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -180,6 +180,9 @@ model Company {
   // Сервизен модул — opt-in per company
   serviceModuleEnabled Boolean @default(false)
 
+  // Електронни трудови досиета — opt-in per company
+  employeeRecordsEnabled Boolean @default(false)
+
   // Системни полета
   role      CompanyRole @default(CLIENT)
   isActive  Boolean     @default(true)
@@ -238,6 +241,15 @@ model Company {
   serviceOrders    ServiceOrder[]
   serviceAssets    ServiceAsset[]
   serviceContracts ServiceContract[]
+
+  // Електронни трудови досиета
+  employmentContracts   EmploymentContract[]
+  employmentAnnexes     EmploymentAnnex[]
+  employmentOrders      EmploymentOrder[]
+  jobDescriptions       JobDescription[]
+  terminations          Termination[]
+  employeeDocuments     EmployeeDocument[]
+  employeeDocumentFiles EmployeeDocumentFile[]
 
   @@map("companies")
 }
@@ -1608,10 +1620,10 @@ model OrderItem {
 // кредитът е отделен paralel state machine. На една поръчка може да
 // има най-много една активна заявка (unique на orderId).
 model CreditApplication {
-  id        String                  @id @default(cuid())
-  status    CreditApplicationStatus @default(REQUESTED)
-  bank      CreditBank // Банка / финансова институция
-  bankRef   String? // Външен референтен номер от банката (договор / заявка)
+  id      String                  @id @default(cuid())
+  status  CreditApplicationStatus @default(REQUESTED)
+  bank    CreditBank // Банка / финансова институция
+  bankRef String? // Външен референтен номер от банката (договор / заявка)
 
   // Сума, която клиентът иска да финансира (gross). Не е задължително
   // равна на order.total — може да има капаро или такси.
@@ -1621,17 +1633,17 @@ model CreditApplication {
   monthlyPayment  Decimal? @db.Decimal(10, 2) // Попълва се след одобрение от банката
 
   // Жизнен цикъл — кога е минал през всеки етап.
-  appliedAt  DateTime  @default(now())
-  decisionAt DateTime? // Кога банката е решила (APPROVED или REJECTED)
-  signedAt   DateTime? // Кога клиентът е подписал договора
-  paidAt     DateTime? // Кога банката е превела парите към търговеца
+  appliedAt   DateTime  @default(now())
+  decisionAt  DateTime? // Кога банката е решила (APPROVED или REJECTED)
+  signedAt    DateTime? // Кога клиентът е подписал договора
+  paidAt      DateTime? // Кога банката е превела парите към търговеца
   cancelledAt DateTime?
 
   notes String? // Бележки от търговеца (защо е отказана, особени условия, ...)
 
   // Релации
-  orderId String  @unique // Една заявка на поръчка
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId String @unique // Една заявка на поръчка
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   customerId String?
   customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
@@ -3808,4 +3820,318 @@ model ServiceContract {
   @@unique([companyId, contractNumber])
   @@index([companyId, status])
   @@map("service_contracts")
+}
+
+// ==================== ЕЛЕКТРОННИ ТРУДОВИ ДОСИЕТА ====================
+// Наредба за вида и изискванията за създаването и съхраняването на електронни
+// документи в трудовото досие на работника или служителя (ПМС № 71/2018).
+// "Служител" = User в контекста на компания (UserCompany) — userId е скалар без
+// релация към User (както при Attendance/Payroll); резолвва се в сервиза.
+// Всеки вид документ е собствен модел; реалните файлове седят в споделената
+// таблица EmployeeDocumentFile (полиморфна към родителите).
+
+// Тип на трудов договор
+enum EmploymentContractType {
+  INDEFINITE // Безсрочен (чл. 67 КТ)
+  FIXED_TERM // Срочен (чл. 68 КТ)
+  TEMPORARY_SUBSTITUTE // За заместване (чл. 68, ал. 1, т. 3)
+  TRIAL // Със срок за изпитване (чл. 70 КТ)
+  MANAGEMENT // Договор за управление
+  OTHER // Друг
+}
+
+// Статус на трудов договор
+enum EmploymentContractStatus {
+  DRAFT // Чернова
+  ACTIVE // Действащ
+  AMENDED // Изменен (с допълнително споразумение)
+  TERMINATED // Прекратен
+}
+
+// Тип на заповед
+enum EmploymentOrderType {
+  HIRE // Назначаване
+  DISMISSAL // Уволнение/прекратяване
+  LEAVE // Отпуск
+  BUSINESS_TRIP // Командировка
+  DISCIPLINARY // Дисциплинарно наказание
+  BONUS // Награждаване
+  OTHER // Друга
+}
+
+// Категория за документи от "опашката" (които нямат собствен модел)
+enum EmployeeDocumentCategory {
+  DIPLOMA // Диплома/образование
+  MEDICAL // Медицинско свидетелство
+  CERTIFICATE // Удостоверение/служебна бележка
+  ID_DOCUMENT // Документ за самоличност
+  CRIMINAL_RECORD // Свидетелство за съдимост
+  CV // Автобиография
+  REFERENCE // Препоръка
+  OTHER // Друг
+}
+
+// Вид на прикачения файл
+enum EmployeeDocumentFileKind {
+  ORIGINAL // Оригинал (напр. генериран от системата)
+  SIGNED_COPY // Подписано копие
+  ATTACHMENT // Прикачен файл/сканирано
+}
+
+// Ниво на електронен подпис (eIDAS / Регламент 910/2014)
+enum EmployeeSignatureType {
+  NONE // Без подпис
+  SES // Обикновен електронен подпис
+  AES // Усъвършенстван електронен подпис
+  QES // Квалифициран електронен подпис
+}
+
+// Трудов договор
+model EmploymentContract {
+  id     String                   @id @default(cuid())
+  number String // TD-2026-00001
+  type   EmploymentContractType   @default(INDEFINITE)
+  status EmploymentContractStatus @default(ACTIVE)
+
+  // Условия
+  position        String? // Длъжност
+  nkpdCode        String? // Код по НКПД
+  startDate       DateTime // Начална дата
+  endDate         DateTime? // Крайна дата (за срочни)
+  salary          Decimal?  @db.Decimal(12, 2) // Основно месечно възнаграждение
+  workingHours    Decimal?  @db.Decimal(5, 2) // Седмично работно време (часове)
+  probationMonths Int? // Срок за изпитване (месеци)
+
+  notes String? @db.Text
+
+  // Регулаторно (наредбата) — уведомяване и потвърждаване на получаване
+  notifiedEmployeeAt  DateTime?
+  deliveryConfirmedAt DateTime?
+
+  // Служител (user в контекста на компанията) + автор
+  userId      String
+  createdById String?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  annexes     EmploymentAnnex[]
+  termination Termination?
+  files       EmployeeDocumentFile[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, number])
+  @@index([companyId])
+  @@index([companyId, userId])
+  @@index([companyId, status])
+  @@map("employment_contracts")
+}
+
+// Допълнително споразумение (анекс) — изменя конкретен договор
+model EmploymentAnnex {
+  id            String   @id @default(cuid())
+  number        String // AX-2026-00001
+  effectiveDate DateTime // Дата на влизане в сила
+  reason        String? // Основание/причина
+
+  // Изменяни условия (само попълнените се прилагат)
+  newSalary       Decimal?  @db.Decimal(12, 2)
+  newPosition     String?
+  newWorkingHours Decimal?  @db.Decimal(5, 2)
+  newEndDate      DateTime?
+
+  notes String? @db.Text
+
+  notifiedEmployeeAt  DateTime?
+  deliveryConfirmedAt DateTime?
+
+  userId      String
+  createdById String?
+
+  contractId String
+  contract   EmploymentContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  files EmployeeDocumentFile[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, number])
+  @@index([companyId])
+  @@index([companyId, userId])
+  @@index([contractId])
+  @@map("employment_annexes")
+}
+
+// Заповед
+model EmploymentOrder {
+  id      String              @id @default(cuid())
+  number  String // ZP-2026-00001
+  type    EmploymentOrderType @default(OTHER)
+  date    DateTime // Дата на заповедта
+  subject String // Относно
+  content String?             @db.Text // Съдържание/мотиви
+
+  notifiedEmployeeAt  DateTime?
+  deliveryConfirmedAt DateTime?
+
+  userId      String
+  createdById String?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  files EmployeeDocumentFile[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, number])
+  @@index([companyId])
+  @@index([companyId, userId])
+  @@map("employment_orders")
+}
+
+// Длъжностна характеристика
+model JobDescription {
+  id               String  @id @default(cuid())
+  position         String // Длъжност
+  version          Int     @default(1)
+  responsibilities String? @db.Text // Задължения
+  requirements     String? @db.Text // Изисквания
+
+  notifiedEmployeeAt  DateTime?
+  deliveryConfirmedAt DateTime?
+
+  userId      String
+  createdById String?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  files EmployeeDocumentFile[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, userId])
+  @@map("job_descriptions")
+}
+
+// Прекратяване на трудово правоотношение
+model Termination {
+  id             String    @id @default(cuid())
+  basis          String // Основание (член от КТ)
+  date           DateTime // Дата на прекратяване
+  noticeServedAt DateTime? // Връчено предизвестие
+  compensation   Decimal?  @db.Decimal(12, 2) // Обезщетение
+
+  notes String? @db.Text
+
+  notifiedEmployeeAt  DateTime?
+  deliveryConfirmedAt DateTime?
+
+  userId      String
+  createdById String?
+
+  // 1:1 с договора, който се прекратява
+  contractId String?             @unique
+  contract   EmploymentContract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  files EmployeeDocumentFile[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, userId])
+  @@map("terminations")
+}
+
+// Документ от "опашката" — без собствен модел (диплома, медицинско и т.н.)
+model EmployeeDocument {
+  id           String                   @id @default(cuid())
+  category     EmployeeDocumentCategory @default(OTHER)
+  title        String
+  documentDate DateTime?
+
+  notes String? @db.Text
+
+  notifiedEmployeeAt  DateTime?
+  deliveryConfirmedAt DateTime?
+
+  userId      String
+  createdById String?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  files EmployeeDocumentFile[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, userId])
+  @@index([companyId, category])
+  @@map("employee_documents")
+}
+
+// Споделена файлова таблица за всички видове трудови документи (Вариант Б).
+// Полиморфна — точно една родителска връзка е попълнена за всеки ред.
+model EmployeeDocumentFile {
+  id       String @id @default(cuid())
+  fileName String // Оригинално име на файла
+  fileUrl  String // R2 object key (proxy URL се строи в контролера)
+  fileKey  String // R2 object key (за изтриване)
+  fileSize Int // Размер в байтове
+  mimeType String // MIME тип
+
+  kind          EmployeeDocumentFileKind @default(ATTACHMENT)
+  signatureType EmployeeSignatureType    @default(NONE)
+  signedAt      DateTime? // Кога е подписан (за SIGNED_COPY)
+
+  uploadedById String?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Полиморфни връзки — само една е попълнена
+  employmentContractId String?
+  employmentContract   EmploymentContract? @relation(fields: [employmentContractId], references: [id], onDelete: Cascade)
+
+  employmentAnnexId String?
+  employmentAnnex   EmploymentAnnex? @relation(fields: [employmentAnnexId], references: [id], onDelete: Cascade)
+
+  employmentOrderId String?
+  employmentOrder   EmploymentOrder? @relation(fields: [employmentOrderId], references: [id], onDelete: Cascade)
+
+  jobDescriptionId String?
+  jobDescription   JobDescription? @relation(fields: [jobDescriptionId], references: [id], onDelete: Cascade)
+
+  terminationId String?
+  termination   Termination? @relation(fields: [terminationId], references: [id], onDelete: Cascade)
+
+  employeeDocumentId String?
+  employeeDocument   EmployeeDocument? @relation(fields: [employeeDocumentId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([employmentContractId])
+  @@index([employmentAnnexId])
+  @@index([employmentOrderId])
+  @@index([jobDescriptionId])
+  @@index([terminationId])
+  @@index([employeeDocumentId])
+  @@map("employee_document_files")
 }

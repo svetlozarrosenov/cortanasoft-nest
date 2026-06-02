@@ -563,6 +563,23 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
           },
         ],
       },
+      {
+        key: 'employeeRecords',
+        labelKey: 'modules.hr.employeeRecords',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'employeeRecordsList',
+            labelKey: 'modules.hr.employeeRecordsList',
+            columns: [
+              { key: 'employee', labelKey: 'modules.hr.employee' },
+              { key: 'contracts', labelKey: 'modules.hr.contracts' },
+              { key: 'documents', labelKey: 'modules.hr.documents' },
+              { key: 'status', labelKey: 'common.status' },
+            ],
+          },
+        ],
+      },
     ],
   },
   {
