@@ -57,8 +57,10 @@ jobs:
             docker compose pull backend
 
             # Apply pending DB migrations with the NEW image BEFORE serving traffic.
-            # Uses versioned migrations (prisma migrate deploy) — no destructive db push.
-            docker compose run --rm backend npx prisma migrate deploy
+            # Override the entrypoint so this container ONLY migrates and exits —
+            # the default entrypoint.sh migrates AND starts the app in the foreground,
+            # which hangs this step. `migrate deploy` = versioned, non-destructive.
+            docker compose run --rm --entrypoint npx backend prisma migrate deploy
 
             # Restart backend + nginx with the new image
             docker compose up -d backend nginx
