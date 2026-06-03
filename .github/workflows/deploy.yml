@@ -56,11 +56,12 @@ jobs:
             # Pull latest backend image
             docker compose pull backend
 
-            # Restart backend + nginx
-            docker compose up -d backend nginx
+            # Apply pending DB migrations with the NEW image BEFORE serving traffic.
+            # Uses versioned migrations (prisma migrate deploy) — no destructive db push.
+            docker compose run --rm backend npx prisma migrate deploy
 
-            # Run database migrations
-            docker exec cortanasoft-backend npx prisma db push --skip-generate
+            # Restart backend + nginx with the new image
+            docker compose up -d backend nginx
 
             # Cleanup old images
             docker image prune -f

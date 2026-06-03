@@ -2473,8 +2473,13 @@ model Leave {
   startDate DateTime // Начална дата
   endDate   DateTime // Крайна дата
   days      Int // Брой работни дни
+  halfDay   Boolean  @default(false) // Половин ден (само за 1 ден)
 
   reason String? // Причина/бележка
+
+  documentNumber String? // Номер на документ (напр. болничен лист)
+  attachmentKey  String? // R2 ключ на прикачен документ
+  attachmentName String? // Оригинално име на прикачения файл
 
   // Служител който иска отпуска
   userId String
@@ -2513,14 +2518,15 @@ model LeaveBalance {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   // Баланси по тип
-  annualTotal   Int @default(20) // Общо дни платен отпуск
-  annualUsed    Int @default(0) // Използвани дни
-  annualCarried Int @default(0) // Пренесени от миналата година
+  annualTotal         Int   @default(20) // Кеширана ефективна квота (за справки/експорт)
+  annualTotalOverride Int? // Ръчна квота за годината (има приоритет пред подразбиращата се)
+  annualUsed          Float @default(0) // Използвани дни (поддържа половин ден)
+  annualCarried       Int   @default(0) // Пренесени от миналата година
 
-  sickTotal Int @default(0) // Общо болнични дни (обикновено неограничени)
-  sickUsed  Int @default(0) // Използвани болнични
+  sickTotal Int   @default(0) // Общо болнични дни (обикновено неограничени)
+  sickUsed  Float @default(0) // Използвани болнични
 
-  unpaidUsed Int @default(0) // Неплатен отпуск
+  unpaidUsed Float @default(0) // Неплатен отпуск
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

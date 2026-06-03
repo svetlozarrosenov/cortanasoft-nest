@@ -10,8 +10,12 @@ import {
   Res,
   StreamableFile,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
   Request,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -28,6 +32,7 @@ import {
   UpdateLeaveDto,
   QueryLeavesDto,
   RejectLeaveDto,
+  AdjustBalanceDto,
 } from './dto';
 import { ExportService } from '../common/export/export.service';
 import type { ExportFormat } from '../common/export/export.service';
@@ -57,8 +62,10 @@ export class CompanyLeavesController {
   async findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryLeavesDto,
+    @Request() req: any,
   ) {
-    return this.leavesService.findAll(companyId, query);
+    const viewer = await this.leavesService.buildViewer(companyId, req.user.id);
+    return this.leavesService.findAll(companyId, query, viewer);
   }
 
   // Get summary stats
@@ -75,8 +82,14 @@ export class CompanyLeavesController {
     @Query() query: QueryLeavesDto,
     @Query('format') format: ExportFormat = 'xlsx',
     @Res({ passthrough: true }) res: Response,
+    @Request() req: any,
   ) {
-    const { data } = await this.leavesService.findAll(companyId, { ...query, page: 1, limit: 100000 } as any);
+    const viewer = await this.leavesService.buildViewer(companyId, req.user.id);
+    const { data } = await this.leavesService.findAll(
+      companyId,
+      { ...query, page: 1, limit: 100000 } as any,
+      viewer,
+    );
 
     const columns = [
       { header: 'First Name', key: 'user.firstName', width: 20 },
@@ -95,6 +108,20 @@ export class CompanyLeavesController {
       'Content-Disposition': `attachment; filename="leaves-${new Date().toISOString().slice(0, 10)}.${ext}"`,
     });
     return new StreamableFile(buffer);
+  }
+
+  // Качване на придружаващ документ (връща R2 ключ + име, които се подават при създаване)
+  @Post('upload-document')
+  @RequireCreate('hr', 'leaves')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadDocument(
+    @Param('companyId') companyId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Не е предоставен файл');
+    }
+    return this.leavesService.uploadDocument(companyId, file);
   }
 
   // Get my leaves - users can always view their own leaves
@@ -136,14 +163,52 @@ export class CompanyLeavesController {
     );
   }
 
+  // Adjust a user's balance for a year (carryover / quota override)
+  @Patch('balance/:userId')
+  @RequireEdit('hr', 'leaves')
+  async adjustBalance(
+    @Param('companyId') companyId: string,
+    @Param('userId') userId: string,
+    @Query('year') year: string,
+    @Body() dto: AdjustBalanceDto,
+  ) {
+    return this.leavesService.adjustBalance(
+      companyId,
+      userId,
+      year ? parseInt(year) : new Date().getFullYear(),
+      dto,
+    );
+  }
+
   // Get one leave
   @Get(':id')
   @RequireView('hr', 'leaves')
   async findOne(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
+    @Request() req: any,
   ) {
-    return this.leavesService.findOne(companyId, id);
+    const viewer = await this.leavesService.buildViewer(companyId, req.user.id);
+    return this.leavesService.findOne(companyId, id, viewer);
+  }
+
+  // Сваляне/преглед на прикачения документ
+  @Get(':id/document')
+  @RequireView('hr', 'leaves')
+  async getDocument(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+    @Request() req: any,
+  ) {
+    const viewer = await this.leavesService.buildViewer(companyId, req.user.id);
+    const { stream, contentType, fileName } =
+      await this.leavesService.getDocument(companyId, id, viewer);
+    res.set({
+      'Content-Type': contentType,
+      'Content-Disposition': `inline; filename="${encodeURIComponent(fileName)}"`,
+    });
+    return new StreamableFile(stream);
   }
 
   // Update a leave request
