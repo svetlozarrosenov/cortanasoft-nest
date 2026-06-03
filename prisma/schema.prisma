@@ -600,6 +600,13 @@ model UserCompany {
 
   maxVacationDays Int? // Максимален брой дни годишен отпуск
 
+  // HR профил за трудовото досие (per-company). ЕГН се пази криптирано (AES-256-GCM).
+  personalIdEncrypted String? // ЕГН (криптирано)
+  birthDate           DateTime? // Дата на раждане
+  personalAddress     String? // Постоянен адрес
+  idCardNumber        String? // № лична карта
+  hireDate            DateTime? // Дата на постъпване
+
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -3914,6 +3921,9 @@ model EmploymentContract {
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Guard срещу повторни push нотификации за изтичащ срочен договор (cron)
+  expiryNotifiedAt DateTime?
 
   annexes     EmploymentAnnex[]
   termination Termination?

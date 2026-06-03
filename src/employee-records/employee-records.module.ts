@@ -1,7 +1,11 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { UploadsModule } from '../uploads/uploads.module';
+import { PushNotificationsModule } from '../push-notifications/push-notifications.module';
 import { EmployeeRecordNumberingService } from './employee-record-numbering.service';
+import { EmployeeProfileService } from './employee-profile.service';
+import { EmployeeRecordsCronService } from './employee-records.cron';
+import { CompanyEmployeeProfilesController } from './company-employee-profiles.controller';
 import { EmploymentContractsService } from './employment-contracts.service';
 import { EmploymentAnnexesService } from './employment-annexes.service';
 import { EmploymentOrdersService } from './employment-orders.service';
@@ -20,7 +24,7 @@ import { CompanyEmployeeDocumentFilesController } from './company-employee-docum
 import { CompanyEmployeeRecordNotificationsController } from './company-employee-record-notifications.controller';
 
 @Module({
-  imports: [PrismaModule, UploadsModule],
+  imports: [PrismaModule, UploadsModule, PushNotificationsModule],
   controllers: [
     CompanyEmploymentContractsController,
     CompanyEmploymentAnnexesController,
@@ -30,6 +34,7 @@ import { CompanyEmployeeRecordNotificationsController } from './company-employee
     CompanyEmployeeDocumentsController,
     CompanyEmployeeDocumentFilesController,
     CompanyEmployeeRecordNotificationsController,
+    CompanyEmployeeProfilesController,
   ],
   providers: [
     EmployeeRecordNumberingService,
@@ -41,6 +46,8 @@ import { CompanyEmployeeRecordNotificationsController } from './company-employee
     EmployeeDocumentsService,
     EmployeeDocumentFilesService,
     EmployeeRecordNotificationsService,
+    EmployeeProfileService,
+    EmployeeRecordsCronService,
   ],
   exports: [
     EmploymentContractsService,
