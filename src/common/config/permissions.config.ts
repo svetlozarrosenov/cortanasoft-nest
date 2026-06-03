@@ -580,6 +580,11 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
           },
         ],
       },
+      {
+        key: 'employeePersonalData',
+        labelKey: 'modules.hr.employeePersonalData',
+        actions: ['view', 'edit'],
+      },
     ],
   },
   {

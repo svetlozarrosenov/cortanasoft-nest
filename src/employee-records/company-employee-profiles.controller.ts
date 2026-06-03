@@ -15,7 +15,7 @@ export class CompanyEmployeeProfilesController {
   constructor(private readonly service: EmployeeProfileService) {}
 
   @Get(':userId')
-  @RequireView('hr', 'employeeRecords')
+  @RequireView('hr', 'employeePersonalData')
   get(
     @Param('companyId') companyId: string,
     @Param('userId') userId: string,
@@ -24,7 +24,7 @@ export class CompanyEmployeeProfilesController {
   }
 
   @Patch(':userId')
-  @RequireEdit('hr', 'employeeRecords')
+  @RequireEdit('hr', 'employeePersonalData')
   update(
     @Param('companyId') companyId: string,
     @Param('userId') userId: string,
