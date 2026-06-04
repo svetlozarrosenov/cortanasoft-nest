@@ -10,7 +10,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { EmploymentOrdersService } from './employment-orders.service';
-import { CreateEmploymentOrderDto, UpdateEmploymentOrderDto } from './dto';
+import {
+  BroadcastEmploymentOrderDto,
+  CreateEmploymentOrderDto,
+  UpdateEmploymentOrderDto,
+} from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import {
@@ -35,6 +39,16 @@ export class CompanyEmploymentOrdersController {
     @Body() dto: CreateEmploymentOrderDto,
   ) {
     return this.service.create(companyId, user.id, dto);
+  }
+
+  @Post('broadcast')
+  @RequireCreate('hr', 'employeeRecords')
+  broadcast(
+    @Param('companyId') companyId: string,
+    @CurrentUser() user: any,
+    @Body() dto: BroadcastEmploymentOrderDto,
+  ) {
+    return this.service.createBroadcast(companyId, user.id, dto);
   }
 
   @Get()

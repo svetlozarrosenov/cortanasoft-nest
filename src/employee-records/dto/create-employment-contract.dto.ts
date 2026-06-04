@@ -62,5 +62,9 @@ export class CreateEmploymentContractDto {
 
   @IsOptional()
   @IsString()
+  content?: string;
+
+  @IsOptional()
+  @IsString()
   notes?: string;
 }

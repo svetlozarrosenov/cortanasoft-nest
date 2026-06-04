@@ -41,9 +41,9 @@ export class CompanyJobDescriptionsController {
   @RequireView('hr', 'employeeRecords')
   findAll(
     @Param('companyId') companyId: string,
-    @Query('userId') userId?: string,
+    @Query('position') position?: string,
   ) {
-    return this.service.findAll(companyId, userId);
+    return this.service.findAll(companyId, position);
   }
 
   @Get(':id')

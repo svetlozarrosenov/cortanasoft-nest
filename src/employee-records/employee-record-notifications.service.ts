@@ -7,11 +7,12 @@ import { PrismaService } from '../prisma/prisma.service';
 
 // Полиморфна карта: тип документ → Prisma модел (всички имат
 // notifiedEmployeeAt + deliveryConfirmedAt колони).
+// Длъжностните характеристики са на ниво длъжност (не се уведомяват per служител),
+// затова не са тук.
 const NOTIFY_MODEL_MAP = {
   employmentContract: 'employmentContract',
   employmentAnnex: 'employmentAnnex',
   employmentOrder: 'employmentOrder',
-  jobDescription: 'jobDescription',
   termination: 'termination',
   employeeDocument: 'employeeDocument',
 } as const;

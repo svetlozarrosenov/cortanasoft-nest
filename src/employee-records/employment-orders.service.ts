@@ -1,7 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmployeeRecordNumberingService } from './employee-record-numbering.service';
-import { CreateEmploymentOrderDto, UpdateEmploymentOrderDto } from './dto';
+import {
+  BroadcastEmploymentOrderDto,
+  CreateEmploymentOrderDto,
+  UpdateEmploymentOrderDto,
+} from './dto';
 
 @Injectable()
 export class EmploymentOrdersService {
@@ -50,6 +58,43 @@ export class EmploymentOrdersService {
         },
         include: this.include,
       });
+    });
+  }
+
+  /**
+   * Издаване на една заповед към много служители (пиши веднъж → fan-out).
+   * Създава по една заповед (със собствен номер) в досието на всеки получател,
+   * така че per-служител notify/confirm и прикачени файлове работят както обикновено.
+   */
+  async createBroadcast(
+    companyId: string,
+    userId: string,
+    dto: BroadcastEmploymentOrderDto,
+  ) {
+    const userIds = [...new Set(dto.userIds)].filter(Boolean);
+    if (userIds.length === 0) {
+      throw new BadRequestException('Няма избрани получатели');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const created: { id: string; number: string; userId: string }[] = [];
+      for (const uid of userIds) {
+        const number = await this.numbering.next('order', companyId, tx);
+        const order = await tx.employmentOrder.create({
+          data: {
+            number,
+            type: dto.type ?? 'OTHER',
+            date: new Date(dto.date),
+            subject: dto.subject,
+            content: dto.content ?? null,
+            userId: uid,
+            createdById: userId,
+            companyId,
+          },
+          select: { id: true, number: true, userId: true },
+        });
+        created.push(order);
+      }
+      return { count: created.length, data: created };
     });
   }
 

@@ -60,6 +60,7 @@ export class EmploymentContractsService {
           salary: dto.salary ?? null,
           workingHours: dto.workingHours ?? null,
           probationMonths: dto.probationMonths ?? null,
+          content: dto.content ?? null,
           notes: dto.notes ?? null,
           userId: dto.userId,
           createdById: userId,
@@ -97,6 +98,7 @@ export class EmploymentContractsService {
         ...(dto.probationMonths !== undefined
           ? { probationMonths: dto.probationMonths }
           : {}),
+        ...(dto.content !== undefined ? { content: dto.content } : {}),
         ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
       },
       include: this.include,

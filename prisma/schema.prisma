@@ -3915,7 +3915,9 @@ model EmploymentContract {
   workingHours    Decimal?  @db.Decimal(5, 2) // Седмично работно време (часове)
   probationMonths Int? // Срок за изпитване (месеци)
 
-  notes String? @db.Text
+  // Съдържание/клаузи на договора (свободен текст)
+  content String? @db.Text
+  notes   String? @db.Text
 
   // Регулаторно (наредбата) — уведомяване и потвърждаване на получаване
   notifiedEmployeeAt  DateTime?
@@ -4014,17 +4016,15 @@ model EmploymentOrder {
 }
 
 // Длъжностна характеристика
+// Длъжностна характеристика — на ниво ДЛЪЖНОСТ (компания), НЕ per служител.
+// Авторира се веднъж за длъжност и важи за всички служители на тази длъжност.
 model JobDescription {
   id               String  @id @default(cuid())
-  position         String // Длъжност
+  position         String // Длъжност (ключът за свързване със служители)
   version          Int     @default(1)
   responsibilities String? @db.Text // Задължения
   requirements     String? @db.Text // Изисквания
 
-  notifiedEmployeeAt  DateTime?
-  deliveryConfirmedAt DateTime?
-
-  userId      String
   createdById String?
 
   companyId String
@@ -4036,7 +4036,7 @@ model JobDescription {
   updatedAt DateTime @updatedAt
 
   @@index([companyId])
-  @@index([companyId, userId])
+  @@index([companyId, position])
   @@map("job_descriptions")
 }
 

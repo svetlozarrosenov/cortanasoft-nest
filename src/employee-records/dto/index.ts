@@ -6,6 +6,7 @@ export * from './create-employment-annex.dto';
 export * from './update-employment-annex.dto';
 export * from './create-employment-order.dto';
 export * from './update-employment-order.dto';
+export * from './broadcast-employment-order.dto';
 export * from './create-job-description.dto';
 export * from './update-job-description.dto';
 export * from './create-termination.dto';

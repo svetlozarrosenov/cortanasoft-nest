@@ -11,9 +11,9 @@ export class JobDescriptionsService {
     _count: { select: { files: true } },
   };
 
-  async findAll(companyId: string, userId?: string) {
+  async findAll(companyId: string, position?: string) {
     const data = await this.prisma.jobDescription.findMany({
-      where: { companyId, ...(userId ? { userId } : {}) },
+      where: { companyId, ...(position ? { position } : {}) },
       include: this.include,
       orderBy: [{ position: 'asc' }, { version: 'desc' }],
     });
@@ -30,9 +30,9 @@ export class JobDescriptionsService {
   }
 
   async create(companyId: string, userId: string, dto: CreateJobDescriptionDto) {
-    // Авто-версиониране: следваща версия за същия служител+длъжност
+    // Авто-версиониране: следваща версия за същата длъжност (компания-ниво)
     const last = await this.prisma.jobDescription.findFirst({
-      where: { companyId, userId: dto.userId, position: dto.position },
+      where: { companyId, position: dto.position },
       orderBy: { version: 'desc' },
       select: { version: true },
     });
@@ -44,7 +44,6 @@ export class JobDescriptionsService {
         version,
         responsibilities: dto.responsibilities ?? null,
         requirements: dto.requirements ?? null,
-        userId: dto.userId,
         createdById: userId,
         companyId,
       },
