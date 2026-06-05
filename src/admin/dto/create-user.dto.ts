@@ -9,6 +9,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { NormalizeEmail, TrimEnds } from '../../common/decorators/normalize.decorator';
 
 class UserCompanyAssignment {
   @IsString()
@@ -25,10 +26,12 @@ class UserCompanyAssignment {
 }
 
 export class CreateUserDto {
+  @NormalizeEmail()
   @IsEmail()
   @IsNotEmpty()
   email: string;
 
+  @TrimEnds()
   @IsString()
   @IsNotEmpty()
   @MinLength(6)

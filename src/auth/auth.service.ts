@@ -222,7 +222,11 @@ export class AuthService {
   }
 
   async forgotPassword(email: string) {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    // Case-insensitive, за да съвпада с поведението при логин (а имейлът вече е
+    // трим-нат + lowercase от DTO-то).
+    const user = await this.prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+    });
 
     // Always return success to prevent email enumeration
     if (!user || !user.isActive) {
