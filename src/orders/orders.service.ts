@@ -935,7 +935,8 @@ export class OrdersService {
               data: { stockDeducted: true },
             });
           } else {
-            // Auto-deduct using FIFO (oldest batches first)
+            // Auto-deduct using FEFO (first-expired-first-out) — за стоки със
+            // срок излиза първо най-скоро изтичащата; без срок → най-старата (FIFO).
             // Prefer item-level locationId, fall back to order-level
             const deductLocationId = item.locationId || order.locationId;
             const batches = await tx.inventoryBatch.findMany({
@@ -945,7 +946,10 @@ export class OrdersService {
                 quantity: { gt: 0 },
                 ...(deductLocationId && { locationId: deductLocationId }),
               },
-              orderBy: { createdAt: 'asc' }, // FIFO
+              orderBy: [
+                { expiryDate: { sort: 'asc', nulls: 'last' } },
+                { createdAt: 'asc' },
+              ], // FEFO, после FIFO
             });
 
             const totalAvailable = batches.reduce(
