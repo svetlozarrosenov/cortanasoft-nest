@@ -430,6 +430,12 @@ export class GoodsReceiptsService {
     itemSerials?: { goodsReceiptItemId: string; serialNumbers: string[] }[],
     paidAtOverride?: string,
     deliveredAtOverride?: string,
+    itemBatches?: {
+      goodsReceiptItemId: string;
+      batchNumber?: string;
+      expiryDate?: string;
+      manufacturingDate?: string;
+    }[],
   ) {
     const receipt = await this.findOne(companyId, id);
 
@@ -536,7 +542,24 @@ export class GoodsReceiptsService {
             }
           } else {
             // PRODUCT, BATCH — create InventoryBatch
-            const batchNumber = `${receipt.receiptNumber}-${item.id.slice(-4)}`;
+            const info = (itemBatches ?? []).find(
+              (b) => b.goodsReceiptItemId === item.id,
+            );
+            const batchNumber =
+              info?.batchNumber?.trim() ||
+              `${receipt.receiptNumber}-${item.id.slice(-4)}`;
+
+            const manufacturingDate = info?.manufacturingDate
+              ? new Date(info.manufacturingDate)
+              : null;
+            // Срок: ръчно зададен има приоритет; иначе авто = дата на производство + срок на годност (дни)
+            let expiryDate: Date | null = info?.expiryDate
+              ? new Date(info.expiryDate)
+              : null;
+            if (!expiryDate && manufacturingDate && product.shelfLifeDays) {
+              expiryDate = new Date(manufacturingDate);
+              expiryDate.setDate(expiryDate.getDate() + product.shelfLifeDays);
+            }
 
             await tx.inventoryBatch.create({
               data: {
@@ -544,6 +567,8 @@ export class GoodsReceiptsService {
                 quantity: item.quantity,
                 initialQty: item.quantity,
                 unitCost: item.unitPrice,
+                manufacturingDate,
+                expiryDate,
                 companyId,
                 productId: item.productId,
                 locationId: receipt.locationId,

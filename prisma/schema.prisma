@@ -946,6 +946,7 @@ model Product {
   // Наличност
   minStock       Decimal? @db.Decimal(10, 3) // Минимална наличност за известие
   trackInventory Boolean  @default(true) // Дали да се следи наличността
+  shelfLifeDays  Int? // Срок на годност в дни (за авто-срок на готовите партиди при производство)
 
   // Статус
   isActive  Boolean  @default(true)

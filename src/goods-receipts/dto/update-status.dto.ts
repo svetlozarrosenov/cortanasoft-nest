@@ -20,6 +20,25 @@ export class ItemSerialNumbersDto {
   serialNumbers: string[];
 }
 
+// Партидни данни за артикул при доставка (№ партида, срок, дата на производство)
+export class ItemBatchInfoDto {
+  @IsString()
+  @IsNotEmpty()
+  goodsReceiptItemId: string;
+
+  @IsOptional()
+  @IsString()
+  batchNumber?: string;
+
+  @IsOptional()
+  @IsDateString()
+  expiryDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  manufacturingDate?: string;
+}
+
 export class UpdateGoodsReceiptStatusDto {
   @IsEnum(GoodsReceiptStatus)
   status: GoodsReceiptStatus;
@@ -29,6 +48,12 @@ export class UpdateGoodsReceiptStatusDto {
   @ValidateNested({ each: true })
   @Type(() => ItemSerialNumbersDto)
   itemSerials?: ItemSerialNumbersDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ItemBatchInfoDto)
+  itemBatches?: ItemBatchInfoDto[];
 
   // Дата на плащане — използва се само при transition към DELIVERED_PAID.
   // Когато е празно, backend-ът използва текущия момент.

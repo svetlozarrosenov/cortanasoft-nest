@@ -15,6 +15,7 @@ import {
   UpdateProductionOrderDto,
   QueryProductionOrdersDto,
   IssueMaterialDto,
+  CompleteProductionOrderDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -108,8 +109,12 @@ export class CompanyProductionController {
 
   @Post(':id/complete')
   @RequireEdit('production', 'orders')
-  complete(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.productionService.complete(companyId, id);
+  complete(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: CompleteProductionOrderDto,
+  ) {
+    return this.productionService.complete(companyId, id, dto);
   }
 
   @Post(':id/cancel')

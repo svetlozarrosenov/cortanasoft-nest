@@ -56,6 +56,11 @@ export class CreateProductDto {
   @Min(0)
   minStock?: number;
 
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  shelfLifeDays?: number;
+
   @IsBoolean()
   @IsOptional()
   trackInventory?: boolean;

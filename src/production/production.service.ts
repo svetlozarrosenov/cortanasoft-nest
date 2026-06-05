@@ -336,7 +336,15 @@ export class ProductionService {
     });
   }
 
-  async complete(companyId: string, id: string) {
+  async complete(
+    companyId: string,
+    id: string,
+    dto?: {
+      batchNumber?: string;
+      manufacturingDate?: string;
+      expiryDate?: string;
+    },
+  ) {
     const order = await this.prisma.productionOrder.findFirst({
       where: { id, companyId },
       include: {
@@ -370,14 +378,30 @@ export class ProductionService {
     const finishedQty = Number(order.quantity);
     const calculatedUnitCost = finishedQty > 0 ? totalMaterialCost / finishedQty : 0;
 
+    // Партида, дата на производство и срок на годност на готовия продукт
+    const manufacturingDate = dto?.manufacturingDate
+      ? new Date(dto.manufacturingDate)
+      : new Date();
+    let expiryDate: Date | null = dto?.expiryDate
+      ? new Date(dto.expiryDate)
+      : null;
+    if (!expiryDate && order.product.shelfLifeDays) {
+      expiryDate = new Date(manufacturingDate);
+      expiryDate.setDate(expiryDate.getDate() + order.product.shelfLifeDays);
+    }
+    const finishedBatchNumber =
+      dto?.batchNumber?.trim() || `PRD-${order.orderNumber}`;
+
     return this.prisma.$transaction(async (tx) => {
       if (locationId) {
         await tx.inventoryBatch.create({
           data: {
-            batchNumber: `PRD-${order.orderNumber}`,
+            batchNumber: finishedBatchNumber,
             quantity: finishedQty,
             initialQty: finishedQty,
             unitCost: calculatedUnitCost,
+            manufacturingDate,
+            expiryDate,
             productId: order.productId,
             companyId,
             locationId,

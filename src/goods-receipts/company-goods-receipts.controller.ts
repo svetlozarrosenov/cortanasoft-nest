@@ -81,6 +81,7 @@ export class CompanyGoodsReceiptsController {
       dto.itemSerials,
       dto.paidAt,
       dto.deliveredAt,
+      dto.itemBatches,
     );
   }
 
