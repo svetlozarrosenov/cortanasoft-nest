@@ -389,8 +389,8 @@ export class ProductionService {
       expiryDate = new Date(manufacturingDate);
       expiryDate.setDate(expiryDate.getDate() + order.product.shelfLifeDays);
     }
-    const finishedBatchNumber =
-      dto?.batchNumber?.trim() || `PRD-${order.orderNumber}`;
+    // orderNumber вече е напр. PRD-2026-00001 → не добавяме втори префикс
+    const finishedBatchNumber = dto?.batchNumber?.trim() || order.orderNumber;
 
     return this.prisma.$transaction(async (tx) => {
       if (locationId) {
@@ -405,6 +405,7 @@ export class ProductionService {
             productId: order.productId,
             companyId,
             locationId,
+            productionOrderId: order.id,
           },
         });
       }
@@ -552,6 +553,19 @@ export class ProductionService {
       await tx.inventoryBatch.update({
         where: { id: batch.id },
         data: { quantity: batchQty - deduct },
+      });
+
+      // Genealogy: записваме коя суровинна партида колко е вложена
+      await tx.productionConsumption.create({
+        data: {
+          productionOrderId: params.productionOrderId,
+          productId: params.productId,
+          inventoryBatchId: batch.id,
+          sourceBatchNumber: batch.batchNumber,
+          quantity: deduct,
+          unitCost,
+          companyId: params.companyId,
+        },
       });
 
       costAccum += deduct * unitCost;

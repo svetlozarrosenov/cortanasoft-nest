@@ -224,6 +224,7 @@ model Company {
   billOfMaterials              BillOfMaterial[]
   productionOrders             ProductionOrder[]
   productionIssuances          ProductionMaterialIssuance[]
+  productionConsumptions       ProductionConsumption[]
   apiKeys                      ApiKey[]
   stockTransfers               StockTransfer[]
   econtConfig                  EcontConfig?
@@ -988,10 +989,11 @@ model Product {
   acceptanceProtocolItems AcceptanceProtocolItem[]
 
   // Производство
-  bomAsProduct        BillOfMaterial[]             @relation("BOMProduct")
-  bomItems            BOMItem[]                    @relation("BOMItemProduct")
-  productionOrders    ProductionOrder[]            @relation("ProductionOrderProduct")
-  productionIssuances ProductionMaterialIssuance[] @relation("IssuanceProduct")
+  bomAsProduct           BillOfMaterial[]             @relation("BOMProduct")
+  bomItems               BOMItem[]                    @relation("BOMItemProduct")
+  productionOrders       ProductionOrder[]            @relation("ProductionOrderProduct")
+  productionIssuances    ProductionMaterialIssuance[] @relation("IssuanceProduct")
+  productionConsumptions ProductionConsumption[]
 
   // Трансфери между складове
   stockTransferItems StockTransferItem[]
@@ -1826,9 +1828,14 @@ model InventoryBatch {
   goodsReceiptItemId String?
   goodsReceiptItem   GoodsReceiptItem? @relation(fields: [goodsReceiptItemId], references: [id], onDelete: SetNull)
 
-  orderItems         OrderItem[]
-  stockTransferItems StockTransferItem[]
-  serviceOrderParts  ServiceOrderPart[]
+  // Произход от производство (за произведени партиди)
+  productionOrderId String?
+  productionOrder   ProductionOrder? @relation("ProductionOutputBatches", fields: [productionOrderId], references: [id], onDelete: SetNull)
+
+  orderItems             OrderItem[]
+  stockTransferItems     StockTransferItem[]
+  serviceOrderParts      ServiceOrderPart[]
+  productionConsumptions ProductionConsumption[]
 
   @@unique([companyId, productId, batchNumber])
   @@index([companyId, productId])
@@ -3055,7 +3062,9 @@ model ProductionOrder {
   createdById String?
   createdBy   User?   @relation("ProductionOrderCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
 
-  issuances ProductionMaterialIssuance[]
+  issuances       ProductionMaterialIssuance[]
+  producedBatches InventoryBatch[]             @relation("ProductionOutputBatches")
+  consumptions    ProductionConsumption[]
 
   @@unique([companyId, orderNumber])
   @@index([companyId, status])
@@ -3096,6 +3105,33 @@ model ProductionMaterialIssuance {
   @@index([companyId, productId])
   @@index([companyId, issuedAt])
   @@map("production_material_issuances")
+}
+
+// Проследимост (genealogy): коя суровинна партида колко е вложена в дадена
+// производствена поръчка. Попълва се при FIFO изписване. sourceBatchNumber е
+// snapshot на лота (остава дори ако партидата се изчерпи/изтрие).
+model ProductionConsumption {
+  id                String   @id @default(cuid())
+  quantity          Decimal  @db.Decimal(10, 3) // Вложено количество от тази партида
+  unitCost          Decimal  @default(0) @db.Decimal(12, 4)
+  sourceBatchNumber String // Лот номер на вложената суровина (snapshot)
+  createdAt         DateTime @default(now())
+
+  productionOrderId String
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  inventoryBatchId String?
+  inventoryBatch   InventoryBatch? @relation(fields: [inventoryBatchId], references: [id], onDelete: SetNull)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([productionOrderId])
+  @@index([companyId, inventoryBatchId])
+  @@map("production_consumptions")
 }
 
 // ==================== ТРАНСФЕРИ МЕЖДУ СКЛАДОВЕ ====================
