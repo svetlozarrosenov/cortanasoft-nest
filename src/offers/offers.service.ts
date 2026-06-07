@@ -139,6 +139,7 @@ export class OffersService {
           total,
           notes: dto.notes || null,
           richDescription: dto.richDescription || null,
+          hideTotals: dto.hideTotals ?? false,
           currencyId,
           companyId,
           createdById: userId,
@@ -270,6 +271,7 @@ export class OffersService {
           ...(dto.richDescription !== undefined && {
             richDescription: dto.richDescription || null,
           }),
+          ...(dto.hideTotals !== undefined && { hideTotals: dto.hideTotals }),
         },
         include: OFFER_INCLUDE,
       });
@@ -367,6 +369,7 @@ export class OffersService {
           ...(dto.richDescription !== undefined && {
             richDescription: dto.richDescription || null,
           }),
+          ...(dto.hideTotals !== undefined && { hideTotals: dto.hideTotals }),
           subtotal,
           vatAmount,
           discount: offerDiscount,

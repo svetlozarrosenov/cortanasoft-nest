@@ -1751,6 +1751,10 @@ model Offer {
   // Подробно описание (rich text, TipTap JSON) — показва се в PDF-а на офертата
   richDescription String?
 
+  // Скрий обобщението на сумите (данъчна основа/ДДС/обща сума/словом) в PDF-а.
+  // За абонаментни/смесени оферти, където един сборен ред е подвеждащ.
+  hideTotals Boolean @default(false)
+
   // Валута
   currencyId   String?
   currency     Currency? @relation(fields: [currencyId], references: [id])

@@ -8,6 +8,7 @@ import {
   ArrayMinSize,
   ValidateNested,
   Min,
+  IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { OfferStatus } from '@prisma/client';
@@ -99,6 +100,10 @@ export class CreateOfferDto {
   @IsOptional()
   richDescription?: string;
 
+  @IsBoolean()
+  @IsOptional()
+  hideTotals?: boolean;
+
   @IsString()
   @IsOptional()
   currencyId?: string;
@@ -167,6 +172,10 @@ export class UpdateOfferDto {
   @IsString()
   @IsOptional()
   richDescription?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  hideTotals?: boolean;
 
   @IsArray()
   @IsOptional()
