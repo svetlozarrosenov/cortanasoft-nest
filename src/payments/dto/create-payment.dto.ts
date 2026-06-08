@@ -18,9 +18,14 @@ enum PaymentMethodEnum {
 }
 
 export class CreatePaymentDto {
-  @IsNotEmpty()
+  // Полиморфно: подава се точно едно от orderId / goodsReceiptId.
+  @IsOptional()
   @IsString()
-  orderId: string;
+  orderId?: string;
+
+  @IsOptional()
+  @IsString()
+  goodsReceiptId?: string;
 
   @IsNotEmpty()
   @Type(() => Number)

@@ -39,6 +39,10 @@ export class PaymentsService {
       where.orderId = query.orderId;
     }
 
+    if (query.goodsReceiptId) {
+      where.goodsReceiptId = query.goodsReceiptId;
+    }
+
     if (query.dateFrom || query.dateTo) {
       where.paidAt = {};
       if (query.dateFrom) where.paidAt.gte = new Date(query.dateFrom);
@@ -72,7 +76,42 @@ export class PaymentsService {
   }
 
   async create(companyId: string, userId: string, dto: CreatePaymentDto) {
+    if (!dto.orderId === !dto.goodsReceiptId) {
+      throw new BadRequestException(
+        'Подайте точно едно от orderId / goodsReceiptId',
+      );
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
+      // --- Goods receipt payment ---
+      if (dto.goodsReceiptId) {
+        const receipt = await tx.goodsReceipt.findFirst({
+          where: { id: dto.goodsReceiptId, companyId },
+          select: { id: true, currencyId: true },
+        });
+        if (!receipt) throw new NotFoundException('Goods receipt not found');
+
+        const payment = await tx.payment.create({
+          data: {
+            goodsReceiptId: dto.goodsReceiptId,
+            companyId,
+            amount: dto.amount,
+            paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
+            method: dto.method || 'CASH',
+            reference: dto.reference,
+            notes: dto.notes,
+            currencyId: dto.currencyId || receipt.currencyId,
+            exchangeRate: dto.exchangeRate ?? 1,
+            createdById: userId,
+          },
+          include: PAYMENT_INCLUDE,
+        });
+
+        await this.recalculateGoodsReceiptState(tx, dto.goodsReceiptId);
+        return payment;
+      }
+
+      // --- Order payment ---
       const order = await tx.order.findFirst({
         where: { id: dto.orderId, companyId },
         select: { id: true, total: true, currencyId: true, paymentStatus: true },
@@ -95,12 +134,53 @@ export class PaymentsService {
         include: PAYMENT_INCLUDE,
       });
 
-      await this.recalculateOrderState(tx, dto.orderId);
+      await this.recalculateOrderState(tx, dto.orderId!);
 
       return payment;
     });
-    await this.webhookDispatcher.emitOrderChanged(companyId, dto.orderId);
+    if (dto.orderId) {
+      await this.webhookDispatcher.emitOrderChanged(companyId, dto.orderId);
+    }
     return result;
+  }
+
+  /**
+   * Derive goodsReceipt.paidAmount + paymentStatus from its payments.
+   * Reads the stored totalAmount (kept in sync by GoodsReceiptsService).
+   * REFUNDED stays a manual override. Also syncs attached expenses' status.
+   */
+  async recalculateGoodsReceiptState(tx: PrismaTx, goodsReceiptId: string) {
+    const agg = await tx.payment.aggregate({
+      where: { goodsReceiptId },
+      _sum: { amount: true },
+    });
+    const paid = Number(agg._sum.amount || 0);
+
+    const receipt = await tx.goodsReceipt.findUnique({
+      where: { id: goodsReceiptId },
+      select: { totalAmount: true, paymentStatus: true },
+    });
+    if (!receipt) return;
+    const total = Number(receipt.totalAmount);
+
+    let newStatus: 'PENDING' | 'PARTIAL' | 'PAID' | 'REFUNDED' =
+      receipt.paymentStatus === 'REFUNDED' ? 'REFUNDED' : 'PENDING';
+    if (receipt.paymentStatus !== 'REFUNDED') {
+      if (paid <= 0) newStatus = 'PENDING';
+      else if (paid < total) newStatus = 'PARTIAL';
+      else newStatus = 'PAID';
+    }
+
+    await tx.goodsReceipt.update({
+      where: { id: goodsReceiptId },
+      data: { paidAmount: paid, paymentStatus: newStatus },
+    });
+
+    // Attached expenses follow the receipt's payment status (not cancelled ones).
+    await tx.expense.updateMany({
+      where: { goodsReceiptId, status: { not: 'CANCELLED' } },
+      data: { status: newStatus === 'PAID' ? 'PAID' : 'PENDING' },
+    });
   }
 
   async update(companyId: string, id: string, dto: UpdatePaymentDto) {
@@ -122,11 +202,17 @@ export class PaymentsService {
         include: PAYMENT_INCLUDE,
       });
 
-      await this.recalculateOrderState(tx, payment.orderId);
+      if (payment.goodsReceiptId) {
+        await this.recalculateGoodsReceiptState(tx, payment.goodsReceiptId);
+      } else if (payment.orderId) {
+        await this.recalculateOrderState(tx, payment.orderId);
+      }
 
       return updated;
     });
-    await this.webhookDispatcher.emitOrderChanged(companyId, result.orderId);
+    if (result.orderId) {
+      await this.webhookDispatcher.emitOrderChanged(companyId, result.orderId);
+    }
     return result;
   }
 
@@ -138,11 +224,17 @@ export class PaymentsService {
       if (!payment) throw new NotFoundException('Payment not found');
 
       await tx.payment.delete({ where: { id } });
-      await this.recalculateOrderState(tx, payment.orderId);
+      if (payment.goodsReceiptId) {
+        await this.recalculateGoodsReceiptState(tx, payment.goodsReceiptId);
+      } else if (payment.orderId) {
+        await this.recalculateOrderState(tx, payment.orderId);
+      }
 
       return { orderId: payment.orderId };
     });
-    await this.webhookDispatcher.emitOrderChanged(companyId, orderId);
+    if (orderId) {
+      await this.webhookDispatcher.emitOrderChanged(companyId, orderId);
+    }
     return { success: true };
   }
 

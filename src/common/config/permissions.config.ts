@@ -907,6 +907,33 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
       },
     ],
   },
+  {
+    key: 'accountant',
+    labelKey: 'modules.accountant.title',
+    icon: 'Calculator',
+    pages: [
+      {
+        key: 'income',
+        labelKey: 'modules.accountant.income',
+        actions: ['view', 'edit'],
+      },
+      {
+        key: 'expenses',
+        labelKey: 'modules.accountant.expenses',
+        actions: ['view'],
+      },
+      {
+        key: 'bankStatements',
+        labelKey: 'modules.accountant.bankStatements',
+        actions: ['view', 'create', 'delete'],
+      },
+      {
+        key: 'settings',
+        labelKey: 'modules.accountant.settings',
+        actions: ['view', 'edit'],
+      },
+    ],
+  },
 ];
 
 // Функция за създаване на празни (без права) permissions

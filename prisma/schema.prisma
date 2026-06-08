@@ -236,6 +236,8 @@ model Company {
   integrationWebhooks          IntegrationWebhook[]
   integrationWebhookDeliveries IntegrationWebhookDelivery[]
   payments                     Payment[]
+  bankStatements               BankStatement[]
+  accountantSettings           AccountantSettings?
   creditApplications           CreditApplication[]
 
   // Сервиз
@@ -873,8 +875,7 @@ enum ProductType {
 // Статус на приемане на стока
 enum GoodsReceiptStatus {
   EXPECTED // Очаквана
-  DELIVERED_PAID // Доставена и платена
-  DELIVERED_UNPAID // Доставена и неплатена
+  DELIVERED // Доставена
   CANCELLED // Анулирана
 }
 
@@ -1126,8 +1127,11 @@ model GoodsReceipt {
   id            String             @id @default(cuid())
   receiptNumber String // Номер на документа
   receiptDate   DateTime           @default(now()) // Дата на поръчката (когато сме поръчали при доставчика)
-  deliveredAt   DateTime? // Дата на реалната доставка — попълва се при EXPECTED → DELIVERED_*
-  status        GoodsReceiptStatus @default(EXPECTED)
+  deliveredAt   DateTime? // Дата на реалната доставка — попълва се при EXPECTED → DELIVERED
+  status        GoodsReceiptStatus @default(EXPECTED) // Статус на доставката (физически)
+  paymentStatus PaymentStatus      @default(PENDING) // Статус на плащане (отделен от доставката)
+  totalAmount   Decimal            @default(0) @db.Decimal(12, 2) // Обща сума (редове + разходи), за статуса на плащане
+  paidAmount    Decimal            @default(0) @db.Decimal(12, 2) // Сумиран еквивалент на Payment-ите (derived)
   notes         String? // Бележки
   invoiceNumber String? // Номер на фактура от доставчик
   invoiceDate   DateTime? // Дата на фактура
@@ -1156,6 +1160,7 @@ model GoodsReceipt {
   items     GoodsReceiptItem[]
   documents Document[]
   expenses  Expense[]
+  payments  Payment[]
 
   @@unique([companyId, receiptNumber])
   @@index([companyId, status])
@@ -1688,8 +1693,12 @@ model Payment {
   exchangeRate Decimal   @default(1) @db.Decimal(10, 6)
 
   // Релации
-  orderId String
-  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // Полиморфно: точно едно от orderId / goodsReceiptId е попълнено
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  goodsReceiptId String?
+  goodsReceipt   GoodsReceipt? @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -1701,8 +1710,46 @@ model Payment {
   updatedAt DateTime @updatedAt
 
   @@index([companyId, orderId])
+  @@index([companyId, goodsReceiptId])
   @@index([companyId, paidAt])
   @@map("payments")
+}
+
+// Банково извлечение — 1 запис на месец (за счетоводния пакет). Файлът е PDF.
+model BankStatement {
+  id        String   @id @default(cuid())
+  year      Int // Година на периода
+  month     Int // Месец на периода (1-12)
+  fileUrl   String // URL към качения файл (PDF)
+  fileName  String? // Оригинално име на файла
+  notes     String? // Бележки
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, year, month])
+  @@map("bank_statements")
+}
+
+// Настройки за счетоводния модул (1 на компания). Разширяемо — данни за
+// счетоводителя + темплейт на имейла, който се праща с месечния пакет.
+model AccountantSettings {
+  id              String  @id @default(cuid())
+  accountantEmail String? // Имейл на счетоводителя
+  accountantName  String? // Име на счетоводителя
+  emailSubject    String? // Тема на имейла (празно = темплейт по подразбиране)
+  emailBody       String? // Текст на имейла (празно = темплейт по подразбиране)
+
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("accountant_settings")
 }
 
 // ==================== ОФЕРТИ ====================

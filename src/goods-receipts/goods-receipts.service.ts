@@ -36,14 +36,21 @@ const RECEIPT_INCLUDE = {
       currency: true,
     },
   },
+  payments: {
+    include: {
+      currency: { select: { id: true, code: true, symbol: true } },
+      createdBy: { select: { id: true, firstName: true, lastName: true } },
+    },
+    orderBy: { paidAt: 'desc' as const },
+  },
   _count: { select: { items: true } },
 };
 
-// Valid status transitions
+// Valid delivery-status transitions (payment is tracked separately via the
+// payment ledger, mirroring orders).
 const VALID_TRANSITIONS: Record<GoodsReceiptStatus, GoodsReceiptStatus[]> = {
-  EXPECTED: ['DELIVERED_PAID', 'DELIVERED_UNPAID', 'CANCELLED'],
-  DELIVERED_PAID: ['CANCELLED'],
-  DELIVERED_UNPAID: ['DELIVERED_PAID', 'CANCELLED'],
+  EXPECTED: ['DELIVERED', 'CANCELLED'],
+  DELIVERED: ['CANCELLED'],
   CANCELLED: [],
 };
 
@@ -183,15 +190,67 @@ export class GoodsReceiptsService {
             },
           });
         }
-
-        // Re-fetch to include expenses
-        return tx.goodsReceipt.findUnique({
-          where: { id: receipt.id },
-          include: RECEIPT_INCLUDE,
-        });
       }
 
-      return receipt;
+      // Store totalAmount (items + expenses) + derive payment status.
+      await this.recalcReceiptState(tx, receipt.id);
+
+      return tx.goodsReceipt.findUnique({
+        where: { id: receipt.id },
+        include: RECEIPT_INCLUDE,
+      });
+    });
+  }
+
+  /**
+   * Recompute and persist a goods receipt's totalAmount (in company currency)
+   * AND re-derive its payment state from the payment ledger:
+   *   totalAmount = Σ items(qty × unitPrice × exchangeRate × (1 + vatRate/100)) + Σ expenses(totalAmount)
+   *   paidAmount  = Σ payments.amount
+   *   paymentStatus = PENDING / PARTIAL / PAID (REFUNDED stays manual)
+   * Self-contained so it can run inside the receipt create/update transactions.
+   */
+  private async recalcReceiptState(
+    tx: Prisma.TransactionClient,
+    receiptId: string,
+  ): Promise<void> {
+    const items = await tx.goodsReceiptItem.findMany({
+      where: { goodsReceiptId: receiptId },
+      select: { quantity: true, unitPrice: true, exchangeRate: true, vatRate: true },
+    });
+    const itemsTotal = items.reduce((sum, it) => {
+      const base =
+        Number(it.quantity) * Number(it.unitPrice) * Number(it.exchangeRate);
+      return sum + base + base * (Number(it.vatRate) / 100);
+    }, 0);
+    const expAgg = await tx.expense.aggregate({
+      where: { goodsReceiptId: receiptId },
+      _sum: { totalAmount: true },
+    });
+    const total =
+      Math.round((itemsTotal + Number(expAgg._sum.totalAmount || 0)) * 100) / 100;
+
+    const payAgg = await tx.payment.aggregate({
+      where: { goodsReceiptId: receiptId },
+      _sum: { amount: true },
+    });
+    const paid = Number(payAgg._sum.amount || 0);
+
+    const current = await tx.goodsReceipt.findUnique({
+      where: { id: receiptId },
+      select: { paymentStatus: true },
+    });
+    let paymentStatus: 'PENDING' | 'PARTIAL' | 'PAID' | 'REFUNDED' =
+      current?.paymentStatus === 'REFUNDED' ? 'REFUNDED' : 'PENDING';
+    if (paymentStatus !== 'REFUNDED') {
+      if (paid <= 0) paymentStatus = 'PENDING';
+      else if (paid < total) paymentStatus = 'PARTIAL';
+      else paymentStatus = 'PAID';
+    }
+
+    await tx.goodsReceipt.update({
+      where: { id: receiptId },
+      data: { totalAmount: total, paidAmount: paid, paymentStatus },
     });
   }
 
@@ -418,6 +477,13 @@ export class GoodsReceiptsService {
             exchangeRate: dto.exchangeRate,
           }),
         },
+      });
+
+      // Items/expenses may have changed → refresh totalAmount + payment status.
+      await this.recalcReceiptState(tx, id);
+
+      return tx.goodsReceipt.findUnique({
+        where: { id },
         include: RECEIPT_INCLUDE,
       });
     });
@@ -428,7 +494,6 @@ export class GoodsReceiptsService {
     id: string,
     targetStatus: GoodsReceiptStatus,
     itemSerials?: { goodsReceiptItemId: string; serialNumbers: string[] }[],
-    paidAtOverride?: string,
     deliveredAtOverride?: string,
     itemBatches?: {
       goodsReceiptItemId: string;
@@ -446,18 +511,10 @@ export class GoodsReceiptsService {
     }
 
     const isDelivering =
-      receipt.status === 'EXPECTED' &&
-      (targetStatus === 'DELIVERED_PAID' || targetStatus === 'DELIVERED_UNPAID');
+      receipt.status === 'EXPECTED' && targetStatus === 'DELIVERED';
 
     const isCancellingDelivered =
-      (receipt.status === 'DELIVERED_PAID' || receipt.status === 'DELIVERED_UNPAID') &&
-      targetStatus === 'CANCELLED';
-
-    const isMarkingPaid =
-      receipt.status === 'DELIVERED_UNPAID' && targetStatus === 'DELIVERED_PAID';
-
-    const isCancellingExpected =
-      receipt.status === 'EXPECTED' && targetStatus === 'CANCELLED';
+      receipt.status === 'DELIVERED' && targetStatus === 'CANCELLED';
 
     // Validate serial numbers if delivering
     if (isDelivering) {
@@ -620,26 +677,18 @@ export class GoodsReceiptsService {
         });
       }
 
-      // === Update expense statuses ===
-      const expenseStatus =
-        targetStatus === 'DELIVERED_PAID'
-          ? 'PAID'
-          : targetStatus === 'CANCELLED'
-            ? 'CANCELLED'
-            : 'PENDING'; // DELIVERED_UNPAID or EXPECTED
-
-      await tx.expense.updateMany({
-        where: { goodsReceiptId: id },
-        data: {
-          status: expenseStatus,
-          ...(targetStatus === 'DELIVERED_PAID'
-            ? { paidAt: paidAtOverride ? new Date(paidAtOverride) : new Date() }
-            : {}),
-        },
-      });
+      // === Cancel attached expenses when the receipt is cancelled ===
+      // (Expense payment now follows the receipt's payment ledger, not its
+      // delivery status — see PaymentsService.recalculateGoodsReceiptState.)
+      if (targetStatus === 'CANCELLED') {
+        await tx.expense.updateMany({
+          where: { goodsReceiptId: id },
+          data: { status: 'CANCELLED' },
+        });
+      }
 
       // === Update receipt status ===
-      // При EXPECTED → DELIVERED_* записваме реалната дата на доставка.
+      // При EXPECTED → DELIVERED записваме реалната дата на доставка.
       const receiptUpdateData: {
         status: GoodsReceiptStatus;
         deliveredAt?: Date;

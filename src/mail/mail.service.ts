@@ -1,6 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import {
+  SESClient,
+  SendEmailCommand,
+  SendRawEmailCommand,
+} from '@aws-sdk/client-ses';
 import * as nodemailer from 'nodemailer';
+import MailComposer from 'nodemailer/lib/mail-composer';
+
+export interface MailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+}
 
 @Injectable()
 export class MailService {
@@ -45,14 +56,49 @@ export class MailService {
     subject: string;
     html: string;
     from?: string;
+    attachments?: MailAttachment[];
   }): Promise<void> {
     const toAddresses = Array.isArray(options.to) ? options.to : [options.to];
     const from = options.from || this.from;
+    const attachments = options.attachments;
 
     if (this.sesClient) {
-      await this.sendViaSES(from, toAddresses, options.subject, options.html);
+      if (attachments && attachments.length > 0) {
+        await this.sendRawViaSES(from, toAddresses, options.subject, options.html, attachments);
+      } else {
+        await this.sendViaSES(from, toAddresses, options.subject, options.html);
+      }
     } else {
-      await this.sendViaSMTP(from, toAddresses, options.subject, options.html);
+      await this.sendViaSMTP(from, toAddresses, options.subject, options.html, attachments);
+    }
+  }
+
+  // SES has no attachment support on SendEmail — build a raw MIME message
+  // (via nodemailer's composer) and send it with SendRawEmail.
+  private async sendRawViaSES(
+    from: string,
+    to: string[],
+    subject: string,
+    html: string,
+    attachments: MailAttachment[],
+  ): Promise<void> {
+    try {
+      const raw = await new MailComposer({
+        from,
+        to: to.join(', '),
+        subject,
+        html,
+        attachments,
+      })
+        .compile()
+        .build();
+      const result = await this.sesClient!.send(
+        new SendRawEmailCommand({ RawMessage: { Data: raw } }),
+      );
+      this.logger.log(`Email (with ${attachments.length} attachment(s)) sent via SES to ${to.join(', ')} (messageId: ${result.MessageId})`);
+    } catch (error) {
+      this.logger.error(`Failed to send raw email via SES to ${to.join(', ')}`, error);
+      throw error;
     }
   }
 
@@ -84,6 +130,7 @@ export class MailService {
     to: string[],
     subject: string,
     html: string,
+    attachments?: MailAttachment[],
   ): Promise<void> {
     try {
       const info = await this.transporter!.sendMail({
@@ -91,6 +138,7 @@ export class MailService {
         to: to.join(', '),
         subject,
         html,
+        attachments,
       });
       this.logger.log(`Email sent via SMTP to ${to.join(', ')} (messageId: ${info.messageId})`);
     } catch (error) {

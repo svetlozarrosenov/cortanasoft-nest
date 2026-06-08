@@ -7,6 +7,10 @@ export class QueryPaymentsDto {
   orderId?: string;
 
   @IsOptional()
+  @IsString()
+  goodsReceiptId?: string;
+
+  @IsOptional()
   @IsDateString()
   dateFrom?: string;
 

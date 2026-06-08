@@ -1,0 +1,645 @@
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import * as ExcelJS from 'exceljs';
+import { PrismaService } from '../prisma/prisma.service';
+import { MailService, MailAttachment } from '../mail/mail.service';
+import {
+  QueryPeriodDto,
+  CreateBankStatementDto,
+  UpdateAccountantSettingsDto,
+  SendToAccountantDto,
+} from './dto';
+
+@Injectable()
+export class AccountantService {
+  constructor(
+    private prisma: PrismaService,
+    private mail: MailService,
+  ) {}
+
+  // Half-open period [start, end) for the given year/month.
+  private periodRange(year: number, month: number) {
+    const start = new Date(Date.UTC(year, month - 1, 1));
+    const end = new Date(Date.UTC(year, month, 1));
+    return { start, end };
+  }
+
+  private paging(query: QueryPeriodDto) {
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 50;
+    return { page, limit, skip: (page - 1) * limit };
+  }
+
+  /**
+   * Income register — issued (non-draft, non-cancelled) invoices for the month.
+   * Single-table query → DB-level pagination (scales to 10k+).
+   */
+  async income(companyId: string, query: QueryPeriodDto) {
+    const { start, end } = this.periodRange(query.year, query.month);
+    const { page, limit, skip } = this.paging(query);
+
+    const where: Prisma.InvoiceWhereInput = {
+      companyId,
+      invoiceDate: { gte: start, lt: end },
+      status: { notIn: ['DRAFT', 'CANCELLED'] },
+    };
+
+    const [data, total, agg] = await Promise.all([
+      this.prisma.invoice.findMany({
+        where,
+        orderBy: { invoiceDate: 'asc' },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          invoiceNumber: true,
+          invoiceDate: true,
+          status: true,
+          customerName: true,
+          customerEik: true,
+          customerVatNumber: true,
+          subtotal: true,
+          vatAmount: true,
+          total: true,
+          paidAmount: true,
+          currency: { select: { code: true, symbol: true } },
+        },
+      }),
+      this.prisma.invoice.count({ where }),
+      this.prisma.invoice.aggregate({
+        where,
+        _sum: { subtotal: true, vatAmount: true, total: true },
+      }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        sums: {
+          subtotal: Number(agg._sum?.subtotal || 0),
+          vatAmount: Number(agg._sum?.vatAmount || 0),
+          total: Number(agg._sum?.total || 0),
+        },
+      },
+    };
+  }
+
+  /**
+   * Expense register — purchase invoices for the month:
+   *   • deliveries (goods receipts) that carry a supplier invoice
+   *   • standalone expenses with an invoice (not attached to a delivery)
+   * "Only records with an invoice" — a delivery-attached expense has no invoice
+   * of its own (it's on the delivery's invoice), so it is excluded.
+   * Merged + sorted by date, then paginated.
+   */
+  async expenses(companyId: string, query: QueryPeriodDto) {
+    const { start, end } = this.periodRange(query.year, query.month);
+    const { page, limit, skip } = this.paging(query);
+
+    const [receipts, standaloneExpenses] = await Promise.all([
+      this.prisma.goodsReceipt.findMany({
+        where: {
+          companyId,
+          status: { not: 'CANCELLED' },
+          invoiceNumber: { not: null },
+          OR: [
+            { invoiceDate: { gte: start, lt: end } },
+            { invoiceDate: null, receiptDate: { gte: start, lt: end } },
+          ],
+        },
+        select: {
+          id: true,
+          invoiceNumber: true,
+          invoiceDate: true,
+          receiptDate: true,
+          totalAmount: true,
+          attachmentUrl: true,
+          supplier: { select: { name: true, eik: true, vatNumber: true } },
+          currency: { select: { code: true, symbol: true } },
+        },
+      }),
+      this.prisma.expense.findMany({
+        where: {
+          companyId,
+          status: { not: 'CANCELLED' },
+          goodsReceiptId: null,
+          invoiceNumber: { not: null },
+          expenseDate: { gte: start, lt: end },
+        },
+        select: {
+          id: true,
+          description: true,
+          invoiceNumber: true,
+          expenseDate: true,
+          amount: true,
+          vatAmount: true,
+          totalAmount: true,
+          attachmentUrl: true,
+          supplier: { select: { name: true, eik: true, vatNumber: true } },
+          currency: { select: { code: true, symbol: true } },
+        },
+      }),
+    ]);
+
+    type Row = {
+      id: string;
+      source: 'DELIVERY' | 'EXPENSE';
+      date: Date;
+      documentNumber: string | null;
+      supplierName: string | null;
+      supplierEik: string | null;
+      supplierVat: string | null;
+      base: number;
+      vat: number;
+      total: number;
+      fileUrl: string | null;
+      currencyCode: string | null;
+    };
+
+    const rows: Row[] = [
+      ...receipts.map((r) => ({
+        id: r.id,
+        source: 'DELIVERY' as const,
+        date: r.invoiceDate || r.receiptDate,
+        documentNumber: r.invoiceNumber,
+        supplierName: r.supplier?.name || null,
+        supplierEik: r.supplier?.eik || null,
+        supplierVat: r.supplier?.vatNumber || null,
+        // Deliveries store only the gross total; base/vat are not aggregated.
+        base: 0,
+        vat: 0,
+        total: Number(r.totalAmount),
+        fileUrl: r.attachmentUrl || null,
+        currencyCode: r.currency?.code || null,
+      })),
+      ...standaloneExpenses.map((e) => ({
+        id: e.id,
+        source: 'EXPENSE' as const,
+        date: e.expenseDate,
+        documentNumber: e.invoiceNumber,
+        supplierName: e.supplier?.name || e.description,
+        supplierEik: e.supplier?.eik || null,
+        supplierVat: e.supplier?.vatNumber || null,
+        base: Number(e.amount),
+        vat: Number(e.vatAmount),
+        total: Number(e.totalAmount),
+        fileUrl: e.attachmentUrl || null,
+        currencyCode: e.currency?.code || null,
+      })),
+    ].sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    const total = rows.length;
+    const sums = rows.reduce(
+      (acc, r) => ({
+        base: acc.base + r.base,
+        vat: acc.vat + r.vat,
+        total: acc.total + r.total,
+      }),
+      { base: 0, vat: 0, total: 0 },
+    );
+
+    return {
+      data: rows.slice(skip, skip + limit),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+        sums: {
+          base: Math.round(sums.base * 100) / 100,
+          vat: Math.round(sums.vat * 100) / 100,
+          total: Math.round(sums.total * 100) / 100,
+        },
+      },
+    };
+  }
+
+  /** Bank statements for a month (or year if month not narrowed), paginated. */
+  async statements(companyId: string, query: QueryPeriodDto) {
+    const { page, limit, skip } = this.paging(query);
+    const where = {
+      companyId,
+      year: query.year,
+      month: query.month,
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.bankStatement.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.bankStatement.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  async createStatement(companyId: string, dto: CreateBankStatementDto) {
+    return this.prisma.bankStatement.create({
+      data: {
+        companyId,
+        year: dto.year,
+        month: dto.month,
+        fileUrl: dto.fileUrl,
+        fileName: dto.fileName || null,
+        notes: dto.notes || null,
+      },
+    });
+  }
+
+  async deleteStatement(companyId: string, id: string) {
+    const statement = await this.prisma.bankStatement.findFirst({
+      where: { id, companyId },
+    });
+    if (!statement) throw new NotFoundException('Bank statement not found');
+    await this.prisma.bankStatement.delete({ where: { id } });
+    return { success: true };
+  }
+
+  // Default email template (used when the company hasn't customised it).
+  // Placeholders: {{company}}, {{month}}, {{year}}.
+  static readonly DEFAULT_SUBJECT = 'Счетоводни документи — {{month}}/{{year}}';
+  static readonly DEFAULT_BODY = `Здравейте,
+
+Изпращаме Ви счетоводните документи на {{company}} за {{month}}/{{year}}:
+— опис на приходните фактури,
+— опис на разходните фактури,
+— банково извлечение.
+
+Поздрави,
+{{company}}
+(изпратено автоматично от CortanaSoft)`;
+
+  async getSettings(companyId: string) {
+    const settings = await this.prisma.accountantSettings.findUnique({
+      where: { companyId },
+    });
+    return {
+      accountantEmail: settings?.accountantEmail || null,
+      accountantName: settings?.accountantName || null,
+      emailSubject: settings?.emailSubject || null,
+      emailBody: settings?.emailBody || null,
+      // The effective template the recipient would get (custom or default).
+      defaultSubject: AccountantService.DEFAULT_SUBJECT,
+      defaultBody: AccountantService.DEFAULT_BODY,
+    };
+  }
+
+  async updateSettings(companyId: string, dto: UpdateAccountantSettingsDto) {
+    const data = {
+      ...(dto.accountantEmail !== undefined && {
+        accountantEmail: dto.accountantEmail || null,
+      }),
+      ...(dto.accountantName !== undefined && {
+        accountantName: dto.accountantName || null,
+      }),
+      ...(dto.emailSubject !== undefined && {
+        emailSubject: dto.emailSubject || null,
+      }),
+      ...(dto.emailBody !== undefined && { emailBody: dto.emailBody || null }),
+    };
+    await this.prisma.accountantSettings.upsert({
+      where: { companyId },
+      create: { companyId, ...data },
+      update: data,
+    });
+    return this.getSettings(companyId);
+  }
+
+  // ===== Register (Excel) + send =====
+
+  /** All income invoices for the month (no pagination) — for the register. */
+  private async allIncomeRows(companyId: string, start: Date, end: Date) {
+    return this.prisma.invoice.findMany({
+      where: {
+        companyId,
+        invoiceDate: { gte: start, lt: end },
+        status: { notIn: ['DRAFT', 'CANCELLED'] },
+      },
+      orderBy: { invoiceDate: 'asc' },
+      select: {
+        invoiceNumber: true,
+        invoiceDate: true,
+        customerName: true,
+        customerEik: true,
+        customerVatNumber: true,
+        subtotal: true,
+        vatAmount: true,
+        total: true,
+      },
+    });
+  }
+
+  /** All expense rows (deliveries + standalone, with invoice) for the month. */
+  private async allExpenseRows(companyId: string, start: Date, end: Date) {
+    const [receipts, expenses] = await Promise.all([
+      this.prisma.goodsReceipt.findMany({
+        where: {
+          companyId,
+          status: { not: 'CANCELLED' },
+          invoiceNumber: { not: null },
+          OR: [
+            { invoiceDate: { gte: start, lt: end } },
+            { invoiceDate: null, receiptDate: { gte: start, lt: end } },
+          ],
+        },
+        select: {
+          invoiceNumber: true,
+          invoiceDate: true,
+          receiptDate: true,
+          totalAmount: true,
+          supplier: { select: { name: true, eik: true, vatNumber: true } },
+        },
+      }),
+      this.prisma.expense.findMany({
+        where: {
+          companyId,
+          status: { not: 'CANCELLED' },
+          goodsReceiptId: null,
+          invoiceNumber: { not: null },
+          expenseDate: { gte: start, lt: end },
+        },
+        select: {
+          description: true,
+          invoiceNumber: true,
+          expenseDate: true,
+          amount: true,
+          vatAmount: true,
+          totalAmount: true,
+          supplier: { select: { name: true, eik: true, vatNumber: true } },
+        },
+      }),
+    ]);
+
+    const rows = [
+      ...receipts.map((r) => ({
+        type: 'Доставка',
+        date: r.invoiceDate || r.receiptDate,
+        documentNumber: r.invoiceNumber || '',
+        supplierName: r.supplier?.name || '',
+        supplierEik: r.supplier?.eik || '',
+        supplierVat: r.supplier?.vatNumber || '',
+        base: 0,
+        vat: 0,
+        total: Number(r.totalAmount),
+      })),
+      ...expenses.map((e) => ({
+        type: 'Разход',
+        date: e.expenseDate,
+        documentNumber: e.invoiceNumber || '',
+        supplierName: e.supplier?.name || e.description,
+        supplierEik: e.supplier?.eik || '',
+        supplierVat: e.supplier?.vatNumber || '',
+        base: Number(e.amount),
+        vat: Number(e.vatAmount),
+        total: Number(e.totalAmount),
+      })),
+    ].sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    return rows;
+  }
+
+  /** Build an .xlsx workbook with an income sheet and an expense sheet. */
+  private async buildRegisterBuffer(
+    companyId: string,
+    year: number,
+    month: number,
+  ): Promise<Buffer> {
+    const { start, end } = this.periodRange(year, month);
+    const [income, expenses] = await Promise.all([
+      this.allIncomeRows(companyId, start, end),
+      this.allExpenseRows(companyId, start, end),
+    ]);
+
+    const wb = new ExcelJS.Workbook();
+    const fmtDate = (d: Date) =>
+      `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+
+    const incomeSheet = wb.addWorksheet('Приходи');
+    incomeSheet.columns = [
+      { header: 'Фактура №', key: 'num', width: 18 },
+      { header: 'Дата', key: 'date', width: 12 },
+      { header: 'Клиент', key: 'customer', width: 32 },
+      { header: 'ЕИК', key: 'eik', width: 16 },
+      { header: 'ДДС №', key: 'vatNo', width: 16 },
+      { header: 'Основа', key: 'base', width: 14 },
+      { header: 'ДДС', key: 'vat', width: 14 },
+      { header: 'Общо', key: 'total', width: 14 },
+    ];
+    income.forEach((r) =>
+      incomeSheet.addRow({
+        num: r.invoiceNumber,
+        date: fmtDate(r.invoiceDate),
+        customer: r.customerName,
+        eik: r.customerEik || '',
+        vatNo: r.customerVatNumber || '',
+        base: Number(r.subtotal),
+        vat: Number(r.vatAmount),
+        total: Number(r.total),
+      }),
+    );
+
+    const expenseSheet = wb.addWorksheet('Разходи');
+    expenseSheet.columns = [
+      { header: 'Тип', key: 'type', width: 12 },
+      { header: 'Дата', key: 'date', width: 12 },
+      { header: 'Документ №', key: 'num', width: 18 },
+      { header: 'Доставчик', key: 'supplier', width: 32 },
+      { header: 'ЕИК', key: 'eik', width: 16 },
+      { header: 'ДДС №', key: 'vatNo', width: 16 },
+      { header: 'Основа', key: 'base', width: 14 },
+      { header: 'ДДС', key: 'vat', width: 14 },
+      { header: 'Общо', key: 'total', width: 14 },
+    ];
+    expenses.forEach((r) =>
+      expenseSheet.addRow({
+        type: r.type,
+        date: fmtDate(r.date),
+        num: r.documentNumber,
+        supplier: r.supplierName,
+        eik: r.supplierEik,
+        vatNo: r.supplierVat,
+        base: r.base,
+        vat: r.vat,
+        total: r.total,
+      }),
+    );
+
+    [incomeSheet, expenseSheet].forEach((sheet) => {
+      sheet.getRow(1).font = { bold: true };
+    });
+
+    const arrayBuffer = await wb.xlsx.writeBuffer();
+    return Buffer.from(arrayBuffer);
+  }
+
+  async getRegister(companyId: string, year: number, month: number) {
+    const buffer = await this.buildRegisterBuffer(companyId, year, month);
+    return {
+      buffer,
+      filename: `opis-${year}-${String(month).padStart(2, '0')}.xlsx`,
+    };
+  }
+
+  private fillTemplate(tpl: string, vars: Record<string, string>): string {
+    return tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? '');
+  }
+
+  /** Email the monthly package (Excel registers + bank statements) to the accountant. */
+  async sendToAccountant(companyId: string, dto: SendToAccountantDto) {
+    const [settings, company] = await Promise.all([
+      this.getSettings(companyId),
+      this.prisma.company.findUnique({
+        where: { id: companyId },
+        select: { name: true },
+      }),
+    ]);
+
+    if (!settings.accountantEmail) {
+      throw new BadRequestException(
+        'Не е зададен имейл на счетоводителя (Настройки).',
+      );
+    }
+
+    const vars = {
+      company: company?.name || '',
+      month: String(dto.month).padStart(2, '0'),
+      year: String(dto.year),
+    };
+    const subject = this.fillTemplate(
+      settings.emailSubject || AccountantService.DEFAULT_SUBJECT,
+      vars,
+    );
+    const bodyText = this.fillTemplate(
+      settings.emailBody || AccountantService.DEFAULT_BODY,
+      vars,
+    );
+    const html = bodyText
+      .split('\n')
+      .map((line) => (line.trim() ? `<p>${line}</p>` : '<br/>'))
+      .join('');
+
+    // Registers (Excel)
+    const { buffer, filename } = await this.getRegister(
+      companyId,
+      dto.year,
+      dto.month,
+    );
+    const attachments: MailAttachment[] = [
+      {
+        filename,
+        content: buffer,
+        contentType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      },
+    ];
+
+    // Bank statements for the month
+    const statements = await this.prisma.bankStatement.findMany({
+      where: { companyId, year: dto.year, month: dto.month },
+    });
+    for (const s of statements) {
+      try {
+        const res = await fetch(s.fileUrl);
+        if (!res.ok) continue;
+        const ab = await res.arrayBuffer();
+        attachments.push({
+          filename:
+            s.fileName ||
+            `izvlechenie-${dto.year}-${String(dto.month).padStart(2, '0')}.pdf`,
+          content: Buffer.from(ab),
+        });
+      } catch {
+        // Skip a statement that can't be fetched; the email still goes out.
+      }
+    }
+
+    await this.mail.send({
+      to: settings.accountantEmail,
+      subject,
+      html,
+      attachments,
+    });
+
+    return { success: true, sentTo: settings.accountantEmail, attachments: attachments.length };
+  }
+
+  /**
+   * Email a pre-built package ZIP (built on the frontend, may include income
+   * invoice PDFs for small volumes) as a single attachment.
+   */
+  async sendPackage(
+    companyId: string,
+    year: number,
+    month: number,
+    file?: { buffer: Buffer; originalname?: string },
+  ) {
+    if (!file?.buffer) {
+      throw new BadRequestException('Липсва файл на пакета.');
+    }
+    const MAX = 20 * 1024 * 1024; // ~20MB email-attachment guard
+    if (file.buffer.length > MAX) {
+      throw new BadRequestException(
+        'Пакетът е твърде голям за имейл (над 20MB). Свалете го и го изпратете ръчно.',
+      );
+    }
+
+    const [settings, company] = await Promise.all([
+      this.getSettings(companyId),
+      this.prisma.company.findUnique({
+        where: { id: companyId },
+        select: { name: true },
+      }),
+    ]);
+    if (!settings.accountantEmail) {
+      throw new BadRequestException(
+        'Не е зададен имейл на счетоводителя (Настройки).',
+      );
+    }
+
+    const vars = {
+      company: company?.name || '',
+      month: String(month).padStart(2, '0'),
+      year: String(year),
+    };
+    const subject = this.fillTemplate(
+      settings.emailSubject || AccountantService.DEFAULT_SUBJECT,
+      vars,
+    );
+    const html = this.fillTemplate(
+      settings.emailBody || AccountantService.DEFAULT_BODY,
+      vars,
+    )
+      .split('\n')
+      .map((line) => (line.trim() ? `<p>${line}</p>` : '<br/>'))
+      .join('');
+
+    await this.mail.send({
+      to: settings.accountantEmail,
+      subject,
+      html,
+      attachments: [
+        {
+          filename: file.originalname || `paket-${vars.year}-${vars.month}.zip`,
+          content: file.buffer,
+          contentType: 'application/zip',
+        },
+      ],
+    });
+
+    return { success: true, sentTo: settings.accountantEmail, attachments: 1 };
+  }
+}

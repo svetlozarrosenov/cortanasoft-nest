@@ -288,7 +288,7 @@ export class ErpAnalyticsService {
           productId: { in: Array.from(productIds) },
           goodsReceipt: {
             companyId,
-            status: { in: ['DELIVERED_PAID', 'DELIVERED_UNPAID'] },
+            status: 'DELIVERED',
           },
         },
         select: {
@@ -537,7 +537,7 @@ export class ErpAnalyticsService {
         gte: dateFrom,
         lte: dateTo,
       },
-      status: { in: ['DELIVERED_PAID', 'DELIVERED_UNPAID'] },
+      status: 'DELIVERED',
     };
 
     if (query.supplierId) {

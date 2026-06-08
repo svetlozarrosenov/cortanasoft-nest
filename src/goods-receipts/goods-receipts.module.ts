@@ -4,9 +4,10 @@ import { GoodsReceiptsController } from './goods-receipts.controller';
 import { CompanyGoodsReceiptsController } from './company-goods-receipts.controller';
 import { WordPressModule } from '../wordpress/wordpress.module';
 import { CloudCartModule } from '../cloudcart/cloudcart.module';
+import { PaymentsModule } from '../payments/payments.module';
 
 @Module({
-  imports: [WordPressModule, CloudCartModule],
+  imports: [WordPressModule, CloudCartModule, PaymentsModule],
   controllers: [GoodsReceiptsController, CompanyGoodsReceiptsController],
   providers: [GoodsReceiptsService],
   exports: [GoodsReceiptsService],

@@ -10,6 +10,8 @@ import {
   Query,
 } from '@nestjs/common';
 import { GoodsReceiptsService } from './goods-receipts.service';
+import { PaymentsService } from '../payments/payments.service';
+import { CreatePaymentDto, UpdatePaymentDto } from '../payments/dto';
 import {
   CreateGoodsReceiptDto,
   UpdateGoodsReceiptDto,
@@ -30,7 +32,10 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 @Controller('companies/:companyId/goods-receipts')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)
 export class CompanyGoodsReceiptsController {
-  constructor(private readonly goodsReceiptsService: GoodsReceiptsService) {}
+  constructor(
+    private readonly goodsReceiptsService: GoodsReceiptsService,
+    private readonly paymentsService: PaymentsService,
+  ) {}
 
   @Post()
   @RequireCreate('warehouse', 'goodsReceipts')
@@ -79,7 +84,6 @@ export class CompanyGoodsReceiptsController {
       id,
       dto.status,
       dto.itemSerials,
-      dto.paidAt,
       dto.deliveredAt,
       dto.itemBatches,
     );
@@ -95,5 +99,41 @@ export class CompanyGoodsReceiptsController {
   @RequireDelete('warehouse', 'goodsReceipts')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.goodsReceiptsService.remove(companyId, id);
+  }
+
+  // ===== Payments (ledger, mirrors orders) =====
+
+  @Post(':id/payments')
+  @RequireEdit('warehouse', 'goodsReceipts')
+  addPayment(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+    @Body() dto: CreatePaymentDto,
+  ) {
+    return this.paymentsService.create(companyId, user.id, {
+      ...dto,
+      orderId: undefined,
+      goodsReceiptId: id,
+    });
+  }
+
+  @Patch(':id/payments/:paymentId')
+  @RequireEdit('warehouse', 'goodsReceipts')
+  updatePayment(
+    @Param('companyId') companyId: string,
+    @Param('paymentId') paymentId: string,
+    @Body() dto: UpdatePaymentDto,
+  ) {
+    return this.paymentsService.update(companyId, paymentId, dto);
+  }
+
+  @Delete(':id/payments/:paymentId')
+  @RequireEdit('warehouse', 'goodsReceipts')
+  removePayment(
+    @Param('companyId') companyId: string,
+    @Param('paymentId') paymentId: string,
+  ) {
+    return this.paymentsService.remove(companyId, paymentId);
   }
 }

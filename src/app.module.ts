@@ -53,6 +53,7 @@ import { ContactSubmissionsModule } from './contact-submissions/contact-submissi
 import { CloudCartModule } from './cloudcart/cloudcart.module';
 import { WordPressModule } from './wordpress/wordpress.module';
 import { PaymentsModule } from './payments/payments.module';
+import { AccountantModule } from './accountant/accountant.module';
 import { AnalyticsGoogleModule } from './analytics-google/analytics-google.module';
 import { MetaPixelModule } from './meta-pixel/meta-pixel.module';
 import { ServiceModule } from './service/service.module';
@@ -128,6 +129,7 @@ import { EmployeeRecordsModule } from './employee-records/employee-records.modul
     CloudCartModule,
     WordPressModule,
     PaymentsModule,
+    AccountantModule,
     AnalyticsGoogleModule,
     MetaPixelModule,
     ServiceModule,
