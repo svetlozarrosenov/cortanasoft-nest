@@ -18,14 +18,21 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import {
   PermissionsGuard,
-  RequireView,
-  RequireCreate,
-  RequireEdit,
-  RequireDelete,
+  RequireAnyPermission,
 } from '../common/guards/permissions.guard';
 import { ExportService } from '../common/export/export.service';
 import type { ExportFormat } from '../common/export/export.service';
 import { CustomerStage, CustomerSource } from '@prisma/client';
+
+// Customers and Leads are the same entity (leads = customers with stage LEAD)
+// served by these endpoints. Allow either the 'customers' or the 'contacts'
+// (= Leads) permission, so a leads-only role can use them too. The frontend
+// decides which menu (Customers / Leads) is shown per permission.
+const crmCustomersOrLeads = (action: 'view' | 'create' | 'edit' | 'delete') =>
+  RequireAnyPermission(
+    { module: 'crm', page: 'customers', action },
+    { module: 'crm', page: 'contacts', action },
+  );
 
 @Controller('companies/:companyId/customers')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)
@@ -36,7 +43,7 @@ export class CompanyCustomersController {
   ) {}
 
   @Post()
-  @RequireCreate('crm', 'customers')
+  @crmCustomersOrLeads('create')
   create(
     @Param('companyId') companyId: string,
     @Body() dto: CreateCustomerDto,
@@ -45,7 +52,7 @@ export class CompanyCustomersController {
   }
 
   @Get()
-  @RequireView('crm', 'customers')
+  @crmCustomersOrLeads('view')
   async findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryCustomersDto,
@@ -54,7 +61,7 @@ export class CompanyCustomersController {
   }
 
   @Get('export')
-  @RequireView('crm', 'customers')
+  @crmCustomersOrLeads('view')
   async export(
     @Param('companyId') companyId: string,
     @Query() query: QueryCustomersDto,
@@ -85,25 +92,25 @@ export class CompanyCustomersController {
   }
 
   @Get('stages')
-  @RequireView('crm', 'customers')
+  @crmCustomersOrLeads('view')
   getStages() {
     return Object.values(CustomerStage);
   }
 
   @Get('sources')
-  @RequireView('crm', 'customers')
+  @crmCustomersOrLeads('view')
   getSources() {
     return Object.values(CustomerSource);
   }
 
   @Get(':id')
-  @RequireView('crm', 'customers')
+  @crmCustomersOrLeads('view')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.customersService.findOne(companyId, id);
   }
 
   @Patch(':id')
-  @RequireEdit('crm', 'customers')
+  @crmCustomersOrLeads('edit')
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -113,7 +120,7 @@ export class CompanyCustomersController {
   }
 
   @Delete(':id')
-  @RequireDelete('crm', 'customers')
+  @crmCustomersOrLeads('delete')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.customersService.remove(companyId, id);
   }

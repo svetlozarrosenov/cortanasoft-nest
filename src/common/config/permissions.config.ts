@@ -260,22 +260,9 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
-        key: 'suppliers',
-        labelKey: 'modules.erp.suppliers',
-        actions: ['view', 'create', 'edit', 'delete'],
-        tables: [
-          {
-            key: 'suppliersList',
-            labelKey: 'modules.erp.suppliersList',
-            columns: [
-              { key: 'name', labelKey: 'common.name' },
-              { key: 'eik', labelKey: 'modules.erp.eik' },
-              { key: 'email', labelKey: 'common.email' },
-              { key: 'phone', labelKey: 'common.phone' },
-              { key: 'status', labelKey: 'common.status' },
-            ],
-          },
-        ],
+        key: 'unfulfilled',
+        labelKey: 'modules.erp.unfulfilled.title',
+        actions: ['view'],
       },
       {
         key: 'expenses',
@@ -339,6 +326,24 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
               { key: 'name', labelKey: 'common.name' },
               { key: 'type', labelKey: 'common.type' },
               { key: 'address', labelKey: 'common.address' },
+              { key: 'status', labelKey: 'common.status' },
+            ],
+          },
+        ],
+      },
+      {
+        key: 'suppliers',
+        labelKey: 'modules.erp.suppliers',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'suppliersList',
+            labelKey: 'modules.erp.suppliersList',
+            columns: [
+              { key: 'name', labelKey: 'common.name' },
+              { key: 'eik', labelKey: 'modules.erp.eik' },
+              { key: 'email', labelKey: 'common.email' },
+              { key: 'phone', labelKey: 'common.phone' },
               { key: 'status', labelKey: 'common.status' },
             ],
           },

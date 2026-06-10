@@ -60,7 +60,7 @@ export class CompanyOrdersController {
   // receipt lands. Returns one row per pending OrderItem with current
   // stock numbers joined in.
   @Get('unfulfilled')
-  @RequireView('erp', 'orders')
+  @RequireView('erp', 'unfulfilled')
   unfulfilled(@Param('companyId') companyId: string) {
     return this.ordersService.findUnfulfilledItems(companyId);
   }

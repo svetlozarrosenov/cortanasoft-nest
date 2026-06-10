@@ -35,7 +35,7 @@ export class CompanySuppliersController {
   ) {}
 
   @Post()
-  @RequireCreate('erp', 'suppliers')
+  @RequireCreate('warehouse', 'suppliers')
   create(
     @Param('companyId') companyId: string,
     @Body() dto: CreateSupplierDto,
@@ -44,7 +44,7 @@ export class CompanySuppliersController {
   }
 
   @Get()
-  @RequireView('erp', 'suppliers')
+  @RequireView('warehouse', 'suppliers')
   findAll(
     @Param('companyId') companyId: string,
     @Query() query: QuerySuppliersDto,
@@ -53,7 +53,7 @@ export class CompanySuppliersController {
   }
 
   @Get('export')
-  @RequireView('erp', 'suppliers')
+  @RequireView('warehouse', 'suppliers')
   async export(
     @Param('companyId') companyId: string,
     @Query() query: QuerySuppliersDto,
@@ -80,13 +80,13 @@ export class CompanySuppliersController {
   }
 
   @Get(':id')
-  @RequireView('erp', 'suppliers')
+  @RequireView('warehouse', 'suppliers')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.suppliersService.findOne(companyId, id);
   }
 
   @Patch(':id')
-  @RequireEdit('erp', 'suppliers')
+  @RequireEdit('warehouse', 'suppliers')
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -96,7 +96,7 @@ export class CompanySuppliersController {
   }
 
   @Delete(':id')
-  @RequireDelete('erp', 'suppliers')
+  @RequireDelete('warehouse', 'suppliers')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.suppliersService.remove(companyId, id);
   }
