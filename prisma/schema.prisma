@@ -1537,6 +1537,12 @@ model Order {
   econtOfficeCode    String? // Код на офис на Еконт
   econtOfficeName    String? // Име на офис на Еконт
 
+  // Експедиционен лист: попълва се при първото издаване. NULL = още не е
+  // издаван. Документът носи номера на поръчката (няма отделна номерация);
+  // полето служи само да издаваме веднъж и да маркираме в UI (зелена иконка),
+  // че листът вече е изваден.
+  expeditionIssuedAt DateTime?
+
   // Плащане
   paymentMethod  PaymentMethod @default(CASH)
   paymentStatus  PaymentStatus @default(PENDING)
@@ -1627,7 +1633,34 @@ model OrderItem {
 
   invoiceItems InvoiceItem[]
 
+  // Точно от кои партиди (и по колко) е изписан редът. Попълва се при
+  // изписване (явно избрана партида ИЛИ авто/FEFO, което може да обхване
+  // няколко партиди). Серийните продукти не ползват това — те пазят
+  // inventorySerialId. Старите поръчки (отпреди функцията) нямат записи тук.
+  batchAllocations OrderItemBatchAllocation[]
+
   @@map("order_items")
+}
+
+// Разпределение на партиди по ред от поръчка. Един ред (особено при авто/FEFO
+// изписване) може да се покрие от няколко партиди — таблицата пази точно от коя
+// партида колко е изписано (проследимост + експедиционен лист). batchNumber е
+// snapshot, за да остане видим дори ако партидата по-късно бъде изтрита.
+model OrderItemBatchAllocation {
+  id          String   @id @default(cuid())
+  quantity    Decimal  @db.Decimal(10, 3)
+  batchNumber String
+  createdAt   DateTime @default(now())
+
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  inventoryBatchId String?
+  inventoryBatch   InventoryBatch? @relation(fields: [inventoryBatchId], references: [id], onDelete: SetNull)
+
+  @@index([orderItemId])
+  @@index([inventoryBatchId])
+  @@map("order_item_batch_allocations")
 }
 
 // Заявка за потребителски / стоков кредит, придружаваща поръчка.
@@ -1884,6 +1917,7 @@ model InventoryBatch {
   productionOrder   ProductionOrder? @relation("ProductionOutputBatches", fields: [productionOrderId], references: [id], onDelete: SetNull)
 
   orderItems             OrderItem[]
+  orderItemAllocations   OrderItemBatchAllocation[]
   stockTransferItems     StockTransferItem[]
   serviceOrderParts      ServiceOrderPart[]
   productionConsumptions ProductionConsumption[]

@@ -30,6 +30,7 @@ const ORDER_INCLUDE = {
       inventoryBatch: true,
       inventorySerial: true,
       location: true,
+      batchAllocations: true,
     },
   },
   acceptanceProtocols: {
@@ -658,6 +659,15 @@ export class OrdersService {
           }
 
           const oldQty = Number(oldItem.quantity);
+          // Ново: ако имаме точни разпределения по партиди, връщаме по тях
+          // (важно е да стане ПРЕДИ deleteMany, който каскадно ги трие).
+          const restoredByAllocations = await this.restoreBatchAllocations(
+            tx,
+            oldItem.id,
+          );
+          if (restoredByAllocations) {
+            continue;
+          }
           if (oldItem.inventoryBatchId) {
             await tx.inventoryBatch.update({
               where: { id: oldItem.inventoryBatchId },
@@ -791,6 +801,13 @@ export class OrdersService {
               where: { id: newItem.id },
               data: { stockDeducted: true },
             });
+            await this.createBatchAllocations(tx, newItem.id, [
+              {
+                batchId: batch.id,
+                batchNumber: batch.batchNumber,
+                quantity: newQty,
+              },
+            ]);
           }
         }
 
@@ -832,6 +849,48 @@ export class OrdersService {
     });
     await this.webhookDispatcher.emitOrderChanged(companyId, id);
     return updated;
+  }
+
+  // Записва от кои партиди (и по колко) е изписан даден ред — за проследимост
+  // и за експедиционния лист. Извиква се при всяко изписване на BATCH продукт.
+  private async createBatchAllocations(
+    tx: Prisma.TransactionClient,
+    orderItemId: string,
+    allocations: { batchId: string; batchNumber: string; quantity: number }[],
+  ) {
+    if (allocations.length === 0) return;
+    await tx.orderItemBatchAllocation.createMany({
+      data: allocations.map((a) => ({
+        orderItemId,
+        inventoryBatchId: a.batchId,
+        batchNumber: a.batchNumber,
+        quantity: a.quantity,
+      })),
+    });
+  }
+
+  // Връща наличността точно по записаните разпределения и ги изтрива. Връща
+  // true, ако е намерил разпределения (нова логика). За стари поръчки без
+  // разпределения връща false и викащият пада към старото възстановяване.
+  private async restoreBatchAllocations(
+    tx: Prisma.TransactionClient,
+    orderItemId: string,
+  ): Promise<boolean> {
+    const allocations = await tx.orderItemBatchAllocation.findMany({
+      where: { orderItemId },
+    });
+    if (allocations.length === 0) return false;
+    for (const alloc of allocations) {
+      if (alloc.inventoryBatchId) {
+        // updateMany не хвърля, ако партидата вече не съществува (SetNull)
+        await tx.inventoryBatch.updateMany({
+          where: { id: alloc.inventoryBatchId },
+          data: { quantity: { increment: Number(alloc.quantity) } },
+        });
+      }
+    }
+    await tx.orderItemBatchAllocation.deleteMany({ where: { orderItemId } });
+    return true;
   }
 
   async confirm(companyId: string, id: string) {
@@ -934,6 +993,13 @@ export class OrdersService {
               where: { id: item.id },
               data: { stockDeducted: true },
             });
+            await this.createBatchAllocations(tx, item.id, [
+              {
+                batchId: batch.id,
+                batchNumber: batch.batchNumber,
+                quantity,
+              },
+            ]);
           } else {
             // Auto-deduct using FEFO (first-expired-first-out) — за стоки със
             // срок излиза първо най-скоро изтичащата; без срок → най-старата (FIFO).
@@ -968,6 +1034,11 @@ export class OrdersService {
             }
 
             let remaining = quantity;
+            const consumed: {
+              batchId: string;
+              batchNumber: string;
+              quantity: number;
+            }[] = [];
             for (const batch of batches) {
               if (remaining <= 0) break;
 
@@ -978,6 +1049,11 @@ export class OrdersService {
                 where: { id: batch.id },
                 data: { quantity: { decrement: deduct } },
               });
+              consumed.push({
+                batchId: batch.id,
+                batchNumber: batch.batchNumber,
+                quantity: deduct,
+              });
 
               remaining -= deduct;
             }
@@ -985,6 +1061,7 @@ export class OrdersService {
               where: { id: item.id },
               data: { stockDeducted: true },
             });
+            await this.createBatchAllocations(tx, item.id, consumed);
           }
         }
 
@@ -999,6 +1076,22 @@ export class OrdersService {
     );
     await this.webhookDispatcher.emitOrderChanged(companyId, id);
     return result;
+  }
+
+  // Издава експедиционен лист — маркира поръчката, че листът е изваден.
+  // Идемпотентно: издава се само веднъж; повторно "издаване" връща поръчката
+  // непроменена (запазва оригиналния момент), а UI-ят просто препечатва PDF-а.
+  // Разрешено е във всички статуси на поръчката.
+  async issueExpedition(companyId: string, id: string) {
+    const order = await this.findOne(companyId, id);
+    if (order.expeditionIssuedAt) {
+      return order;
+    }
+    return this.prisma.order.update({
+      where: { id },
+      data: { expeditionIssuedAt: new Date() },
+      include: ORDER_INCLUDE,
+    });
   }
 
   async cancel(companyId: string, id: string) {
@@ -1049,7 +1142,14 @@ export class OrdersService {
 
           const quantity = Number(item.quantity);
 
-          if (item.inventoryBatchId) {
+          // Ново: ако имаме точни разпределения по партиди — връщаме по тях.
+          const restoredByAllocations = await this.restoreBatchAllocations(
+            tx,
+            item.id,
+          );
+          if (restoredByAllocations) {
+            // нищо повече — разпределенията върнаха точните количества
+          } else if (item.inventoryBatchId) {
             // Restore to the specific batch using atomic increment
             await tx.inventoryBatch.update({
               where: { id: item.inventoryBatchId },

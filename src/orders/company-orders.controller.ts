@@ -121,6 +121,15 @@ export class CompanyOrdersController {
     return this.ordersService.cancel(companyId, id);
   }
 
+  @Post(':id/issue-expedition')
+  @RequireView('erp', 'expeditionNote')
+  issueExpedition(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.ordersService.issueExpedition(companyId, id);
+  }
+
   @Delete(':id')
   @RequireDelete('erp', 'orders')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {

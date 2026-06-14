@@ -217,6 +217,13 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
+        // Контролира дали бутонът „Експедиционен лист" се показва в колоната
+        // с действия на поръчките. view = може да издава/преглежда листа.
+        key: 'expeditionNote',
+        labelKey: 'modules.erp.expeditionNote',
+        actions: ['view'],
+      },
+      {
         key: 'credits',
         labelKey: 'modules.erp.credits.title',
         actions: ['view', 'create', 'edit', 'delete'],
