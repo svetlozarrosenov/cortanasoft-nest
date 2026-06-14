@@ -16,6 +16,7 @@ import {
   Industry,
   CompanySize,
 } from '@prisma/client';
+import { Type } from 'class-transformer';
 
 export class CreateCustomerDto {
   @IsEnum(CustomerType)
@@ -96,13 +97,15 @@ export class CreateCustomerDto {
   @IsOptional()
   notes?: string;
 
-  @IsNumber({}, { message: 'Кредитният лимит трябва да бъде число.' })
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'Кредитният лимит трябва да бъде число.' })
   @Min(0, { message: 'Кредитният лимит не може да бъде отрицателен.' })
   creditLimit?: number;
 
-  @IsNumber({}, { message: 'Отстъпката трябва да бъде число.' })
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'Отстъпката трябва да бъде число.' })
   @Min(0, { message: 'Отстъпката не може да бъде отрицателна.' })
   @Max(100, { message: 'Отстъпката не може да бъде повече от 100%.' })
   discount?: number;
