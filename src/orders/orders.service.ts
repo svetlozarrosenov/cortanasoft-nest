@@ -4,7 +4,12 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateOrderDto, UpdateOrderDto, QueryOrdersDto } from './dto';
+import {
+  CreateOrderDto,
+  UpdateOrderDto,
+  QueryOrdersDto,
+  FulfillOrderDto,
+} from './dto';
 import { Prisma } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
 import { WarrantiesService } from '../warranties/warranties.service';
@@ -544,6 +549,25 @@ export class OrdersService {
 
     // Status change
     if (dto.status && dto.status !== order.status) {
+      // „Изпратена/Доставена" означава, че стоката физически излиза → всички
+      // партидни/складови редове трябва да са изписани преди това. Не можеш да
+      // доставиш каквото нямаш. Серийните се обработват отделно и не блокират тук.
+      if (dto.status === 'SHIPPED' || dto.status === 'DELIVERED') {
+        const unfulfilled = order.items.filter(
+          (it) =>
+            it.product &&
+            it.product.type !== 'SERVICE' &&
+            it.product.type !== 'SERIAL' &&
+            it.product.trackInventory &&
+            !it.stockDeducted,
+        );
+        if (unfulfilled.length > 0) {
+          throw new BadRequestException(
+            'Поръчката има неизписани редове. Окомплектовайте (изберете партиди), преди да я маркирате като изпратена/доставена.',
+          );
+        }
+      }
+
       // Simple status transitions (CONFIRMED→PROCESSING, PROCESSING→SHIPPED, SHIPPED→DELIVERED)
       const updated = await this.prisma.order.update({
         where: { id },
@@ -891,6 +915,177 @@ export class OrdersService {
     }
     await tx.orderItemBatchAllocation.deleteMany({ where: { orderItemId } });
     return true;
+  }
+
+  // Връща плана за окомплектоване: за всеки неизписан партиден ред — наличните
+  // партиди (FEFO подредени) + предложено разпределение. Серийните и
+  // непроследимите редове се прескачат (обработват се другаде).
+  async getFulfillmentPlan(companyId: string, id: string) {
+    const order = await this.findOne(companyId, id);
+    const lines: Array<{
+      orderItemId: string;
+      productId: string;
+      productName: string;
+      unit: string;
+      quantity: number;
+      totalAvailable: number;
+      availableBatches: Array<{
+        id: string;
+        batchNumber: string;
+        quantity: number;
+        expiryDate: Date | null;
+        locationName: string | null;
+      }>;
+      suggested: Array<{ inventoryBatchId: string; quantity: number }>;
+    }> = [];
+
+    for (const item of order.items) {
+      const product = item.product;
+      if (
+        !product ||
+        product.type === 'SERVICE' ||
+        product.type === 'SERIAL' ||
+        !product.trackInventory ||
+        item.stockDeducted
+      ) {
+        continue;
+      }
+
+      const locId = item.locationId || order.locationId;
+      const batches = await this.prisma.inventoryBatch.findMany({
+        where: {
+          companyId,
+          productId: item.productId,
+          quantity: { gt: 0 },
+          ...(locId && { locationId: locId }),
+        },
+        orderBy: [
+          { expiryDate: { sort: 'asc', nulls: 'last' } },
+          { createdAt: 'asc' },
+        ],
+        include: { location: { select: { name: true } } },
+      });
+
+      // FEFO предложение до количеството на реда
+      let remaining = Number(item.quantity);
+      const suggested: Array<{ inventoryBatchId: string; quantity: number }> = [];
+      for (const b of batches) {
+        if (remaining <= 0) break;
+        const take = Math.min(Number(b.quantity), remaining);
+        suggested.push({ inventoryBatchId: b.id, quantity: round2(take) });
+        remaining -= take;
+      }
+
+      lines.push({
+        orderItemId: item.id,
+        productId: item.productId,
+        productName: product.name,
+        unit: product.unit,
+        quantity: Number(item.quantity),
+        totalAvailable: round2(
+          batches.reduce((s, b) => s + Number(b.quantity), 0),
+        ),
+        availableBatches: batches.map((b) => ({
+          id: b.id,
+          batchNumber: b.batchNumber,
+          quantity: Number(b.quantity),
+          expiryDate: b.expiryDate,
+          locationName: b.location?.name ?? null,
+        })),
+        suggested,
+      });
+    }
+
+    return { orderId: id, lines };
+  }
+
+  // Окомплектоване/изписване: изписва посочените редове от избраните партиди,
+  // записва разпределенията и маркира редовете като изписани. Сумата на
+  // избраните партиди по ред трябва да е точно количеството на реда.
+  async fulfill(companyId: string, id: string, dto: FulfillOrderDto) {
+    const order = await this.findOne(companyId, id);
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      for (const lineAlloc of dto.items) {
+        const item = order.items.find((i) => i.id === lineAlloc.orderItemId);
+        if (!item) {
+          throw new BadRequestException('Невалиден ред в поръчката');
+        }
+        if (item.stockDeducted) continue; // вече е изписан
+
+        const product = await tx.product.findUnique({
+          where: { id: item.productId },
+        });
+        if (!product || product.type === 'SERVICE' || !product.trackInventory) {
+          continue;
+        }
+        if (product.type === 'SERIAL') {
+          throw new BadRequestException(
+            `Серийните продукти се изписват чрез избор на сериен номер: "${product.name}"`,
+          );
+        }
+
+        const sum = lineAlloc.batches.reduce(
+          (s, b) => s + Number(b.quantity),
+          0,
+        );
+        if (round2(sum) !== round2(Number(item.quantity))) {
+          throw new BadRequestException(
+            `Сумата на избраните партиди (${round2(sum)}) трябва да е ${Number(
+              item.quantity,
+            )} за "${product.name}"`,
+          );
+        }
+
+        const consumed: {
+          batchId: string;
+          batchNumber: string;
+          quantity: number;
+        }[] = [];
+        for (const b of lineAlloc.batches) {
+          if (Number(b.quantity) <= 0) continue;
+          const batch = await tx.inventoryBatch.findFirst({
+            where: {
+              id: b.inventoryBatchId,
+              companyId,
+              productId: item.productId,
+            },
+          });
+          if (!batch) {
+            throw new BadRequestException(
+              `Партидата за "${product.name}" не е намерена`,
+            );
+          }
+          if (Number(batch.quantity) < Number(b.quantity)) {
+            throw new BadRequestException(
+              `Партида ${batch.batchNumber}: налични ${Number(
+                batch.quantity,
+              )}, заявени ${Number(b.quantity)}`,
+            );
+          }
+          await tx.inventoryBatch.update({
+            where: { id: batch.id },
+            data: { quantity: { decrement: Number(b.quantity) } },
+          });
+          consumed.push({
+            batchId: batch.id,
+            batchNumber: batch.batchNumber,
+            quantity: Number(b.quantity),
+          });
+        }
+
+        await tx.orderItem.update({
+          where: { id: item.id },
+          data: { stockDeducted: true },
+        });
+        await this.createBatchAllocations(tx, item.id, consumed);
+      }
+
+      return tx.order.findFirst({ where: { id }, include: ORDER_INCLUDE });
+    });
+
+    await this.webhookDispatcher.emitOrderChanged(companyId, id);
+    return result;
   }
 
   async confirm(companyId: string, id: string) {

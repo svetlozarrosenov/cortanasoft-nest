@@ -13,7 +13,12 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto, UpdateOrderDto, QueryOrdersDto } from './dto';
+import {
+  CreateOrderDto,
+  UpdateOrderDto,
+  QueryOrdersDto,
+  FulfillOrderDto,
+} from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import {
@@ -128,6 +133,25 @@ export class CompanyOrdersController {
     @Param('id') id: string,
   ) {
     return this.ordersService.issueExpedition(companyId, id);
+  }
+
+  @Get(':id/fulfillment-plan')
+  @RequireEdit('erp', 'orders')
+  getFulfillmentPlan(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.ordersService.getFulfillmentPlan(companyId, id);
+  }
+
+  @Post(':id/fulfill')
+  @RequireEdit('erp', 'orders')
+  fulfill(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: FulfillOrderDto,
+  ) {
+    return this.ordersService.fulfill(companyId, id, dto);
   }
 
   @Delete(':id')
