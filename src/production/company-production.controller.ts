@@ -16,6 +16,7 @@ import {
   QueryProductionOrdersDto,
   IssueMaterialDto,
   CompleteProductionOrderDto,
+  StartProductionDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -77,14 +78,24 @@ export class CompanyProductionController {
     return this.productionService.update(companyId, id, dto);
   }
 
+  @Get(':id/start-material-plan')
+  @RequireView('production', 'orders')
+  startMaterialPlan(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.productionService.getStartMaterialPlan(companyId, id);
+  }
+
   @Post(':id/start')
   @RequireEdit('production', 'orders')
   start(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
     @CurrentUser() user: any,
+    @Body() dto: StartProductionDto,
   ) {
-    return this.productionService.start(companyId, id, user.id);
+    return this.productionService.start(companyId, id, user.id, dto);
   }
 
   @Post(':id/issue-material')

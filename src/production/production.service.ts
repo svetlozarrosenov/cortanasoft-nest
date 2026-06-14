@@ -9,6 +9,7 @@ import {
   UpdateProductionOrderDto,
   QueryProductionOrdersDto,
   IssueMaterialDto,
+  StartProductionDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
@@ -217,7 +218,12 @@ export class ProductionService {
    * materials from stock. If there's no BOM (custom job), just mark as
    * IN_PROGRESS — materials will be issued ad-hoc via issueMaterial().
    */
-  async start(companyId: string, id: string, userId?: string) {
+  async start(
+    companyId: string,
+    id: string,
+    userId?: string,
+    dto?: StartProductionDto,
+  ) {
     const order = await this.prisma.productionOrder.findFirst({
       where: { id, companyId },
       include: { bom: { include: { items: { include: { product: true } } } } },
@@ -230,8 +236,14 @@ export class ProductionService {
       throw new BadRequestException(ErrorMessages.production.canOnlyStartDraftOrPlanned);
     }
 
+    // Ръчно избрани партиди по материал (productId → партиди). Ако липсва за
+    // даден материал → deductAndLog тегли по автоматично FIFO.
+    const manualByProduct = new Map(
+      (dto?.materials || []).map((m) => [m.productId, m.batches]),
+    );
+
     return this.prisma.$transaction(async (tx) => {
-      // Auto-issue from BOM (if present). Unit cost is derived from actual FIFO batches.
+      // Auto-issue from BOM (if present). Unit cost is derived from actual batches.
       if (order.bom && order.bom.items.length > 0) {
         const outputQty = Number(order.bom.outputQuantity) || 1;
         const scale = Number(order.quantity) / outputQty;
@@ -247,6 +259,7 @@ export class ProductionService {
             locationId: order.locationId,
             userId,
             notes: 'Автоматично от рецепта',
+            batchAllocations: manualByProduct.get(bomItem.productId),
           });
         }
       }
@@ -257,6 +270,90 @@ export class ProductionService {
         include: defaultInclude,
       });
     });
+  }
+
+  // План за избор на партиди при старт: за всеки партиден материал от рецептата
+  // — нужно количество (bomQty × мащаб) + налични партиди (FIFO) + предложение.
+  async getStartMaterialPlan(companyId: string, id: string) {
+    const order = await this.prisma.productionOrder.findFirst({
+      where: { id, companyId },
+      include: { bom: { include: { items: { include: { product: true } } } } },
+    });
+    if (!order) {
+      throw new NotFoundException(ErrorMessages.production.notFound);
+    }
+    if (!order.bom || order.bom.items.length === 0) {
+      return { orderId: id, lines: [] };
+    }
+
+    const outputQty = Number(order.bom.outputQuantity) || 1;
+    const scale = Number(order.quantity) / outputQty;
+
+    const lines: Array<{
+      productId: string;
+      productName: string;
+      unit: string;
+      required: number;
+      totalAvailable: number;
+      availableBatches: Array<{
+        id: string;
+        batchNumber: string;
+        quantity: number;
+        expiryDate: Date | null;
+        locationName: string | null;
+      }>;
+      suggested: Array<{ inventoryBatchId: string; quantity: number }>;
+    }> = [];
+    for (const bomItem of order.bom.items) {
+      // Само партидни продукти влизат в избора на партиди. Останалите
+      // (обикновени, услуги и т.н.) се изписват автоматично по FIFO при старт.
+      if (bomItem.product.type !== 'BATCH') continue;
+
+      const required = Math.round(Number(bomItem.quantity) * scale * 1000) / 1000;
+      const batches = await this.prisma.inventoryBatch.findMany({
+        where: {
+          companyId,
+          productId: bomItem.productId,
+          quantity: { gt: 0 },
+          ...(order.locationId && { locationId: order.locationId }),
+        },
+        orderBy: { createdAt: 'asc' }, // FIFO
+        include: { location: { select: { name: true } } },
+      });
+
+      let remaining = required;
+      const suggested: { inventoryBatchId: string; quantity: number }[] = [];
+      for (const b of batches) {
+        if (remaining <= 0) break;
+        const take = Math.min(Number(b.quantity), remaining);
+        suggested.push({
+          inventoryBatchId: b.id,
+          quantity: Math.round(take * 1000) / 1000,
+        });
+        remaining -= take;
+      }
+
+      lines.push({
+        productId: bomItem.productId,
+        productName: bomItem.product.name,
+        unit: bomItem.unit,
+        required,
+        totalAvailable:
+          Math.round(
+            batches.reduce((s, b) => s + Number(b.quantity), 0) * 1000,
+          ) / 1000,
+        availableBatches: batches.map((b) => ({
+          id: b.id,
+          batchNumber: b.batchNumber,
+          quantity: Number(b.quantity),
+          expiryDate: b.expiryDate,
+          locationName: b.location?.name ?? null,
+        })),
+        suggested,
+      });
+    }
+
+    return { orderId: id, lines };
   }
 
   /**
@@ -517,59 +614,123 @@ export class ProductionService {
       locationId: string | null | undefined;
       userId?: string;
       notes?: string;
+      // По избор: ръчно избрани партиди + количества. Ако липсва → FIFO.
+      batchAllocations?: { inventoryBatchId: string; quantity: number }[];
     },
   ) {
-    const batchWhere: Prisma.InventoryBatchWhereInput = {
-      productId: params.productId,
-      companyId: params.companyId,
-      quantity: { gt: 0 },
-      ...(params.locationId && { locationId: params.locationId }),
-    };
-
-    const batches = await tx.inventoryBatch.findMany({
-      where: batchWhere,
-      orderBy: { createdAt: 'asc' }, // FIFO
-    });
-
-    const totalAvailable = batches.reduce((sum, b) => sum + Number(b.quantity), 0);
-    if (totalAvailable < params.quantity) {
-      throw new BadRequestException(
-        ErrorMessages.production.insufficientMaterials(
-          params.productName,
-          totalAvailable,
-          params.quantity,
-        ),
-      );
-    }
-
-    let remaining = params.quantity;
+    const round3 = (n: number) => Math.round(n * 1000) / 1000;
     let costAccum = 0;
-    for (const batch of batches) {
-      if (remaining <= 0) break;
-      const batchQty = Number(batch.quantity);
-      const deduct = Math.min(batchQty, remaining);
-      const unitCost = Number(batch.unitCost || 0);
 
-      await tx.inventoryBatch.update({
-        where: { id: batch.id },
-        data: { quantity: batchQty - deduct },
-      });
-
-      // Genealogy: записваме коя суровинна партида колко е вложена
+    const consume = async (
+      batchId: string,
+      batchNumber: string,
+      qty: number,
+      unitCost: number,
+    ) => {
       await tx.productionConsumption.create({
         data: {
           productionOrderId: params.productionOrderId,
           productId: params.productId,
-          inventoryBatchId: batch.id,
-          sourceBatchNumber: batch.batchNumber,
-          quantity: deduct,
+          inventoryBatchId: batchId,
+          sourceBatchNumber: batchNumber,
+          quantity: qty,
           unitCost,
           companyId: params.companyId,
         },
       });
+      costAccum += qty * unitCost;
+    };
 
-      costAccum += deduct * unitCost;
-      remaining -= deduct;
+    if (params.batchAllocations && params.batchAllocations.length > 0) {
+      // Ръчно избрани партиди
+      const sum = params.batchAllocations.reduce(
+        (s, a) => s + Number(a.quantity),
+        0,
+      );
+      if (round3(sum) !== round3(params.quantity)) {
+        throw new BadRequestException(
+          `Сумата на избраните партиди (${round3(sum)}) трябва да е ${round3(
+            params.quantity,
+          )} за "${params.productName}"`,
+        );
+      }
+      for (const alloc of params.batchAllocations) {
+        if (Number(alloc.quantity) <= 0) continue;
+        const batch = await tx.inventoryBatch.findFirst({
+          where: {
+            id: alloc.inventoryBatchId,
+            companyId: params.companyId,
+            productId: params.productId,
+          },
+        });
+        if (!batch) {
+          throw new BadRequestException(
+            `Партидата за "${params.productName}" не е намерена`,
+          );
+        }
+        if (Number(batch.quantity) < Number(alloc.quantity)) {
+          throw new BadRequestException(
+            `Партида ${batch.batchNumber}: налични ${Number(
+              batch.quantity,
+            )}, заявени ${Number(alloc.quantity)}`,
+          );
+        }
+        await tx.inventoryBatch.update({
+          where: { id: batch.id },
+          data: { quantity: Number(batch.quantity) - Number(alloc.quantity) },
+        });
+        await consume(
+          batch.id,
+          batch.batchNumber,
+          Number(alloc.quantity),
+          Number(batch.unitCost || 0),
+        );
+      }
+    } else {
+      // Автоматично FIFO (поведение по подразбиране)
+      const batchWhere: Prisma.InventoryBatchWhereInput = {
+        productId: params.productId,
+        companyId: params.companyId,
+        quantity: { gt: 0 },
+        ...(params.locationId && { locationId: params.locationId }),
+      };
+
+      const batches = await tx.inventoryBatch.findMany({
+        where: batchWhere,
+        orderBy: { createdAt: 'asc' }, // FIFO
+      });
+
+      const totalAvailable = batches.reduce(
+        (sum, b) => sum + Number(b.quantity),
+        0,
+      );
+      if (totalAvailable < params.quantity) {
+        throw new BadRequestException(
+          ErrorMessages.production.insufficientMaterials(
+            params.productName,
+            totalAvailable,
+            params.quantity,
+          ),
+        );
+      }
+
+      let remaining = params.quantity;
+      for (const batch of batches) {
+        if (remaining <= 0) break;
+        const batchQty = Number(batch.quantity);
+        const deduct = Math.min(batchQty, remaining);
+        await tx.inventoryBatch.update({
+          where: { id: batch.id },
+          data: { quantity: batchQty - deduct },
+        });
+        await consume(
+          batch.id,
+          batch.batchNumber,
+          deduct,
+          Number(batch.unitCost || 0),
+        );
+        remaining -= deduct;
+      }
     }
 
     const weightedAvgCost = params.quantity > 0 ? costAccum / params.quantity : 0;
