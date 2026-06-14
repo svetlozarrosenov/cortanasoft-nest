@@ -1,4 +1,10 @@
-import { IsString, IsOptional, IsNumber, Min } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  Min,
+  IsNotEmpty,
+} from 'class-validator';
 
 export class CreateProductionOrderDto {
   @IsString()
@@ -26,8 +32,8 @@ export class CreateProductionOrderDto {
   quantity: number;
 
   @IsString()
-  @IsOptional()
-  locationId?: string;
+  @IsNotEmpty()
+  locationId: string;
 
   @IsString()
   @IsOptional()
