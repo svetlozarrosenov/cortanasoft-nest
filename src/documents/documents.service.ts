@@ -9,6 +9,7 @@ import { UploadsService } from '../uploads/uploads.service';
 const ENTITY_TYPE_MAP = {
   goodsReceipt: 'goodsReceiptId',
   invoice: 'invoiceId',
+  proforma: 'proformaId',
   expense: 'expenseId',
   stockReceipt: 'stockReceiptId',
   acceptanceProtocol: 'acceptanceProtocolId',
@@ -20,6 +21,7 @@ type EntityType = keyof typeof ENTITY_TYPE_MAP;
 const ENTITY_MODEL_MAP: Record<EntityType, string> = {
   goodsReceipt: 'goodsReceipt',
   invoice: 'invoice',
+  proforma: 'proforma',
   expense: 'expense',
   stockReceipt: 'stockReceipt',
   acceptanceProtocol: 'acceptanceProtocol',

@@ -15,7 +15,6 @@ import type { Response } from 'express';
 import { InvoicesService } from './invoices.service';
 import {
   CreateInvoiceDto,
-  CreateProformaDto,
   CreateAdvanceInvoiceDto,
   CreateFinalInvoiceDto,
   UpdateInvoiceDto,
@@ -51,16 +50,6 @@ export class CompanyInvoicesController {
     @Body() dto: CreateInvoiceDto,
   ) {
     return this.invoicesService.createFromOrder(companyId, user.id, dto);
-  }
-
-  @Post('proforma')
-  @RequireCreate('erp', 'invoices')
-  createProforma(
-    @Param('companyId') companyId: string,
-    @CurrentUser() user: any,
-    @Body() dto: CreateProformaDto,
-  ) {
-    return this.invoicesService.createProforma(companyId, user.id, dto);
   }
 
   @Post('advance')

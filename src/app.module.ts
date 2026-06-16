@@ -13,6 +13,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { OrdersModule } from './orders/orders.module';
 import { CreditApplicationsModule } from './credit-applications/credit-applications.module';
 import { InvoicesModule } from './invoices/invoices.module';
+import { ProformasModule } from './proformas/proformas.module';
 import { CurrenciesModule } from './currencies/currencies.module';
 import { CountriesModule } from './countries/countries.module';
 import { SettlementsModule } from './settlements/settlements.module';
@@ -89,6 +90,7 @@ import { EmployeeRecordsModule } from './employee-records/employee-records.modul
     OrdersModule,
     CreditApplicationsModule,
     InvoicesModule,
+    ProformasModule,
     CurrenciesModule,
     CountriesModule,
     SettlementsModule,

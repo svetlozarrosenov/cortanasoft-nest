@@ -6,7 +6,6 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateInvoiceDto,
-  CreateProformaDto,
   CreateAdvanceInvoiceDto,
   CreateFinalInvoiceDto,
   UpdateInvoiceDto,
@@ -590,112 +589,6 @@ export class InvoicesService {
 
     // Re-fetch after transaction — recalculateOrderState mutated paidAmount/status.
     return this.findOne(companyId, created.id);
-  }
-
-  async createProforma(
-    companyId: string,
-    userId: string,
-    dto: CreateProformaDto,
-  ) {
-    // Get company for default currency and VAT
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { vatNumber: true, currencyId: true },
-    });
-    if (!company) {
-      throw new NotFoundException('Компанията не е намерена');
-    }
-
-    const defaultVatRate = company.vatNumber ? 20 : 0;
-
-    // Validate products if productId is provided
-    const productIds = dto.items
-      .filter((item) => item.productId)
-      .map((item) => item.productId!);
-
-    let products: any[] = [];
-    if (productIds.length > 0) {
-      products = await this.prisma.product.findMany({
-        where: { id: { in: productIds }, companyId },
-      });
-      const foundIds = new Set(products.map((p) => p.id));
-      const missingIds = productIds.filter((id) => !foundIds.has(id));
-      if (missingIds.length > 0) {
-        throw new BadRequestException(
-          'Някои от посочените продукти не са намерени',
-        );
-      }
-    }
-
-    // Use company currency as default
-    const currencyId = dto.currencyId || company.currencyId;
-
-    // Calculate totals
-    let subtotal = 0;
-    let vatAmount = 0;
-
-    const itemsData = dto.items.map((item) => {
-      const product = item.productId
-        ? products.find((p) => p.id === item.productId)
-        : null;
-      const productVatRate = product ? Number(product.vatRate) : defaultVatRate;
-      const itemVatRate =
-        item.vatRate ?? (isNaN(productVatRate) ? defaultVatRate : productVatRate);
-      const itemDiscount = item.discount ?? 0;
-      const itemSubtotal = item.quantity * item.unitPrice - itemDiscount;
-      const itemVat = itemSubtotal * (itemVatRate / 100);
-
-      subtotal += itemSubtotal;
-      vatAmount += itemVat;
-
-      return {
-        productId: item.productId || null,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        vatRate: itemVatRate,
-        discount: itemDiscount,
-        total: itemSubtotal,
-      };
-    });
-
-    const invoiceDiscount = dto.discount ?? 0;
-    const total = subtotal + vatAmount - invoiceDiscount;
-
-    // Generate number + create in a transaction to prevent duplicates
-    return this.prisma.$transaction(async (tx) => {
-      const invoiceNumber = await this.generateInvoiceNumber(companyId, 'PRO', tx);
-
-      return tx.invoice.create({
-        data: {
-          invoiceNumber,
-          invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(),
-          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
-          type: 'PROFORMA',
-          status: 'DRAFT',
-          customerId: dto.customerId || null,
-          customerName: dto.customerName,
-          customerEik: dto.customerEik || null,
-          customerVatNumber: dto.customerVatNumber || null,
-          customerAddress: dto.customerAddress || null,
-          customerCity: dto.customerCity || null,
-          customerPostalCode: dto.customerPostalCode || null,
-          subtotal,
-          vatAmount,
-          discount: invoiceDiscount,
-          total,
-          paymentMethod: dto.paymentMethod || null,
-          notes: dto.notes || null,
-          currencyId,
-          companyId,
-          createdById: userId,
-          items: {
-            create: itemsData,
-          },
-        },
-        include: this.invoiceInclude,
-      });
-    });
   }
 
   async findAll(companyId: string, query: QueryInvoicesDto) {
