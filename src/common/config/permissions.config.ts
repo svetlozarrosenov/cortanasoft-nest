@@ -309,6 +309,28 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
+        key: 'contracts',
+        labelKey: 'modules.erp.contracts.title',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'contractsList',
+            labelKey: 'modules.erp.contracts.listTitle',
+            columns: [
+              { key: 'number', labelKey: 'modules.erp.contracts.number' },
+              { key: 'title', labelKey: 'common.name' },
+              {
+                key: 'counterparty',
+                labelKey: 'modules.erp.contracts.counterparty',
+              },
+              { key: 'startDate', labelKey: 'modules.erp.contracts.startDate' },
+              { key: 'endDate', labelKey: 'modules.erp.contracts.endDate' },
+              { key: 'files', labelKey: 'modules.erp.contracts.files' },
+            ],
+          },
+        ],
+      },
+      {
         key: 'analytics',
         labelKey: 'modules.erp.profitAnalytics',
         actions: ['view'],

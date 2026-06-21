@@ -59,6 +59,7 @@ import { AnalyticsGoogleModule } from './analytics-google/analytics-google.modul
 import { MetaPixelModule } from './meta-pixel/meta-pixel.module';
 import { ServiceModule } from './service/service.module';
 import { EmployeeRecordsModule } from './employee-records/employee-records.module';
+import { ContractsModule } from './contracts/contracts.module';
 
 @Module({
   imports: [
@@ -136,6 +137,7 @@ import { EmployeeRecordsModule } from './employee-records/employee-records.modul
     MetaPixelModule,
     ServiceModule,
     EmployeeRecordsModule,
+    ContractsModule,
   ],
   controllers: [],
   providers: [],

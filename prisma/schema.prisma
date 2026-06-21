@@ -184,6 +184,9 @@ model Company {
   // Електронни трудови досиета — opt-in per company
   employeeRecordsEnabled Boolean @default(false)
 
+  // Договори (шаблони + архив) — opt-in per company
+  contractsEnabled Boolean @default(false)
+
   // Системни полета
   role      CompanyRole @default(CLIENT)
   isActive  Boolean     @default(true)
@@ -255,6 +258,10 @@ model Company {
   terminations          Termination[]
   employeeDocuments     EmployeeDocument[]
   employeeDocumentFiles EmployeeDocumentFile[]
+
+  // Договори
+  contractTemplates ContractTemplate[]
+  contracts         Contract[]
 
   @@map("companies")
 }
@@ -1296,6 +1303,7 @@ model Customer {
   serviceAssets          ServiceAsset[]
   serviceContracts       ServiceContract[]
   creditApplications     CreditApplication[]
+  contracts              Contract[]
 
   @@unique([companyId, eik])
   @@index([companyId, type])
@@ -1755,12 +1763,12 @@ model Payment {
 
 // Банково извлечение — 1 запис на месец (за счетоводния пакет). Файлът е PDF.
 model BankStatement {
-  id        String   @id @default(cuid())
-  year      Int // Година на периода
-  month     Int // Месец на периода (1-12)
-  fileUrl   String // URL към качения файл (PDF)
-  fileName  String? // Оригинално име на файла
-  notes     String? // Бележки
+  id       String  @id @default(cuid())
+  year     Int // Година на периода
+  month    Int // Месец на периода (1-12)
+  fileUrl  String // URL към качения файл (PDF)
+  fileName String? // Оригинално име на файла
+  notes    String? // Бележки
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -4355,4 +4363,85 @@ model EmployeeDocumentFile {
   @@index([terminationId])
   @@index([employeeDocumentId])
   @@map("employee_document_files")
+}
+
+// ============================================================
+// Договори (търговски) — шаблони за бързо генериране + архив с
+// прикачени подписани файлове. Per-company opt-in (contractsEnabled).
+// ============================================================
+
+// Шаблон за договор — преизползваем текст с плейсхолдъри ({{client.name}})
+model ContractTemplate {
+  id        String   @id @default(cuid())
+  name      String // напр. "GDPR договор"
+  content   String   @db.Text // rich text с merge плейсхолдъри
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("contract_templates")
+}
+
+// Конкретен договор — архивен запис с контрагент + прикачени файлове
+model Contract {
+  id     String @id @default(cuid())
+  number String // CT-2026-00001
+  title  String // име на договора
+
+  // Опционална връзка към клиент (за префил)
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  // Snapshot на контрагента (за ръчен контрагент или замразени данни)
+  counterpartyName    String
+  counterpartyEik     String?
+  counterpartyAddress String?
+  counterpartyContact String?
+
+  startDate DateTime?
+  endDate   DateTime?
+  notes     String?   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  files ContractFile[]
+
+  @@unique([companyId, number])
+  @@index([companyId])
+  @@index([customerId])
+  @@map("contracts")
+}
+
+// Прикачен файл към договор (подписан PDF, оригинал, приложение)
+model ContractFile {
+  id           String           @id @default(cuid())
+  fileName     String
+  fileUrl      String
+  fileKey      String
+  fileSize     Int
+  mimeType     String
+  kind         ContractFileKind @default(SIGNED_COPY)
+  uploadedById String?
+  createdAt    DateTime         @default(now())
+
+  companyId  String
+  contractId String
+  contract   Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId])
+  @@map("contract_files")
+}
+
+enum ContractFileKind {
+  ORIGINAL // Неподписан оригинал
+  SIGNED_COPY // Подписан екземпляр
+  ATTACHMENT // Приложение / друг документ
 }
