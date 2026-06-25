@@ -7,6 +7,10 @@ import {
   CreateContactSubmissionDto,
   UpdateContactSubmissionDto,
   QueryContactSubmissionsDto,
+  CreateContactSubmissionTaskDto,
+  UpdateContactSubmissionTaskDto,
+  CreateContactSubmissionNoteDto,
+  UpdateContactSubmissionNoteDto,
 } from './dto';
 import { Prisma, ContactSubmissionStatus } from '@prisma/client';
 
@@ -221,11 +225,15 @@ export class ContactSubmissionsService {
   }
 
   /**
-   * Get a single contact submission by ID (admin only)
+   * Get a single contact submission by ID with tasks and notes timeline (admin only)
    */
   async findOne(id: string) {
     const submission = await this.prisma.contactSubmission.findUnique({
       where: { id },
+      include: {
+        tasks: { orderBy: [{ completed: 'asc' }, { dueDate: 'asc' }] },
+        notes: { orderBy: { createdAt: 'desc' } },
+      },
     });
 
     if (!submission) {
@@ -235,27 +243,141 @@ export class ContactSubmissionsService {
     return submission;
   }
 
+  private async ensureExists(id: string) {
+    const exists = await this.prisma.contactSubmission.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!exists) {
+      throw new NotFoundException('Contact submission not found');
+    }
+  }
+
   /**
    * Update a contact submission (admin only)
    */
   async update(id: string, dto: UpdateContactSubmissionDto) {
-    await this.findOne(id);
+    await this.ensureExists(id);
 
     return this.prisma.contactSubmission.update({
       where: { id },
       data: {
         ...(dto.status && { status: dto.status }),
-        ...(dto.notes !== undefined && { notes: dto.notes }),
         ...(dto.repliedAt && { repliedAt: new Date(dto.repliedAt) }),
       },
     });
+  }
+
+  // ==================== TASKS ====================
+
+  async createTask(
+    contactSubmissionId: string,
+    dto: CreateContactSubmissionTaskDto,
+  ) {
+    await this.ensureExists(contactSubmissionId);
+    return this.prisma.contactSubmissionTask.create({
+      data: {
+        contactSubmissionId,
+        title: dto.title,
+        description: dto.description,
+        dueDate: new Date(dto.dueDate),
+      },
+    });
+  }
+
+  async updateTask(
+    contactSubmissionId: string,
+    taskId: string,
+    dto: UpdateContactSubmissionTaskDto,
+  ) {
+    const task = await this.prisma.contactSubmissionTask.findUnique({
+      where: { id: taskId },
+    });
+    if (!task || task.contactSubmissionId !== contactSubmissionId) {
+      throw new NotFoundException('Task not found');
+    }
+
+    const data: Prisma.ContactSubmissionTaskUpdateInput = {};
+    if (dto.title !== undefined) data.title = dto.title;
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.dueDate !== undefined) {
+      data.dueDate = new Date(dto.dueDate);
+      // Resetting dueDate forward should re-enable notification
+      if (!task.completed && new Date(dto.dueDate) > new Date()) {
+        data.notifiedAt = null;
+      }
+    }
+    if (dto.completed !== undefined) {
+      data.completed = dto.completed;
+      data.completedAt = dto.completed ? new Date() : null;
+    }
+
+    return this.prisma.contactSubmissionTask.update({
+      where: { id: taskId },
+      data,
+    });
+  }
+
+  async deleteTask(contactSubmissionId: string, taskId: string) {
+    const task = await this.prisma.contactSubmissionTask.findUnique({
+      where: { id: taskId },
+      select: { id: true, contactSubmissionId: true },
+    });
+    if (!task || task.contactSubmissionId !== contactSubmissionId) {
+      throw new NotFoundException('Task not found');
+    }
+    await this.prisma.contactSubmissionTask.delete({ where: { id: taskId } });
+  }
+
+  // ==================== NOTES ====================
+
+  async createNote(
+    contactSubmissionId: string,
+    dto: CreateContactSubmissionNoteDto,
+  ) {
+    await this.ensureExists(contactSubmissionId);
+    return this.prisma.contactSubmissionNote.create({
+      data: {
+        contactSubmissionId,
+        content: dto.content,
+      },
+    });
+  }
+
+  async updateNote(
+    contactSubmissionId: string,
+    noteId: string,
+    dto: UpdateContactSubmissionNoteDto,
+  ) {
+    const note = await this.prisma.contactSubmissionNote.findUnique({
+      where: { id: noteId },
+      select: { id: true, contactSubmissionId: true },
+    });
+    if (!note || note.contactSubmissionId !== contactSubmissionId) {
+      throw new NotFoundException('Note not found');
+    }
+    return this.prisma.contactSubmissionNote.update({
+      where: { id: noteId },
+      data: { content: dto.content },
+    });
+  }
+
+  async deleteNote(contactSubmissionId: string, noteId: string) {
+    const note = await this.prisma.contactSubmissionNote.findUnique({
+      where: { id: noteId },
+      select: { id: true, contactSubmissionId: true },
+    });
+    if (!note || note.contactSubmissionId !== contactSubmissionId) {
+      throw new NotFoundException('Note not found');
+    }
+    await this.prisma.contactSubmissionNote.delete({ where: { id: noteId } });
   }
 
   /**
    * Delete a contact submission (admin only)
    */
   async remove(id: string) {
-    await this.findOne(id);
+    await this.ensureExists(id);
 
     return this.prisma.contactSubmission.delete({
       where: { id },

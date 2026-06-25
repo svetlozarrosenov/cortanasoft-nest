@@ -1,15 +1,25 @@
 import {
   Controller,
   Get,
+  Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
   Query,
   UseGuards,
+  HttpCode,
 } from '@nestjs/common';
 import { ContactSubmissionsService } from './contact-submissions.service';
-import { UpdateContactSubmissionDto, QueryContactSubmissionsDto } from './dto';
+import {
+  UpdateContactSubmissionDto,
+  QueryContactSubmissionsDto,
+  CreateContactSubmissionTaskDto,
+  UpdateContactSubmissionTaskDto,
+  CreateContactSubmissionNoteDto,
+  UpdateContactSubmissionNoteDto,
+} from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { SuperAdminGuard } from '../common/guards/super-admin.guard';
 
@@ -96,5 +106,75 @@ export class AdminContactSubmissionsController {
       success: true,
       message: 'Contact submission deleted successfully',
     };
+  }
+
+  // ==================== TASKS ====================
+
+  @Post(':id/tasks')
+  async createTask(
+    @Param('id') id: string,
+    @Body() dto: CreateContactSubmissionTaskDto,
+  ) {
+    const task = await this.contactSubmissionsService.createTask(id, dto);
+    return { success: true, task };
+  }
+
+  @Patch(':id/tasks/:taskId')
+  async updateTask(
+    @Param('id') id: string,
+    @Param('taskId') taskId: string,
+    @Body() dto: UpdateContactSubmissionTaskDto,
+  ) {
+    const task = await this.contactSubmissionsService.updateTask(
+      id,
+      taskId,
+      dto,
+    );
+    return { success: true, task };
+  }
+
+  @Delete(':id/tasks/:taskId')
+  @HttpCode(200)
+  async deleteTask(
+    @Param('id') id: string,
+    @Param('taskId') taskId: string,
+  ) {
+    await this.contactSubmissionsService.deleteTask(id, taskId);
+    return { success: true };
+  }
+
+  // ==================== NOTES ====================
+
+  @Post(':id/notes')
+  async createNote(
+    @Param('id') id: string,
+    @Body() dto: CreateContactSubmissionNoteDto,
+  ) {
+    const note = await this.contactSubmissionsService.createNote(id, dto);
+    return { success: true, note };
+  }
+
+  @Patch(':id/notes/:noteId')
+  async updateNote(
+    @Param('id') id: string,
+    @Param('noteId') noteId: string,
+    @Body() dto: UpdateContactSubmissionNoteDto,
+  ) {
+    const note = await this.contactSubmissionsService.updateNote(
+      id,
+      noteId,
+      dto,
+    );
+    return { success: true, note };
+  }
+
+  @Delete(':id/notes/:noteId')
+  @HttpCode(200)
+  async deleteNote(
+    @Param('id') id: string,
+    @Param('noteId') noteId: string,
+  ) {
+    await this.contactSubmissionsService.deleteNote(id, noteId);
+    return { success: true };
   }
 }
