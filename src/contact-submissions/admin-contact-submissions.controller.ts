@@ -78,7 +78,7 @@ export class AdminContactSubmissionsController {
     const submission = await this.contactSubmissionsService.findOne(id);
     return {
       success: true,
-      submission,
+      contactSubmission: submission,
     };
   }
 
@@ -91,7 +91,7 @@ export class AdminContactSubmissionsController {
     const submission = await this.contactSubmissionsService.update(id, dto);
     return {
       success: true,
-      submission,
+      contactSubmission: submission,
     };
   }
 
