@@ -3645,10 +3645,11 @@ model IssuedWarranty {
 // ==================== КОНТАКТНА ФОРМА ====================
 
 enum ContactSubmissionStatus {
-  NEW
-  READ
-  REPLIED
-  ARCHIVED
+  NEW // Нова заявка
+  CONTACTED // Осъществен контакт
+  SCHEDULED // Насрочена среща/демо
+  COMPLETED // Приключена
+  CANCELLED // Отказана/анулирана
 }
 
 model ContactSubmission {
