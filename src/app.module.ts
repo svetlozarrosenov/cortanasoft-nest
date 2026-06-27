@@ -60,6 +60,7 @@ import { MetaPixelModule } from './meta-pixel/meta-pixel.module';
 import { ServiceModule } from './service/service.module';
 import { EmployeeRecordsModule } from './employee-records/employee-records.module';
 import { ContractsModule } from './contracts/contracts.module';
+import { SupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -138,6 +139,7 @@ import { ContractsModule } from './contracts/contracts.module';
     ServiceModule,
     EmployeeRecordsModule,
     ContractsModule,
+    SupportModule,
   ],
   controllers: [],
   providers: [],

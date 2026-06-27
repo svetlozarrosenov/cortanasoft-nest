@@ -834,6 +834,31 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
     ],
   },
   {
+    key: 'support',
+    labelKey: 'modules.support.title',
+    icon: 'LifeBuoy',
+    pages: [
+      {
+        key: 'tickets',
+        labelKey: 'modules.support.tickets',
+        actions: ['view', 'create', 'edit'],
+        tables: [
+          {
+            key: 'ticketsList',
+            labelKey: 'modules.support.ticketsList',
+            columns: [
+              { key: 'number', labelKey: 'modules.support.number' },
+              { key: 'subject', labelKey: 'modules.support.subject' },
+              { key: 'status', labelKey: 'common.status' },
+              { key: 'priority', labelKey: 'modules.support.priority' },
+              { key: 'createdAt', labelKey: 'common.createdAt' },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
     key: 'admin',
     labelKey: 'modules.admin.title',
     icon: 'Shield',

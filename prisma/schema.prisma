@@ -263,6 +263,9 @@ model Company {
   contractTemplates ContractTemplate[]
   contracts         Contract[]
 
+  // Тикети за поддръжка (към екипа на Кортана)
+  supportTickets SupportTicket[]
+
   @@map("companies")
 }
 
@@ -563,6 +566,11 @@ model User {
 
   // Password reset
   passwordResets PasswordReset[]
+
+  // Тикети за поддръжка
+  createdSupportTickets  SupportTicket[]        @relation("SupportTicketCreator")
+  assignedSupportTickets SupportTicket[]        @relation("SupportTicketAssignee")
+  supportTicketMessages  SupportTicketMessage[] @relation("SupportTicketMessageAuthor")
 
   @@map("users")
 }
@@ -3667,8 +3675,8 @@ model ContactSubmission {
   tasks ContactSubmissionTask[]
   notes ContactSubmissionNote[]
 
-  createdAt DateTime                @default(now())
-  updatedAt DateTime                @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([status])
   @@index([createdAt])
@@ -4487,4 +4495,113 @@ enum ContractFileKind {
   ORIGINAL // Неподписан оригинал
   SIGNED_COPY // Подписан екземпляр
   ATTACHMENT // Приложение / друг документ
+}
+
+// ==================== ПОДДРЪЖКА (SUPPORT) ====================
+// Тикет система: фирмите-наематели подават тикети към екипа на Кортана (СВ Софт / OWNER).
+// Всеки тикет носи companyId на фирмата-създател — нейните потребители виждат само своите.
+// Super-admin (OWNER) вижда всички тикети от всички компании, отговаря и сменя статуси.
+
+enum SupportTicketStatus {
+  NEW // Нов — подаден, още не е поет
+  IN_PROGRESS // В процес на обработка от support
+  WAITING_CUSTOMER // Чака отговор/информация от клиента
+  RESOLVED // Решен
+  CLOSED // Затворен/архивиран
+}
+
+enum SupportTicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum SupportTicketCategory {
+  BUG // Грешка/проблем
+  QUESTION // Въпрос
+  FEATURE_REQUEST // Заявка за функционалност
+  BILLING // Фактуриране/плащане
+  OTHER // Друго
+}
+
+model SupportTicket {
+  id          String                 @id @default(cuid())
+  number      Int // четим пореден номер, per-company (виж @@unique)
+  subject     String
+  description String                 @db.Text
+  status      SupportTicketStatus    @default(NEW)
+  priority    SupportTicketPriority  @default(MEDIUM)
+  category    SupportTicketCategory?
+
+  // Фирма-създател (тикетът е с нейното company id)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Потребител от фирмата, който е създал тикета
+  createdById String
+  createdBy   User   @relation("SupportTicketCreator", fields: [createdById], references: [id])
+
+  // Поел тикета (потребител от OWNER компанията)
+  assignedToId String?
+  assignedTo   User?   @relation("SupportTicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  resolvedAt DateTime?
+  closedAt   DateTime?
+
+  messages    SupportTicketMessage[]
+  attachments SupportTicketAttachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, number])
+  @@index([companyId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("support_tickets")
+}
+
+// Съобщение в нишката на тикет (реплика напред-назад: клиент ↔ support)
+model SupportTicketMessage {
+  id       String        @id @default(cuid())
+  ticketId String
+  ticket   SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User   @relation("SupportTicketMessageAuthor", fields: [authorId], references: [id])
+
+  // true = от екипа на Кортана (support); false = от фирмата-клиент
+  isFromSupport Boolean @default(false)
+
+  body String @db.Text
+
+  attachments SupportTicketAttachment[]
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([createdAt])
+  @@map("support_ticket_messages")
+}
+
+// Прикачен файл към тикет или съобщение (R2)
+model SupportTicketAttachment {
+  id       String @id @default(cuid())
+  fileName String
+  fileUrl  String
+  fileKey  String
+  fileSize Int
+  mimeType String
+
+  ticketId  String
+  ticket    SupportTicket         @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  messageId String?
+  message   SupportTicketMessage? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([ticketId])
+  @@index([messageId])
+  @@map("support_ticket_attachments")
 }

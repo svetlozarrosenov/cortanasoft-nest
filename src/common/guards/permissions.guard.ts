@@ -75,15 +75,10 @@ export class PermissionsGuard implements CanActivate {
       throw new ForbiddenException(ErrorMessages.common.userNotAuthenticated);
     }
 
-    // Super admins (OWNER company role) have full access
-    // Check if user is owner of any company they belong to
-    const ownerCompany = user.companies?.find(
-      (c: { id: string; role: string }) =>
-        c.id === companyId && c.role === 'OWNER',
-    );
-    if (ownerCompany) {
-      return true;
-    }
+    // Access on company-scoped routes is governed entirely by the user's
+    // granular role permissions for this company — there is no blanket OWNER
+    // bypass here. Platform-admin routes (/admin/*) are protected separately by
+    // SuperAdminGuard.
 
     // Get user's role for this company
     const userCompany = await this.prisma.userCompany.findUnique({
