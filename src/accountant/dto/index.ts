@@ -78,6 +78,28 @@ export class UpdateAccountantSettingsDto {
   emailBody?: string;
 }
 
+export class QueryArchivesDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(2000)
+  @Max(2100)
+  year?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  limit?: number;
+}
+
 export class SendToAccountantDto {
   @Type(() => Number)
   @IsInt()

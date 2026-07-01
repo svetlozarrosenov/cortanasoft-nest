@@ -243,6 +243,7 @@ model Company {
   payments                     Payment[]
   bankStatements               BankStatement[]
   accountantSettings           AccountantSettings?
+  accountantArchives           AccountantArchive[]
   creditApplications           CreditApplication[]
 
   // Сервиз
@@ -1804,6 +1805,31 @@ model AccountantSettings {
   updatedAt DateTime @updatedAt
 
   @@map("accountant_settings")
+}
+
+// Архив на изпратен към счетоводителя месечен пакет. Хибрид: пазим само Excel
+// описа (snapshot в R2) + метаданни/бройки — тежките PDF-и (разходни фактури,
+// извлечения) вече са в R2, затова НЕ ги дублираме; свалянето на целия пакет
+// ги реглобява от съществуващите файлове.
+model AccountantArchive {
+  id             String   @id @default(cuid())
+  year           Int
+  month          Int
+  sentAt         DateTime @default(now())
+  sentTo         String // имейл на счетоводителя, до който е изпратено
+  registerKey    String // R2 ключ на запазения Excel опис (snapshot)
+  incomeCount    Int      @default(0)
+  expenseCount   Int      @default(0)
+  statementCount Int      @default(0)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, sentAt])
+  @@index([companyId, year, month])
+  @@map("accountant_archives")
 }
 
 // ==================== ОФЕРТИ ====================

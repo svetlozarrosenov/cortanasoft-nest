@@ -92,6 +92,35 @@ export class UploadsService {
   }
 
   /**
+   * Upload a raw buffer to R2 (private bucket). Returns the R2 object key.
+   * Used for server-generated files (e.g. the accountant register snapshot).
+   */
+  async uploadBuffer(
+    companyId: string,
+    folder: string,
+    buffer: Buffer,
+    ext: string,
+    contentType: string,
+  ): Promise<{ key: string }> {
+    if (!this.bucket) {
+      throw new BadRequestException(
+        'Cloudflare R2 не е конфигуриран. Моля, добавете R2_BUCKET в .env',
+      );
+    }
+    const key = `${folder}/${companyId}/${randomUUID()}${ext}`;
+    await this.s3.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType,
+      }),
+    );
+    this.logger.log(`Uploaded buffer: ${key} for company ${companyId}`);
+    return { key };
+  }
+
+  /**
    * Get file stream from R2 for proxying through the backend.
    */
   async getFile(

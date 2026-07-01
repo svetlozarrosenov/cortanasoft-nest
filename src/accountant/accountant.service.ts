@@ -2,13 +2,16 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as ExcelJS from 'exceljs';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService, MailAttachment } from '../mail/mail.service';
+import { UploadsService } from '../uploads/uploads.service';
 import {
   QueryPeriodDto,
+  QueryArchivesDto,
   CreateBankStatementDto,
   UpdateAccountantSettingsDto,
   SendToAccountantDto,
@@ -16,9 +19,12 @@ import {
 
 @Injectable()
 export class AccountantService {
+  private readonly logger = new Logger(AccountantService.name);
+
   constructor(
     private prisma: PrismaService,
     private mail: MailService,
+    private uploads: UploadsService,
   ) {}
 
   // Half-open period [start, end) for the given year/month.
@@ -574,6 +580,15 @@ export class AccountantService {
       attachments,
     });
 
+    // Архивиране (best-effort) — reuse-ваме вече построения опис.
+    await this.recordArchive(
+      companyId,
+      dto.year,
+      dto.month,
+      settings.accountantEmail,
+      buffer,
+    );
+
     return { success: true, sentTo: settings.accountantEmail, attachments: attachments.length };
   }
 
@@ -640,6 +655,121 @@ export class AccountantService {
       ],
     });
 
+    // Архивиране (best-effort) — описът се построява отделно (клиентът праща ZIP).
+    await this.recordArchive(companyId, year, month, settings.accountantEmail);
+
     return { success: true, sentTo: settings.accountantEmail, attachments: 1 };
+  }
+
+  // ===== Архив на изпратените пакети =====
+
+  /** Брой документи по вид за периода (за архивния запис и прегледа). */
+  private async countsForPeriod(companyId: string, year: number, month: number) {
+    const { start, end } = this.periodRange(year, month);
+    const [income, receipts, expenses, statement] = await Promise.all([
+      this.prisma.invoice.count({
+        where: {
+          companyId,
+          invoiceDate: { gte: start, lt: end },
+          status: { notIn: ['DRAFT', 'CANCELLED'] },
+        },
+      }),
+      this.prisma.goodsReceipt.count({
+        where: {
+          companyId,
+          status: { not: 'CANCELLED' },
+          invoiceNumber: { not: null },
+          OR: [
+            { invoiceDate: { gte: start, lt: end } },
+            { invoiceDate: null, receiptDate: { gte: start, lt: end } },
+          ],
+        },
+      }),
+      this.prisma.expense.count({
+        where: {
+          companyId,
+          status: { not: 'CANCELLED' },
+          goodsReceiptId: null,
+          invoiceNumber: { not: null },
+          expenseDate: { gte: start, lt: end },
+        },
+      }),
+      this.prisma.bankStatement.count({ where: { companyId, year, month } }),
+    ]);
+    return { income, expense: receipts + expenses, statement };
+  }
+
+  /**
+   * Записва архив на изпратения пакет. Best-effort: имейлът вече е тръгнал, така
+   * че при грешка (напр. R2 недостъпен) само логваме, без да чупим заявката.
+   * Пази само Excel описа (snapshot) + бройки — виж модела за причината.
+   */
+  private async recordArchive(
+    companyId: string,
+    year: number,
+    month: number,
+    sentTo: string,
+    prebuiltRegister?: Buffer,
+  ) {
+    try {
+      const buffer =
+        prebuiltRegister ||
+        (await this.buildRegisterBuffer(companyId, year, month));
+      const { key } = await this.uploads.uploadBuffer(
+        companyId,
+        'accountant',
+        buffer,
+        '.xlsx',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      const counts = await this.countsForPeriod(companyId, year, month);
+      await this.prisma.accountantArchive.create({
+        data: {
+          companyId,
+          year,
+          month,
+          sentTo,
+          registerKey: key,
+          incomeCount: counts.income,
+          expenseCount: counts.expense,
+          statementCount: counts.statement,
+        },
+      });
+    } catch (err) {
+      this.logger.error('Failed to record accountant archive', err as Error);
+    }
+  }
+
+  /** Списък с изпратени пакети (по подразбиране всички, сортирани по дата). */
+  async listArchives(companyId: string, query: QueryArchivesDto) {
+    const page = Number(query.page) || 1;
+    const limit = Number(query.limit) || 50;
+    const where: Prisma.AccountantArchiveWhereInput = {
+      companyId,
+      ...(query.year ? { year: Number(query.year) } : {}),
+    };
+    const [data, total] = await Promise.all([
+      this.prisma.accountantArchive.findMany({
+        where,
+        orderBy: { sentAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.accountantArchive.count({ where }),
+    ]);
+    return {
+      data,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  async deleteArchive(companyId: string, id: string) {
+    const archive = await this.prisma.accountantArchive.findFirst({
+      where: { id, companyId },
+    });
+    if (!archive) throw new NotFoundException('Архивът не е намерен');
+    await this.uploads.deleteFile(archive.registerKey);
+    await this.prisma.accountantArchive.delete({ where: { id } });
+    return { success: true };
   }
 }

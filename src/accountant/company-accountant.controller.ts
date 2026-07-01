@@ -11,12 +11,15 @@ import {
   UseInterceptors,
   UploadedFile,
   Res,
+  BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { AccountantService } from './accountant.service';
+import { UploadsService } from '../uploads/uploads.service';
 import {
   QueryPeriodDto,
+  QueryArchivesDto,
   CreateBankStatementDto,
   UpdateAccountantSettingsDto,
   SendToAccountantDto,
@@ -29,12 +32,45 @@ import {
   RequireCreate,
   RequireDelete,
   RequireEdit,
+  RequireAnyPermission,
 } from '../common/guards/permissions.guard';
 
 @Controller('companies/:companyId/accountant')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)
 export class CompanyAccountantController {
-  constructor(private readonly accountantService: AccountantService) {}
+  constructor(
+    private readonly accountantService: AccountantService,
+    private readonly uploads: UploadsService,
+  ) {}
+
+  /**
+   * Стриймва качен счетоводен файл (банково извлечение / разходна фактура) от R2
+   * по неговия ключ. Файловете се пазят като частни R2 ключове (folder/companyId/uuid),
+   * затова не са директно достъпни — минават през този проксирован, company-scoped
+   * endpoint. Ключът се валидира да е на текущата фирма (без cross-tenant достъп).
+   */
+  @Get('file')
+  @RequireAnyPermission(
+    { module: 'accountant', page: 'income', action: 'view' },
+    { module: 'accountant', page: 'expenses', action: 'view' },
+    { module: 'accountant', page: 'bankStatements', action: 'view' },
+  )
+  async file(
+    @Param('companyId') companyId: string,
+    @Query('key') key: string,
+    @Res() res: Response,
+  ) {
+    if (!key || key.includes('..') || key.split('/')[1] !== companyId) {
+      throw new BadRequestException('Невалиден ключ на файл');
+    }
+    const { stream, contentType, contentLength } =
+      await this.uploads.getFile(key);
+    res.set({
+      'Content-Type': contentType,
+      ...(contentLength ? { 'Content-Length': String(contentLength) } : {}),
+    });
+    stream.pipe(res);
+  }
 
   @Get('income')
   @RequireView('accountant', 'income')
@@ -123,6 +159,26 @@ export class CompanyAccountantController {
     @Body() dto: SendToAccountantDto,
   ) {
     return this.accountantService.sendToAccountant(companyId, dto);
+  }
+
+  // ===== Архив на изпратените пакети =====
+
+  @Get('archives')
+  @RequireView('accountant', 'income')
+  listArchives(
+    @Param('companyId') companyId: string,
+    @Query() query: QueryArchivesDto,
+  ) {
+    return this.accountantService.listArchives(companyId, query);
+  }
+
+  @Delete('archives/:id')
+  @RequireDelete('accountant', 'income')
+  deleteArchive(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.accountantService.deleteArchive(companyId, id);
   }
 
   // Email a pre-built package ZIP (built on the frontend; may include income PDFs).
