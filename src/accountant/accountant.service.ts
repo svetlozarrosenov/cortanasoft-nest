@@ -747,6 +747,7 @@ export class AccountantService {
     const where: Prisma.AccountantArchiveWhereInput = {
       companyId,
       ...(query.year ? { year: Number(query.year) } : {}),
+      ...(query.month ? { month: Number(query.month) } : {}),
     };
     const [data, total] = await Promise.all([
       this.prisma.accountantArchive.findMany({

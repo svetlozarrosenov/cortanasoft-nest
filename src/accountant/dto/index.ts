@@ -90,6 +90,13 @@ export class QueryArchivesDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(12)
+  month?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   page?: number;
 
   @IsOptional()

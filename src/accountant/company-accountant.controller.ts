@@ -173,7 +173,7 @@ export class CompanyAccountantController {
   }
 
   @Delete('archives/:id')
-  @RequireDelete('accountant', 'income')
+  @RequireEdit('accountant', 'income')
   deleteArchive(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
