@@ -600,13 +600,18 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
     ],
   },
   // Електронни трудови досиета (наредба ПМС 71/2018) — отделен модул.
-  // Страницата „Моето досие" е self-service и нарочно НЯМА permission —
-  // всеки служител има непрекъснат достъп до своите документи (чл. 14).
+  // Правата се дават през редактора на роли, вкл. „Моето досие" (myDossier,
+  // само view) — включва се на ролите на служителите, когато фирмата ползва модула.
   {
     key: 'employeeRecords',
     labelKey: 'modules.employeeRecords.title',
     icon: 'FolderLock',
     pages: [
+      {
+        key: 'myDossier',
+        labelKey: 'modules.employeeRecords.myDossier',
+        actions: ['view'],
+      },
       {
         key: 'dossiers',
         labelKey: 'modules.employeeRecords.dossiers',

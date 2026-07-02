@@ -31,8 +31,9 @@ export class EmployeeRecordsCronService {
         status: 'ACTIVE',
         expiryNotifiedAt: null,
         endDate: { not: null, gte: now, lte: horizon },
+        // Достъпът до модула е през ролевите права (не company флагове);
+        // гейтваме само по мастер ключа за push известията.
         company: {
-          employeeRecordsEnabled: true,
           pushNotificationsEnabled: true,
         },
       },

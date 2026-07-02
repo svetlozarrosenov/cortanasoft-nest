@@ -13,6 +13,10 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
+import {
+  PermissionsGuard,
+  RequireView,
+} from '../common/guards/permissions.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { MyDossierService } from './my-dossier.service';
 import { EmployeeConsentsService } from './employee-consents.service';
@@ -30,12 +34,12 @@ import {
 
 /**
  * „Моето досие" — self-service достъп на служителя до собственото му трудово
- * досие (чл. 14 от наредбата). Нарочно БЕЗ PermissionsGuard: всеки служител
- * на компанията има право на достъп до своите документи; собствеността се
- * проверява в service слоя (userId от JWT), тенантът — от CompanyAccessGuard.
+ * досие (чл. 14 от наредбата). Достъпът се дава през ролята (страница
+ * employeeRecords.myDossier, view) — като всеки друг модул. Собствеността
+ * се проверява в service слоя (userId от JWT), тенантът — от CompanyAccessGuard.
  */
 @Controller('companies/:companyId/my-dossier')
-@UseGuards(JwtAuthGuard, CompanyAccessGuard)
+@UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)
 export class MyDossierController {
   constructor(
     private readonly dossier: MyDossierService,
@@ -48,11 +52,13 @@ export class MyDossierController {
   ) {}
 
   @Get()
+  @RequireView('employeeRecords', 'myDossier')
   overview(@Param('companyId') companyId: string, @CurrentUser() user: any) {
     return this.dossier.overview(companyId, user.id);
   }
 
   @Get('files/:id/file')
+  @RequireView('employeeRecords', 'myDossier')
   async file(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -74,6 +80,7 @@ export class MyDossierController {
   // ===== Съгласие (чл. 4) =====
 
   @Get('consent')
+  @RequireView('employeeRecords', 'myDossier')
   async consent(@Param('companyId') companyId: string, @CurrentUser() user: any) {
     const [current, history] = await Promise.all([
       this.consents.current(companyId, user.id),
@@ -83,6 +90,7 @@ export class MyDossierController {
   }
 
   @Post('consent')
+  @RequireView('employeeRecords', 'myDossier')
   recordConsent(
     @Param('companyId') companyId: string,
     @CurrentUser() user: any,
@@ -98,6 +106,7 @@ export class MyDossierController {
   // ===== Потвърждаване на получаване (връчване) =====
 
   @Post('confirm/:entityType/:id')
+  @RequireView('employeeRecords', 'myDossier')
   confirmDelivery(
     @Param('companyId') companyId: string,
     @Param('entityType') entityType: string,
@@ -116,11 +125,13 @@ export class MyDossierController {
   // ===== Входящи документи (чл. 9) =====
 
   @Get('submissions')
+  @RequireView('employeeRecords', 'myDossier')
   mySubmissions(@Param('companyId') companyId: string, @CurrentUser() user: any) {
     return this.submissions.findMine(companyId, user.id);
   }
 
   @Post('submissions')
+  @RequireView('employeeRecords', 'myDossier')
   createSubmission(
     @Param('companyId') companyId: string,
     @CurrentUser() user: any,
@@ -130,6 +141,7 @@ export class MyDossierController {
   }
 
   @Post('submissions/:id/files')
+  @RequireView('employeeRecords', 'myDossier')
   @UseInterceptors(FileInterceptor('file'))
   async uploadSubmissionFile(
     @Param('companyId') companyId: string,
@@ -151,11 +163,13 @@ export class MyDossierController {
   // ===== Заявки за преписи (чл. 5) =====
 
   @Get('copy-requests')
+  @RequireView('employeeRecords', 'myDossier')
   myCopyRequests(@Param('companyId') companyId: string, @CurrentUser() user: any) {
     return this.copyRequests.findMine(companyId, user.id);
   }
 
   @Post('copy-requests')
+  @RequireView('employeeRecords', 'myDossier')
   createCopyRequest(
     @Param('companyId') companyId: string,
     @CurrentUser() user: any,
@@ -167,6 +181,7 @@ export class MyDossierController {
   // ===== Подписване (чл. 7) =====
 
   @Get('signature-requests')
+  @RequireView('employeeRecords', 'myDossier')
   mySignatureRequests(
     @Param('companyId') companyId: string,
     @CurrentUser() user: any,
@@ -175,6 +190,7 @@ export class MyDossierController {
   }
 
   @Post('signature-requests/:id/sign')
+  @RequireView('employeeRecords', 'myDossier')
   sign(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -187,6 +203,7 @@ export class MyDossierController {
   }
 
   @Post('signature-requests/:id/decline')
+  @RequireView('employeeRecords', 'myDossier')
   decline(
     @Param('companyId') companyId: string,
     @Param('id') id: string,

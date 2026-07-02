@@ -14,6 +14,14 @@ import { ServiceProtocolsService } from './service-protocols.service';
 import { ServiceInvoicingService } from './service-invoicing.service';
 import { WarrantiesService } from '../warranties/warranties.service';
 import {
+  CreateAcceptanceProtocolDto,
+  UpdateAcceptanceProtocolDto,
+} from '../acceptance-protocols/dto';
+import {
+  CreateAscertainmentProtocolDto,
+  UpdateAscertainmentProtocolDto,
+} from '../ascertainment-protocols/dto';
+import {
   CreateServiceOrderDto,
   UpdateServiceOrderDto,
   QueryServiceOrdersDto,
@@ -279,6 +287,103 @@ export class CompanyServiceOrdersController {
     @Body() dto: IssueInvoiceDto,
   ) {
     return this.invoicing.issueInvoice(companyId, id, user?.id, dto);
+  }
+
+  // ==== Протоколи с пълен контрол (service.orders права, не erp.protocols) ====
+
+  @Post(':id/protocols/acceptance')
+  @RequireEdit('service', 'orders')
+  createAcceptanceProtocol(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+    @Body() dto: CreateAcceptanceProtocolDto,
+  ) {
+    return this.protocols.createCustom(companyId, id, user?.id, 'acceptance', dto);
+  }
+
+  @Get(':id/protocols/acceptance/:protocolId')
+  @RequireView('service', 'orders')
+  getAcceptanceProtocol(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Param('protocolId') protocolId: string,
+  ) {
+    return this.protocols.getOne(companyId, id, 'acceptance', protocolId);
+  }
+
+  @Patch(':id/protocols/acceptance/:protocolId')
+  @RequireEdit('service', 'orders')
+  updateAcceptanceProtocol(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Param('protocolId') protocolId: string,
+    @Body() dto: UpdateAcceptanceProtocolDto,
+  ) {
+    return this.protocols.updateCustom(companyId, id, 'acceptance', protocolId, dto);
+  }
+
+  @Post(':id/protocols/acceptance/:protocolId/cancel')
+  @RequireEdit('service', 'orders')
+  cancelAcceptanceProtocol(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Param('protocolId') protocolId: string,
+  ) {
+    return this.protocols.cancelCustom(companyId, id, 'acceptance', protocolId);
+  }
+
+  @Post(':id/protocols/ascertainment-full')
+  @RequireEdit('service', 'orders')
+  createAscertainmentProtocolFull(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+    @Body() dto: CreateAscertainmentProtocolDto,
+  ) {
+    return this.protocols.createCustom(companyId, id, user?.id, 'ascertainment', dto);
+  }
+
+  @Get(':id/protocols/ascertainment/:protocolId')
+  @RequireView('service', 'orders')
+  getAscertainmentProtocol(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Param('protocolId') protocolId: string,
+  ) {
+    return this.protocols.getOne(companyId, id, 'ascertainment', protocolId);
+  }
+
+  @Patch(':id/protocols/ascertainment/:protocolId')
+  @RequireEdit('service', 'orders')
+  updateAscertainmentProtocol(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Param('protocolId') protocolId: string,
+    @Body() dto: UpdateAscertainmentProtocolDto,
+  ) {
+    return this.protocols.updateCustom(companyId, id, 'ascertainment', protocolId, dto);
+  }
+
+  @Post(':id/protocols/ascertainment/:protocolId/cancel')
+  @RequireEdit('service', 'orders')
+  cancelAscertainmentProtocol(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Param('protocolId') protocolId: string,
+  ) {
+    return this.protocols.cancelCustom(companyId, id, 'ascertainment', protocolId);
+  }
+
+  // Гаранционните шаблони за модала „Издай гаранция" — през service права,
+  // за да не изискваме warranties.templates view от сервизния екип.
+  @Get(':id/warranty-templates')
+  @RequireView('service', 'orders')
+  warrantyTemplates(@Param('companyId') companyId: string) {
+    return this.warranties.findAllTemplates(companyId, {
+      isActive: true,
+      limit: 100,
+    } as any);
   }
 
   // Изпраща tracking линка на клиента по имейл (генерира токен при нужда)

@@ -26,7 +26,8 @@ export class ServiceSlaCronService {
         promisedAt: { lt: new Date() },
         slaNotifiedAt: null,
         status: { notIn: ['READY', 'DELIVERED', 'CANCELED'] },
-        company: { serviceModuleEnabled: true, pushNotificationsEnabled: true },
+        // Достъпът до модула е през ролевите права (не company флагове)
+        company: { pushNotificationsEnabled: true },
       },
       select: {
         id: true,
