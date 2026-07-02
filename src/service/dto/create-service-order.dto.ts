@@ -4,6 +4,8 @@ import {
   IsEnum,
   IsBoolean,
   IsDateString,
+  IsNumber,
+  Min,
 } from 'class-validator';
 import {
   ServiceOrderType,
@@ -73,4 +75,13 @@ export class CreateServiceOrderDto {
   @IsBoolean()
   @IsOptional()
   generatePublicToken?: boolean;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  estimatedCost?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  notifyCustomer?: boolean;
 }

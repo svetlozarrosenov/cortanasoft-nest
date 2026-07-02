@@ -82,4 +82,13 @@ export class UpdateServiceOrderDto {
   @IsString()
   @IsOptional()
   approvalChannel?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  estimatedCost?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  notifyCustomer?: boolean;
 }

@@ -13,9 +13,16 @@ import { CompanyServiceOrdersController } from './company-service-orders.control
 import { CompanyServiceAssetsController } from './company-service-assets.controller';
 import { CompanyServiceContractsController } from './company-service-contracts.controller';
 import { ServicePublicController } from './service-public.controller';
+import { WarrantiesModule } from '../warranties/warranties.module';
+import { ServiceSlaCronService } from './service-sla.cron';
 
 @Module({
-  imports: [PrismaModule, AcceptanceProtocolsModule, AscertainmentProtocolsModule],
+  imports: [
+    PrismaModule,
+    AcceptanceProtocolsModule,
+    AscertainmentProtocolsModule,
+    WarrantiesModule,
+  ],
   controllers: [
     CompanyServiceOrdersController,
     CompanyServiceAssetsController,
@@ -30,6 +37,7 @@ import { ServicePublicController } from './service-public.controller';
     ServiceProtocolsService,
     ServiceInvoicingService,
     ServiceStockService,
+    ServiceSlaCronService,
   ],
   exports: [ServiceOrdersService, ServiceAssetsService, ServiceContractsService],
 })

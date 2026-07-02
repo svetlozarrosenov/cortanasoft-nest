@@ -376,6 +376,71 @@ export class WarrantiesService {
     });
   }
 
+  /**
+   * Ремонтна гаранция от сервизна заявка (модул Сервиз). Ползва същите
+   * шаблони и номерация като продажбените гаранции; orderId остава празен,
+   * а връзката е през serviceOrderId. Продукт/сериен номер идват от актива
+   * (може да липсват — чуждо устройство).
+   */
+  async issueForServiceOrder(
+    companyId: string,
+    dto: { serviceOrderId: string; warrantyTemplateId: string; notes?: string },
+  ) {
+    const order = await this.prisma.serviceOrder.findFirst({
+      where: { id: dto.serviceOrderId, companyId },
+      include: { asset: true },
+    });
+    if (!order) {
+      throw new NotFoundException('Сервизната заявка не е намерена');
+    }
+
+    const template = await this.prisma.warrantyTemplate.findFirst({
+      where: { id: dto.warrantyTemplateId, companyId, isActive: true },
+    });
+    if (!template) {
+      throw new NotFoundException('Гаранционният шаблон не е намерен');
+    }
+
+    const startDate = new Date();
+    const endDate = this.calculateEndDate(
+      startDate,
+      template.duration,
+      template.durationUnit,
+    );
+    const warrantyNumber = await this.generateWarrantyNumber(
+      companyId,
+      this.prisma,
+    );
+
+    return this.prisma.issuedWarranty.create({
+      data: {
+        warrantyNumber,
+        startDate,
+        endDate,
+        status: 'ACTIVE',
+        serialNumber: order.asset?.serialNumber || null,
+        quantity: 1,
+        notes: dto.notes ?? null,
+        companyId,
+        warrantyTemplateId: template.id,
+        serviceOrderId: order.id,
+        productId: order.asset?.productId ?? null,
+        customerId: order.customerId,
+      },
+      include: { warrantyTemplate: true },
+    });
+  }
+
+  /** Гаранции, издадени по конкретна сервизна заявка. */
+  async listForServiceOrder(companyId: string, serviceOrderId: string) {
+    const data = await this.prisma.issuedWarranty.findMany({
+      where: { companyId, serviceOrderId },
+      include: { warrantyTemplate: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    return { data, meta: { total: data.length } };
+  }
+
   private calculateEndDate(
     startDate: Date,
     duration: number,

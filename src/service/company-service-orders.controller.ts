@@ -12,6 +12,7 @@ import {
 import { ServiceOrdersService } from './service-orders.service';
 import { ServiceProtocolsService } from './service-protocols.service';
 import { ServiceInvoicingService } from './service-invoicing.service';
+import { WarrantiesService } from '../warranties/warranties.service';
 import {
   CreateServiceOrderDto,
   UpdateServiceOrderDto,
@@ -50,6 +51,15 @@ class IssueInvoiceDto {
   @IsOptional()
   notes?: string;
 }
+
+class IssueServiceWarrantyDto {
+  @IsString()
+  warrantyTemplateId: string;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
+}
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import {
@@ -68,6 +78,7 @@ export class CompanyServiceOrdersController {
     private readonly orders: ServiceOrdersService,
     private readonly protocols: ServiceProtocolsService,
     private readonly invoicing: ServiceInvoicingService,
+    private readonly warranties: WarrantiesService,
   ) {}
 
   @Post()
@@ -268,6 +279,40 @@ export class CompanyServiceOrdersController {
     @Body() dto: IssueInvoiceDto,
   ) {
     return this.invoicing.issueInvoice(companyId, id, user?.id, dto);
+  }
+
+  // Изпраща tracking линка на клиента по имейл (генерира токен при нужда)
+  @Post(':id/send-tracking-link')
+  @RequireEdit('service', 'orders')
+  sendTrackingLink(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.orders.sendTrackingLink(companyId, id);
+  }
+
+  // Ремонтна гаранция през модул Гаранции (същите шаблони и номерация)
+  @Post(':id/issue-warranty')
+  @RequireEdit('service', 'orders')
+  issueWarranty(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: IssueServiceWarrantyDto,
+  ) {
+    return this.warranties.issueForServiceOrder(companyId, {
+      serviceOrderId: id,
+      warrantyTemplateId: dto.warrantyTemplateId,
+      notes: dto.notes,
+    });
+  }
+
+  @Get(':id/warranties')
+  @RequireView('service', 'orders')
+  listWarranties(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.warranties.listForServiceOrder(companyId, id);
   }
 
   @Delete(':id')

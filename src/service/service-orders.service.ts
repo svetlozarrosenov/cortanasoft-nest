@@ -1,9 +1,11 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
+import { MailService } from '../mail/mail.service';
 import {
   Prisma,
   ServiceOrderStatus,
@@ -79,10 +81,13 @@ const ALLOWED_TRANSITIONS: Record<ServiceOrderStatus, ServiceOrderStatus[]> = {
 
 @Injectable()
 export class ServiceOrdersService {
+  private readonly logger = new Logger(ServiceOrdersService.name);
+
   constructor(
     private prisma: PrismaService,
     private numbering: ServiceNumberingService,
     private stock: ServiceStockService,
+    private mail: MailService,
   ) {}
 
   // ==================== CRUD ====================
@@ -135,6 +140,8 @@ export class ServiceOrdersService {
           cosmeticState: dto.cosmeticState,
           declaredFault: dto.declaredFault,
           internalNotes: dto.internalNotes,
+          estimatedCost: dto.estimatedCost,
+          notifyCustomer: dto.notifyCustomer ?? true,
           publicToken,
           customerId: dto.customerId,
           assetId: dto.assetId,
@@ -336,7 +343,72 @@ export class ServiceOrdersService {
         where: { id: updated.id },
         include: ORDER_INCLUDE,
       });
+    }).then(async (result) => {
+      // Клиентска комуникация (best-effort, извън транзакцията):
+      // при READY клиентът получава „готово за получаване" с tracking линка.
+      if (dto.status === 'READY' && result.notifyCustomer) {
+        await this.emailCustomerStatus(result as any).catch((err) =>
+          this.logger.error('Failed to email customer on READY', err),
+        );
+      }
+      return result;
     });
+  }
+
+  /** Имейл до клиента при готов ремонт (ако има имейл + notifyCustomer). */
+  private async emailCustomerStatus(order: {
+    id: string;
+    orderNumber: string;
+    publicToken: string | null;
+    customer: { email: string | null; firstName: string | null } | null;
+    asset: { name: string } | null;
+  }) {
+    const email = order.customer?.email;
+    if (!email) return;
+    const link = order.publicToken
+      ? `${process.env.FRONTEND_URL || 'https://cortanasoft.com'}/service-status/${order.publicToken}`
+      : null;
+    await this.mail.send({
+      to: email,
+      subject: `Ремонтът по заявка ${order.orderNumber} е готов`,
+      html:
+        `<p>Здравейте${order.customer?.firstName ? `, ${order.customer.firstName}` : ''},</p>` +
+        `<p>${order.asset?.name ? `Вашето устройство „${order.asset.name}"` : 'Вашата сервизна заявка'} по заявка <b>${order.orderNumber}</b> е готово за получаване.</p>` +
+        (link ? `<p>Статус на заявката: <a href="${link}">${link}</a></p>` : '') +
+        `<p>(изпратено автоматично от CortanaSoft)</p>`,
+    });
+  }
+
+  /**
+   * Изпраща tracking линка на клиента по имейл. Генерира публичен токен,
+   * ако заявката е създадена без такъв.
+   */
+  async sendTrackingLink(companyId: string, id: string) {
+    const order = await this.findOne(companyId, id);
+    const email = (order as any).customer?.email;
+    if (!email) {
+      throw new BadRequestException('Клиентът няма въведен имейл');
+    }
+
+    let token = order.publicToken;
+    if (!token) {
+      token = randomBytes(24).toString('hex');
+      await this.prisma.serviceOrder.update({
+        where: { id },
+        data: { publicToken: token },
+      });
+    }
+
+    const link = `${process.env.FRONTEND_URL || 'https://cortanasoft.com'}/service-status/${token}`;
+    await this.mail.send({
+      to: email,
+      subject: `Проследяване на сервизна заявка ${order.orderNumber}`,
+      html:
+        `<p>Здравейте,</p><p>Можете да следите статуса на вашата сервизна заявка <b>${order.orderNumber}</b> на адрес:</p>` +
+        `<p><a href="${link}">${link}</a></p><p>(изпратено автоматично от CortanaSoft)</p>`,
+    });
+
+    return { success: true, publicToken: token, sentTo: email };
   }
 
   private assertEditable(order: { status: ServiceOrderStatus }) {
@@ -587,6 +659,8 @@ export class ServiceOrdersService {
         promisedAt: true,
         completedAt: true,
         deliveredAt: true,
+        estimatedCost: true,
+        isApprovedByCustomer: true,
         asset: { select: { name: true, brand: true, model: true } },
         statusHistory: {
           orderBy: { createdAt: 'desc' },
@@ -601,7 +675,56 @@ export class ServiceOrdersService {
     if (!order) {
       throw new NotFoundException('Заявката не е намерена');
     }
-    return order;
+    // Клиентът може да одобри само докато чакаме оферта/одобрение
+    const canApprove =
+      !order.isApprovedByCustomer &&
+      (order.status === 'AWAITING_QUOTE' || order.status === 'AWAITING_APPROVAL');
+    return { ...order, canApprove };
+  }
+
+  /**
+   * Одобрение на ремонта от клиента през публичната tracking страница.
+   * Токенът е тайната (24 байта) — не изискваме друга автентикация.
+   * При одобрение заявката минава в IN_REPAIR със запис в историята.
+   */
+  async approveByPublicToken(token: string) {
+    const order = await this.prisma.serviceOrder.findUnique({
+      where: { publicToken: token },
+      select: { id: true, status: true, isApprovedByCustomer: true },
+    });
+    if (!order) {
+      throw new NotFoundException('Заявката не е намерена');
+    }
+    if (order.isApprovedByCustomer) {
+      throw new BadRequestException('Ремонтът вече е одобрен');
+    }
+    if (order.status !== 'AWAITING_QUOTE' && order.status !== 'AWAITING_APPROVAL') {
+      throw new BadRequestException(
+        'Заявката не очаква одобрение в момента',
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.serviceOrder.update({
+        where: { id: order.id },
+        data: {
+          isApprovedByCustomer: true,
+          approvalChannel: 'portal',
+          approvedAt: new Date(),
+          status: 'IN_REPAIR',
+        },
+      });
+      await tx.serviceOrderStatusHistory.create({
+        data: {
+          serviceOrderId: order.id,
+          fromStatus: order.status,
+          toStatus: 'IN_REPAIR',
+          note: 'Одобрено от клиента през публичната страница',
+        },
+      });
+    });
+
+    return { success: true };
   }
 
   // ==================== Helpers ====================
