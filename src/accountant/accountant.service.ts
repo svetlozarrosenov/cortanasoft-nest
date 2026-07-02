@@ -98,6 +98,8 @@ export class AccountantService {
       companyId,
       invoiceDate: { gte: start, lt: end },
       status: { notIn: ['DRAFT', 'CANCELLED'] },
+      // Легаси редове отпреди отделянето на проформите — не са данъчен документ.
+      type: { not: 'PROFORMA' },
     };
 
     const [data, total, agg] = await Promise.all([
@@ -156,7 +158,7 @@ export class AccountantService {
     const { start, end } = this.periodRange(query.year, query.month);
     const { page, limit, skip } = this.paging(query);
 
-    const [receipts, standaloneExpenses] = await Promise.all([
+    const [receipts, standaloneExpenses, baseCurrency] = await Promise.all([
       this.prisma.goodsReceipt.findMany({
         where: {
           companyId,
@@ -200,6 +202,7 @@ export class AccountantService {
           currency: { select: { code: true, symbol: true } },
         },
       }),
+      this.baseCurrencyCode(companyId),
     ]);
 
     type Row = {
@@ -232,7 +235,8 @@ export class AccountantService {
           vat,
           total: Number(r.totalAmount),
           fileUrl: r.attachmentUrl || null,
-          currencyCode: r.currency?.code || null,
+          // totalAmount на доставка е конвертиран (редове × курс) → базова валута.
+          currencyCode: baseCurrency,
         };
       }),
       ...standaloneExpenses.map((e) => ({
@@ -247,7 +251,7 @@ export class AccountantService {
         vat: Number(e.vatAmount),
         total: Number(e.totalAmount),
         fileUrl: e.attachmentUrl || null,
-        currencyCode: e.currency?.code || null,
+        currencyCode: e.currency?.code || baseCurrency,
       })),
     ].sort((a, b) => a.date.getTime() - b.date.getTime());
 
@@ -324,6 +328,10 @@ export class AccountantService {
     return { success: true };
   }
 
+  // SES v1 SendRawEmail отказва сурови съобщения над 10MB, а base64 надува
+  // прикачените файлове с ~37% → безопасният таван за прикачено съдържание е ~7MB.
+  static readonly MAX_EMAIL_ATTACHMENTS = 7 * 1024 * 1024;
+
   // Default email template (used when the company hasn't customised it).
   // Placeholders: {{company}}, {{month}}, {{year}}.
   static readonly DEFAULT_SUBJECT = 'Счетоводни документи — {{month}}/{{year}}';
@@ -376,6 +384,15 @@ export class AccountantService {
 
   // ===== Register (Excel) + send =====
 
+  /** Базовата валута на фирмата (код) — за конвертираните суми на доставките. */
+  private async baseCurrencyCode(companyId: string): Promise<string> {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { currency: { select: { code: true } } },
+    });
+    return company?.currency?.code || 'BGN';
+  }
+
   /** All income invoices for the month (no pagination) — for the register. */
   private async allIncomeRows(companyId: string, start: Date, end: Date) {
     return this.prisma.invoice.findMany({
@@ -383,6 +400,7 @@ export class AccountantService {
         companyId,
         invoiceDate: { gte: start, lt: end },
         status: { notIn: ['DRAFT', 'CANCELLED'] },
+        type: { not: 'PROFORMA' },
       },
       orderBy: { invoiceDate: 'asc' },
       select: {
@@ -394,6 +412,7 @@ export class AccountantService {
         subtotal: true,
         vatAmount: true,
         total: true,
+        currency: { select: { code: true } },
       },
     });
   }
@@ -436,6 +455,7 @@ export class AccountantService {
           vatAmount: true,
           totalAmount: true,
           supplier: { select: { name: true, eik: true, vatNumber: true } },
+          currency: { select: { code: true } },
         },
       }),
     ]);
@@ -453,6 +473,8 @@ export class AccountantService {
           base,
           vat,
           total: Number(r.totalAmount),
+          // Сумите на доставка са конвертирани → базова валута (null = базова).
+          currencyCode: null as string | null,
         };
       }),
       ...expenses.map((e) => ({
@@ -465,6 +487,7 @@ export class AccountantService {
         base: Number(e.amount),
         vat: Number(e.vatAmount),
         total: Number(e.totalAmount),
+        currencyCode: e.currency?.code || null,
       })),
     ].sort((a, b) => a.date.getTime() - b.date.getTime());
 
@@ -478,9 +501,10 @@ export class AccountantService {
     month: number,
   ): Promise<Buffer> {
     const { start, end } = this.periodRange(year, month);
-    const [income, expenses] = await Promise.all([
+    const [income, expenses, baseCurrency] = await Promise.all([
       this.allIncomeRows(companyId, start, end),
       this.allExpenseRows(companyId, start, end),
+      this.baseCurrencyCode(companyId),
     ]);
 
     const wb = new ExcelJS.Workbook();
@@ -497,6 +521,7 @@ export class AccountantService {
       { header: 'Основа', key: 'base', width: 14 },
       { header: 'ДДС', key: 'vat', width: 14 },
       { header: 'Общо', key: 'total', width: 14 },
+      { header: 'Валута', key: 'currency', width: 10 },
     ];
     income.forEach((r) =>
       incomeSheet.addRow({
@@ -508,6 +533,7 @@ export class AccountantService {
         base: Number(r.subtotal),
         vat: Number(r.vatAmount),
         total: Number(r.total),
+        currency: r.currency?.code || baseCurrency,
       }),
     );
 
@@ -522,6 +548,7 @@ export class AccountantService {
       { header: 'Основа', key: 'base', width: 14 },
       { header: 'ДДС', key: 'vat', width: 14 },
       { header: 'Общо', key: 'total', width: 14 },
+      { header: 'Валута', key: 'currency', width: 10 },
     ];
     expenses.forEach((r) =>
       expenseSheet.addRow({
@@ -534,6 +561,7 @@ export class AccountantService {
         base: r.base,
         vat: r.vat,
         total: r.total,
+        currency: r.currencyCode || baseCurrency,
       }),
     );
 
@@ -627,14 +655,25 @@ export class AccountantService {
       },
     ];
 
-    // Bank statements for the month
+    // Bank statements for the month. Държим общия размер под SES тавана —
+    // извлечение, което би го надхвърлило, се пропуска (описът пак тръгва).
     const statements = await this.prisma.bankStatement.findMany({
       where: { companyId, year: dto.year, month: dto.month },
     });
+    let attachedBytes = buffer.length;
+    let skippedStatements = 0;
     for (const s of statements) {
       try {
         const file = await this.statementContent(s.fileUrl);
         if (!file) continue;
+        if (
+          attachedBytes + file.content.length >
+          AccountantService.MAX_EMAIL_ATTACHMENTS
+        ) {
+          skippedStatements++;
+          continue;
+        }
+        attachedBytes += file.content.length;
         attachments.push({
           filename:
             s.fileName ||
@@ -645,6 +684,11 @@ export class AccountantService {
       } catch {
         // Skip a statement that can't be fetched; the email still goes out.
       }
+    }
+    if (skippedStatements > 0) {
+      this.logger.warn(
+        `sendToAccountant(${companyId} ${dto.year}-${dto.month}): skipped ${skippedStatements} statement(s) over the email size cap`,
+      );
     }
 
     await this.mail.send({
@@ -679,10 +723,9 @@ export class AccountantService {
     if (!file?.buffer) {
       throw new BadRequestException('Липсва файл на пакета.');
     }
-    const MAX = 20 * 1024 * 1024; // ~20MB email-attachment guard
-    if (file.buffer.length > MAX) {
+    if (file.buffer.length > AccountantService.MAX_EMAIL_ATTACHMENTS) {
       throw new BadRequestException(
-        'Пакетът е твърде голям за имейл (над 20MB). Свалете го и го изпратете ръчно.',
+        'Пакетът е твърде голям за имейл. Свалете го и го изпратете ръчно.',
       );
     }
 
@@ -746,6 +789,7 @@ export class AccountantService {
           companyId,
           invoiceDate: { gte: start, lt: end },
           status: { notIn: ['DRAFT', 'CANCELLED'] },
+          type: { not: 'PROFORMA' },
         },
       }),
       this.prisma.goodsReceipt.count({
