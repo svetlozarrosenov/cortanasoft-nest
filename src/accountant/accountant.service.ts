@@ -40,6 +40,52 @@ export class AccountantService {
     return { page, limit, skip: (page - 1) * limit };
   }
 
+  // Select-ът, от който се смята основа/ДДС на доставка (редове + прикачени разходи).
+  private static readonly RECEIPT_BREAKDOWN_SELECT = {
+    items: {
+      select: {
+        quantity: true,
+        unitPrice: true,
+        exchangeRate: true,
+        vatRate: true,
+      },
+    },
+    expenses: { select: { amount: true, vatAmount: true } },
+  } as const;
+
+  /**
+   * Основа/ДДС на доставка, изчислени от артикулните редове (vatRate е по ред)
+   * + прикачените към нея разходи. Същата формула като recalcReceiptState в
+   * goods-receipts (totalAmount = base + vat), затова сборът съвпада със
+   * запазеното total до стотинка-две разлика от закръгляне.
+   */
+  private receiptBreakdown(receipt: {
+    items: {
+      quantity: Prisma.Decimal;
+      unitPrice: Prisma.Decimal;
+      exchangeRate: Prisma.Decimal;
+      vatRate: Prisma.Decimal;
+    }[];
+    expenses: { amount: Prisma.Decimal; vatAmount: Prisma.Decimal }[];
+  }): { base: number; vat: number } {
+    let base = 0;
+    let vat = 0;
+    for (const it of receipt.items) {
+      const lineBase =
+        Number(it.quantity) * Number(it.unitPrice) * Number(it.exchangeRate);
+      base += lineBase;
+      vat += lineBase * (Number(it.vatRate) / 100);
+    }
+    for (const e of receipt.expenses) {
+      base += Number(e.amount);
+      vat += Number(e.vatAmount);
+    }
+    return {
+      base: Math.round(base * 100) / 100,
+      vat: Math.round(vat * 100) / 100,
+    };
+  }
+
   /**
    * Income register — issued (non-draft, non-cancelled) invoices for the month.
    * Single-table query → DB-level pagination (scales to 10k+).
@@ -130,6 +176,7 @@ export class AccountantService {
           attachmentUrl: true,
           supplier: { select: { name: true, eik: true, vatNumber: true } },
           currency: { select: { code: true, symbol: true } },
+          ...AccountantService.RECEIPT_BREAKDOWN_SELECT,
         },
       }),
       this.prisma.expense.findMany({
@@ -171,21 +218,23 @@ export class AccountantService {
     };
 
     const rows: Row[] = [
-      ...receipts.map((r) => ({
-        id: r.id,
-        source: 'DELIVERY' as const,
-        date: r.invoiceDate || r.receiptDate,
-        documentNumber: r.invoiceNumber,
-        supplierName: r.supplier?.name || null,
-        supplierEik: r.supplier?.eik || null,
-        supplierVat: r.supplier?.vatNumber || null,
-        // Deliveries store only the gross total; base/vat are not aggregated.
-        base: 0,
-        vat: 0,
-        total: Number(r.totalAmount),
-        fileUrl: r.attachmentUrl || null,
-        currencyCode: r.currency?.code || null,
-      })),
+      ...receipts.map((r) => {
+        const { base, vat } = this.receiptBreakdown(r);
+        return {
+          id: r.id,
+          source: 'DELIVERY' as const,
+          date: r.invoiceDate || r.receiptDate,
+          documentNumber: r.invoiceNumber,
+          supplierName: r.supplier?.name || null,
+          supplierEik: r.supplier?.eik || null,
+          supplierVat: r.supplier?.vatNumber || null,
+          base,
+          vat,
+          total: Number(r.totalAmount),
+          fileUrl: r.attachmentUrl || null,
+          currencyCode: r.currency?.code || null,
+        };
+      }),
       ...standaloneExpenses.map((e) => ({
         id: e.id,
         source: 'EXPENSE' as const,
@@ -368,6 +417,7 @@ export class AccountantService {
           receiptDate: true,
           totalAmount: true,
           supplier: { select: { name: true, eik: true, vatNumber: true } },
+          ...AccountantService.RECEIPT_BREAKDOWN_SELECT,
         },
       }),
       this.prisma.expense.findMany({
@@ -391,17 +441,20 @@ export class AccountantService {
     ]);
 
     const rows = [
-      ...receipts.map((r) => ({
-        type: 'Доставка',
-        date: r.invoiceDate || r.receiptDate,
-        documentNumber: r.invoiceNumber || '',
-        supplierName: r.supplier?.name || '',
-        supplierEik: r.supplier?.eik || '',
-        supplierVat: r.supplier?.vatNumber || '',
-        base: 0,
-        vat: 0,
-        total: Number(r.totalAmount),
-      })),
+      ...receipts.map((r) => {
+        const { base, vat } = this.receiptBreakdown(r);
+        return {
+          type: 'Доставка',
+          date: r.invoiceDate || r.receiptDate,
+          documentNumber: r.invoiceNumber || '',
+          supplierName: r.supplier?.name || '',
+          supplierEik: r.supplier?.eik || '',
+          supplierVat: r.supplier?.vatNumber || '',
+          base,
+          vat,
+          total: Number(r.totalAmount),
+        };
+      }),
       ...expenses.map((e) => ({
         type: 'Разход',
         date: e.expenseDate,
@@ -504,6 +557,27 @@ export class AccountantService {
     return tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? '');
   }
 
+  /**
+   * Съдържание на банково извлечение за прикачване към имейл.
+   * `fileUrl` пази R2 ключ (uploadInvoice връща `{ url: key }`); стари записи
+   * може да носят пълен URL — тогава теглим по HTTP.
+   */
+  private async statementContent(
+    fileUrl: string,
+  ): Promise<{ content: Buffer; contentType?: string } | null> {
+    if (/^https?:\/\//i.test(fileUrl)) {
+      const res = await fetch(fileUrl);
+      if (!res.ok) return null;
+      return { content: Buffer.from(await res.arrayBuffer()) };
+    }
+    const { stream, contentType } = await this.uploads.getFile(fileUrl);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(chunk as Buffer);
+    }
+    return { content: Buffer.concat(chunks), contentType };
+  }
+
   /** Email the monthly package (Excel registers + bank statements) to the accountant. */
   async sendToAccountant(companyId: string, dto: SendToAccountantDto) {
     const [settings, company] = await Promise.all([
@@ -559,14 +633,14 @@ export class AccountantService {
     });
     for (const s of statements) {
       try {
-        const res = await fetch(s.fileUrl);
-        if (!res.ok) continue;
-        const ab = await res.arrayBuffer();
+        const file = await this.statementContent(s.fileUrl);
+        if (!file) continue;
         attachments.push({
           filename:
             s.fileName ||
             `izvlechenie-${dto.year}-${String(dto.month).padStart(2, '0')}.pdf`,
-          content: Buffer.from(ab),
+          content: file.content,
+          ...(file.contentType ? { contentType: file.contentType } : {}),
         });
       } catch {
         // Skip a statement that can't be fetched; the email still goes out.
