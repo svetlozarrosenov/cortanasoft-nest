@@ -22,6 +22,16 @@ import { CompanyTerminationsController } from './company-terminations.controller
 import { CompanyEmployeeDocumentsController } from './company-employee-documents.controller';
 import { CompanyEmployeeDocumentFilesController } from './company-employee-document-files.controller';
 import { CompanyEmployeeRecordNotificationsController } from './company-employee-record-notifications.controller';
+import { CompanyEmployeeRecordsComplianceController } from './company-employee-records-compliance.controller';
+import { MyDossierController } from './my-dossier.controller';
+import { MyDossierService } from './my-dossier.service';
+import { EmployeeRecordAuditService } from './employee-record-audit.service';
+import { EmployeeConsentsService } from './employee-consents.service';
+import { EmployeeRecordsSettingsService } from './employee-records-settings.service';
+import { EmployeeSubmissionsService } from './employee-submissions.service';
+import { DossierCopyRequestsService } from './dossier-copy-requests.service';
+import { EmployeeSignatureRequestsService } from './employee-signature-requests.service';
+import { EvrotrustService } from './evrotrust.service';
 
 @Module({
   imports: [PrismaModule, UploadsModule, PushNotificationsModule],
@@ -33,8 +43,12 @@ import { CompanyEmployeeRecordNotificationsController } from './company-employee
     CompanyTerminationsController,
     CompanyEmployeeDocumentsController,
     CompanyEmployeeDocumentFilesController,
+    // Специфичните пътища (consents/settings/audit/...) са преди генеричния
+    // :entityType/:entityId контролер, за да не се прихващат от него.
+    CompanyEmployeeRecordsComplianceController,
     CompanyEmployeeRecordNotificationsController,
     CompanyEmployeeProfilesController,
+    MyDossierController,
   ],
   providers: [
     EmployeeRecordNumberingService,
@@ -48,6 +62,14 @@ import { CompanyEmployeeRecordNotificationsController } from './company-employee
     EmployeeRecordNotificationsService,
     EmployeeProfileService,
     EmployeeRecordsCronService,
+    EmployeeRecordAuditService,
+    EmployeeConsentsService,
+    EmployeeRecordsSettingsService,
+    EmployeeSubmissionsService,
+    DossierCopyRequestsService,
+    EmployeeSignatureRequestsService,
+    EvrotrustService,
+    MyDossierService,
   ],
   exports: [
     EmploymentContractsService,

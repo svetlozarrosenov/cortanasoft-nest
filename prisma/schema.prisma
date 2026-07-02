@@ -259,6 +259,12 @@ model Company {
   terminations          Termination[]
   employeeDocuments     EmployeeDocument[]
   employeeDocumentFiles EmployeeDocumentFile[]
+  employeeConsents      EmployeeConsent[]
+  employeeRecordsSettings EmployeeRecordsSettings?
+  employeeRecordAuditEvents EmployeeRecordAuditEvent[]
+  employeeSubmissions   EmployeeSubmission[]
+  dossierCopyRequests   DossierCopyRequest[]
+  employeeSignatureRequests EmployeeSignatureRequest[]
 
   // Договори
   contractTemplates ContractTemplate[]
@@ -4212,6 +4218,7 @@ model EmploymentContract {
   // Регулаторно (наредбата) — уведомяване и потвърждаване на получаване
   notifiedEmployeeAt  DateTime?
   deliveryConfirmedAt DateTime?
+  deliveryConfirmedById String? // кой потвърди получаването (служителят или HR ръчно)
 
   // Служител (user в контекста на компанията) + автор
   userId      String
@@ -4254,6 +4261,7 @@ model EmploymentAnnex {
 
   notifiedEmployeeAt  DateTime?
   deliveryConfirmedAt DateTime?
+  deliveryConfirmedById String? // кой потвърди получаването (служителят или HR ръчно)
 
   userId      String
   createdById String?
@@ -4287,6 +4295,7 @@ model EmploymentOrder {
 
   notifiedEmployeeAt  DateTime?
   deliveryConfirmedAt DateTime?
+  deliveryConfirmedById String? // кой потвърди получаването (служителят или HR ръчно)
 
   userId      String
   createdById String?
@@ -4342,6 +4351,7 @@ model Termination {
 
   notifiedEmployeeAt  DateTime?
   deliveryConfirmedAt DateTime?
+  deliveryConfirmedById String? // кой потвърди получаването (служителят или HR ръчно)
 
   userId      String
   createdById String?
@@ -4374,6 +4384,7 @@ model EmployeeDocument {
 
   notifiedEmployeeAt  DateTime?
   deliveryConfirmedAt DateTime?
+  deliveryConfirmedById String? // кой потвърди получаването (служителят или HR ръчно)
 
   userId      String
   createdById String?
@@ -4430,6 +4441,11 @@ model EmployeeDocumentFile {
   employeeDocumentId String?
   employeeDocument   EmployeeDocument? @relation(fields: [employeeDocumentId], references: [id], onDelete: Cascade)
 
+  employeeSubmissionId String?
+  employeeSubmission   EmployeeSubmission? @relation(fields: [employeeSubmissionId], references: [id], onDelete: Cascade)
+
+  signatureRequests EmployeeSignatureRequest[]
+
   createdAt DateTime @default(now())
 
   @@index([companyId])
@@ -4439,7 +4455,239 @@ model EmployeeDocumentFile {
   @@index([jobDescriptionId])
   @@index([terminationId])
   @@index([employeeDocumentId])
+  @@index([employeeSubmissionId])
   @@map("employee_document_files")
+}
+
+// ============================================================
+// Електронно трудово досие — съответствие с Наредбата (ПМС 71/2018)
+// ============================================================
+
+// Действие по съгласието на служителя (чл. 4 от наредбата)
+enum EmployeeConsentAction {
+  GIVEN // Дадено изрично съгласие за електронни изявления
+  WITHDRAWN // Оттеглено (чл. 4, ал. 3 — по всяко време)
+}
+
+// Съгласие на служителя да е адресат на електронни изявления (чл. 4).
+// Append-only история: всяко даване/оттегляне е нов ред; активното
+// състояние е последният по време ред за (companyId, userId).
+model EmployeeConsent {
+  id     String                @id @default(cuid())
+  action EmployeeConsentAction
+  method String? // как е дадено: „в трудовия договор", „отделна декларация"...
+  note   String? @db.Text
+
+  userId  String // служителят
+  actorId String? // кой е регистрирал действието (служителят сам или HR)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, userId, createdAt])
+  @@map("employee_consents")
+}
+
+// Вътрешни правила на компанията за е-досиетата (чл. 3 + чл. 6, ал. 2).
+// 1 ред на компания. Отразява какво трябва да пише в ПВТР.
+model EmployeeRecordsSettings {
+  id String @id @default(cuid())
+
+  // Кои категории документи се създават/съхраняват електронно (чл. 6, ал. 2, т. 1).
+  // Ключове: EMPLOYER_UNILATERAL, EMPLOYEE_UNILATERAL, BILATERAL, THIRD_PARTY, OTHER
+  electronicCategories String[] @default([])
+
+  // Вид електронен подпис, който използват служителите (чл. 6, ал. 2, т. 2)
+  employeeSignatureLevel EmployeeSignatureType @default(SES)
+
+  // Ред и начин на уведомяване на служителите (чл. 3) — текст за ПВТР
+  notificationPolicy String? @db.Text
+
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("employee_records_settings")
+}
+
+// Действие в одит журнала на досиетата (чл. 12, ал. 1, т. 2–4)
+enum EmployeeRecordAuditAction {
+  CREATE // Създаване на документ
+  UPDATE // Промяна
+  DELETE // Изтриване
+  VIEW // Преглед на досие/документ
+  DOWNLOAD // Сваляне на файл
+  PRINT // Отпечатан хартиен препис (чл. 12, ал. 1, т. 4)
+  NOTIFY // Изпратено уведомление до служителя
+  CONFIRM_DELIVERY // Потвърдено получаване
+  SIGN_REQUEST // Заявено подписване
+  SIGN // Подписан документ
+  SIGN_DECLINE // Отказано подписване
+  CONSENT_GIVEN // Дадено съгласие (чл. 4)
+  CONSENT_WITHDRAWN // Оттеглено съгласие
+  SUBMISSION // Входящ документ от служител (чл. 9)
+  COPY_REQUEST // Заявка за препис (чл. 5)
+  COPY_FULFILLED // Изпълнена заявка за препис
+  SETTINGS_UPDATE // Промяна на вътрешните правила
+}
+
+// Одит журнал (чл. 12): кой, кога, какво — append-only, БЕЗ update/delete
+// API. Поредността на постъпване не се променя (чл. 12, ал. 2).
+model EmployeeRecordAuditEvent {
+  id     String                    @id @default(cuid())
+  action EmployeeRecordAuditAction
+
+  actorId    String? // лицето, извършило операцията (чл. 12, ал. 1, т. 3)
+  actorEmail String? // електронният му адрес към момента
+  targetUserId String? // чието досие засяга
+
+  entityType String? // employmentContract / employmentOrder / ... / file
+  entityId   String?
+  detail     String? @db.Text // човешки текст: „Заповед ZP-2026-00003 — уведомен по имейл"
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([companyId, targetUserId, createdAt])
+  @@map("employee_record_audit_events")
+}
+
+// Категория на входящ документ от служителя (§ 1, т. 2 от наредбата)
+enum EmployeeSubmissionCategory {
+  APPLICATION // Молба
+  REQUEST // Заявление/искане
+  DECLARATION // Декларация
+  NOTICE // Уведомление
+  REPORT // Отчет
+  OTHER // Друго
+}
+
+enum EmployeeSubmissionStatus {
+  SUBMITTED // Регистриран, чака обработка
+  IN_REVIEW // В обработка от HR
+  ANSWERED // Отговорено/приключено
+}
+
+// Входящ електронен документ от служителя (чл. 9): регистрира се с
+// пореден входящ номер, а системата изпраща потвърждение с номер,
+// дата и час (чл. 9, ал. 2–3).
+model EmployeeSubmission {
+  id        String                     @id @default(cuid())
+  regNumber String // ВХ-2026-00001 (per-company)
+  category  EmployeeSubmissionCategory @default(APPLICATION)
+  status    EmployeeSubmissionStatus   @default(SUBMITTED)
+  subject   String
+  content   String?                    @db.Text
+
+  userId String // подателят
+
+  confirmationSentAt DateTime? // кога е изпратено потвърждението по чл. 9, ал. 2
+  answeredById       String?
+  answeredAt         DateTime?
+  answer             String?   @db.Text
+
+  files EmployeeDocumentFile[]
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, regNumber])
+  @@index([companyId, userId])
+  @@index([companyId, status])
+  @@map("employee_submissions")
+}
+
+enum DossierCopyRequestKind {
+  ELECTRONIC // Е-документи по чл. 5, ал. 1 (връчват се електронно)
+  PAPER // Хартиени преписи по чл. 5, ал. 2
+}
+
+enum DossierCopyRequestStatus {
+  PENDING // Чака изпълнение (14-дневен срок)
+  FULFILLED // Изпълнена
+  REJECTED // Отказана (с причина)
+}
+
+// Заявка на служителя за документи/преписи от досието (чл. 5 + чл. 128б, ал. 4 КТ).
+// Срокът за изпълнение е 14 дни от заявяването (dueAt).
+model DossierCopyRequest {
+  id     String                   @id @default(cuid())
+  kind   DossierCopyRequestKind
+  status DossierCopyRequestStatus @default(PENDING)
+  scope  String?                  @db.Text // какво точно иска служителят
+
+  userId String // заявителят
+
+  dueAt         DateTime // заявено + 14 дни
+  fulfilledById String?
+  fulfilledAt   DateTime?
+  responseNote  String?  @db.Text
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, status, dueAt])
+  @@index([companyId, userId])
+  @@map("dossier_copy_requests")
+}
+
+// Доставчик на подписването
+enum SignatureProvider {
+  INTERNAL // Вътрешно (in-app) подписване — обикновен електронен подпис (SES)
+  EVROTRUST // Евротръст (отдалечен КЕП/УЕП + е-връчване) — заготовка
+}
+
+enum SignatureRequestStatus {
+  PENDING // Изпратена към подписващия
+  SIGNED // Подписана
+  DECLINED // Отказана от подписващия
+  CANCELLED // Оттеглена от заявителя
+  FAILED // Грешка при доставчика (Евротръст)
+}
+
+// Заявка за електронен подпис върху файл от досието (чл. 7).
+// INTERNAL: служителят потвърждава в приложението (SES — чл. 7, ал. 2,
+// когато е договорено). EVROTRUST: заготовка за отдалечен КЕП — статусът
+// се обновява от bridge service-а, когато интеграцията бъде активирана.
+model EmployeeSignatureRequest {
+  id       String                 @id @default(cuid())
+  level    EmployeeSignatureType // искано ниво: SES / AES / QES
+  provider SignatureProvider      @default(INTERNAL)
+  status   SignatureRequestStatus @default(PENDING)
+
+  fileId String
+  file   EmployeeDocumentFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  signerUserId  String // кой трябва да подпише
+  requestedById String? // кой е заявил
+
+  providerRef   String? // Evrotrust transaction ID (заготовка)
+  declineReason String?
+  signedAt      DateTime?
+  declinedAt    DateTime?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, signerUserId, status])
+  @@index([companyId, fileId])
+  @@map("employee_signature_requests")
 }
 
 // ============================================================

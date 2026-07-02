@@ -597,9 +597,19 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
           },
         ],
       },
+    ],
+  },
+  // Електронни трудови досиета (наредба ПМС 71/2018) — отделен модул.
+  // Страницата „Моето досие" е self-service и нарочно НЯМА permission —
+  // всеки служител има непрекъснат достъп до своите документи (чл. 14).
+  {
+    key: 'employeeRecords',
+    labelKey: 'modules.employeeRecords.title',
+    icon: 'FolderLock',
+    pages: [
       {
-        key: 'employeeRecords',
-        labelKey: 'modules.hr.employeeRecords',
+        key: 'dossiers',
+        labelKey: 'modules.employeeRecords.dossiers',
         actions: ['view', 'create', 'edit', 'delete'],
         tables: [
           {
@@ -615,9 +625,24 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
-        key: 'employeePersonalData',
+        key: 'personalData',
         labelKey: 'modules.hr.employeePersonalData',
         actions: ['view', 'edit'],
+      },
+      {
+        key: 'submissions',
+        labelKey: 'modules.employeeRecords.submissions',
+        actions: ['view', 'edit'],
+      },
+      {
+        key: 'settings',
+        labelKey: 'modules.employeeRecords.settings',
+        actions: ['view', 'edit'],
+      },
+      {
+        key: 'audit',
+        labelKey: 'modules.employeeRecords.audit',
+        actions: ['view'],
       },
     ],
   },

@@ -32,7 +32,7 @@ export class CompanyEmployeeDocumentFilesController {
   constructor(private readonly service: EmployeeDocumentFilesService) {}
 
   @Post()
-  @RequireCreate('hr', 'employeeRecords')
+  @RequireCreate('employeeRecords', 'dossiers')
   @UseInterceptors(FileInterceptor('file'))
   async upload(
     @Param('companyId') companyId: string,
@@ -65,7 +65,7 @@ export class CompanyEmployeeDocumentFilesController {
   }
 
   @Get()
-  @RequireView('hr', 'employeeRecords')
+  @RequireView('employeeRecords', 'dossiers')
   async findByEntity(
     @Param('companyId') companyId: string,
     @Query('entityType') entityType: string,
@@ -87,14 +87,15 @@ export class CompanyEmployeeDocumentFilesController {
 
   /** Proxy — стриймва файла от R2 през backend (auth + tenant check). */
   @Get(':id/file')
-  @RequireView('hr', 'employeeRecords')
+  @RequireView('employeeRecords', 'dossiers')
   async getFile(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
+    @CurrentUser() user: any,
     @Res({ passthrough: true }) res: Response,
   ) {
     const { stream, contentType, fileName } =
-      await this.service.getFileStream(companyId, id);
+      await this.service.getFileStream(companyId, id, user);
 
     res.set({
       'Content-Type': contentType,
@@ -106,8 +107,12 @@ export class CompanyEmployeeDocumentFilesController {
   }
 
   @Delete(':id')
-  @RequireDelete('hr', 'employeeRecords')
-  remove(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.service.remove(companyId, id);
+  @RequireDelete('employeeRecords', 'dossiers')
+  remove(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.service.remove(companyId, id, user.id);
   }
 }

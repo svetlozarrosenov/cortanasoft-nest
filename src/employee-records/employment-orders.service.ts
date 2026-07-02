@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmployeeRecordNumberingService } from './employee-record-numbering.service';
+import { EmployeeRecordAuditService } from './employee-record-audit.service';
 import {
   BroadcastEmploymentOrderDto,
   CreateEmploymentOrderDto,
@@ -16,6 +17,7 @@ export class EmploymentOrdersService {
   constructor(
     private prisma: PrismaService,
     private numbering: EmployeeRecordNumberingService,
+    private audit: EmployeeRecordAuditService,
   ) {}
 
   private readonly include = {
@@ -42,7 +44,7 @@ export class EmploymentOrdersService {
   }
 
   async create(companyId: string, userId: string, dto: CreateEmploymentOrderDto) {
-    return this.prisma.$transaction(async (tx) => {
+    const order = await this.prisma.$transaction(async (tx) => {
       const number =
         dto.number || (await this.numbering.next('order', companyId, tx));
       return tx.employmentOrder.create({
@@ -59,6 +61,17 @@ export class EmploymentOrdersService {
         include: this.include,
       });
     });
+
+    await this.audit.log(companyId, {
+      action: 'CREATE',
+      actorId: userId,
+      targetUserId: dto.userId,
+      entityType: 'employmentOrder',
+      entityId: order.id,
+      detail: `Заповед ${order.number}`,
+    });
+
+    return order;
   }
 
   /**
@@ -75,7 +88,7 @@ export class EmploymentOrdersService {
     if (userIds.length === 0) {
       throw new BadRequestException('Няма избрани получатели');
     }
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const created: { id: string; number: string; userId: string }[] = [];
       for (const uid of userIds) {
         const number = await this.numbering.next('order', companyId, tx);
@@ -96,11 +109,29 @@ export class EmploymentOrdersService {
       }
       return { count: created.length, data: created };
     });
+
+    for (const order of result.data) {
+      await this.audit.log(companyId, {
+        action: 'CREATE',
+        actorId: userId,
+        targetUserId: order.userId,
+        entityType: 'employmentOrder',
+        entityId: order.id,
+        detail: `Заповед ${order.number}`,
+      });
+    }
+
+    return result;
   }
 
-  async update(companyId: string, id: string, dto: UpdateEmploymentOrderDto) {
-    await this.findOne(companyId, id);
-    return this.prisma.employmentOrder.update({
+  async update(
+    companyId: string,
+    id: string,
+    dto: UpdateEmploymentOrderDto,
+    actorId?: string,
+  ) {
+    const existing = await this.findOne(companyId, id);
+    const updated = await this.prisma.employmentOrder.update({
       where: { id },
       data: {
         ...(dto.number !== undefined ? { number: dto.number } : {}),
@@ -111,11 +142,30 @@ export class EmploymentOrdersService {
       },
       include: this.include,
     });
+
+    await this.audit.log(companyId, {
+      action: 'UPDATE',
+      actorId: actorId ?? null,
+      targetUserId: existing.userId,
+      entityType: 'employmentOrder',
+      entityId: id,
+      detail: `Заповед ${existing.number}`,
+    });
+
+    return updated;
   }
 
-  async remove(companyId: string, id: string) {
-    await this.findOne(companyId, id);
+  async remove(companyId: string, id: string, actorId?: string) {
+    const existing = await this.findOne(companyId, id);
     await this.prisma.employmentOrder.delete({ where: { id } });
+    await this.audit.log(companyId, {
+      action: 'DELETE',
+      actorId: actorId ?? null,
+      targetUserId: existing.userId,
+      entityType: 'employmentOrder',
+      entityId: id,
+      detail: `Заповед ${existing.number}`,
+    });
     return { message: 'Заповедта е изтрита успешно' };
   }
 }

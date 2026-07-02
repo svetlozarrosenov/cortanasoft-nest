@@ -31,7 +31,7 @@ export class CompanyEmploymentContractsController {
   constructor(private readonly service: EmploymentContractsService) {}
 
   @Post()
-  @RequireCreate('hr', 'employeeRecords')
+  @RequireCreate('employeeRecords', 'dossiers')
   create(
     @Param('companyId') companyId: string,
     @CurrentUser() user: any,
@@ -41,7 +41,7 @@ export class CompanyEmploymentContractsController {
   }
 
   @Get()
-  @RequireView('hr', 'employeeRecords')
+  @RequireView('employeeRecords', 'dossiers')
   findAll(
     @Param('companyId') companyId: string,
     @Query('userId') userId?: string,
@@ -50,39 +50,33 @@ export class CompanyEmploymentContractsController {
   }
 
   @Get(':id')
-  @RequireView('hr', 'employeeRecords')
+  @RequireView('employeeRecords', 'dossiers')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.service.findOne(companyId, id);
   }
 
   @Patch(':id')
-  @RequireEdit('hr', 'employeeRecords')
+  @RequireEdit('employeeRecords', 'dossiers')
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
     @Body() dto: UpdateEmploymentContractDto,
+    @CurrentUser() user: any,
   ) {
-    return this.service.update(companyId, id, dto);
+    return this.service.update(companyId, id, dto, user.id);
   }
 
-  @Post(':id/notify')
-  @RequireEdit('hr', 'employeeRecords')
-  notify(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.service.markNotified(companyId, id);
-  }
-
-  @Post(':id/confirm-delivery')
-  @RequireEdit('hr', 'employeeRecords')
-  confirmDelivery(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-  ) {
-    return this.service.confirmDelivery(companyId, id);
-  }
+  // notify / confirm-delivery минават през генеричните endpoint-и
+  // (company-employee-record-notifications.controller.ts), които реално
+  // известяват служителя и пишат одит следа.
 
   @Delete(':id')
-  @RequireDelete('hr', 'employeeRecords')
-  remove(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.service.remove(companyId, id);
+  @RequireDelete('employeeRecords', 'dossiers')
+  remove(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.service.remove(companyId, id, user.id);
   }
 }

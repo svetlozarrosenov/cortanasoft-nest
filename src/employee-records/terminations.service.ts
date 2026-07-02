@@ -4,11 +4,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmployeeRecordAuditService } from './employee-record-audit.service';
 import { CreateTerminationDto, UpdateTerminationDto } from './dto';
 
 @Injectable()
 export class TerminationsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: EmployeeRecordAuditService,
+  ) {}
 
   private readonly include = {
     files: { orderBy: { createdAt: 'desc' as const } },
@@ -46,8 +50,8 @@ export class TerminationsService {
       }
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const term = await tx.termination.create({
+    const term = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.termination.create({
         data: {
           basis: dto.basis,
           date: new Date(dto.date),
@@ -70,13 +74,29 @@ export class TerminationsService {
           data: { status: 'TERMINATED' },
         });
       }
-      return term;
+      return created;
     });
+
+    await this.audit.log(companyId, {
+      action: 'CREATE',
+      actorId: userId,
+      targetUserId: dto.userId,
+      entityType: 'termination',
+      entityId: term.id,
+      detail: `Прекратяване (${term.basis})`,
+    });
+
+    return term;
   }
 
-  async update(companyId: string, id: string, dto: UpdateTerminationDto) {
-    await this.findOne(companyId, id);
-    return this.prisma.termination.update({
+  async update(
+    companyId: string,
+    id: string,
+    dto: UpdateTerminationDto,
+    actorId?: string,
+  ) {
+    const existing = await this.findOne(companyId, id);
+    const updated = await this.prisma.termination.update({
       where: { id },
       data: {
         ...(dto.basis !== undefined ? { basis: dto.basis } : {}),
@@ -95,11 +115,22 @@ export class TerminationsService {
       },
       include: this.include,
     });
+
+    await this.audit.log(companyId, {
+      action: 'UPDATE',
+      actorId: actorId ?? null,
+      targetUserId: existing.userId,
+      entityType: 'termination',
+      entityId: id,
+      detail: `Прекратяване (${existing.basis})`,
+    });
+
+    return updated;
   }
 
-  async remove(companyId: string, id: string) {
+  async remove(companyId: string, id: string, actorId?: string) {
     const term = await this.findOne(companyId, id);
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       await tx.termination.delete({ where: { id } });
       // Връщаме договора към AMENDED (вече не е прекратен)
       if (term.contractId) {
@@ -110,5 +141,16 @@ export class TerminationsService {
       }
       return { message: 'Прекратяването е изтрито успешно' };
     });
+
+    await this.audit.log(companyId, {
+      action: 'DELETE',
+      actorId: actorId ?? null,
+      targetUserId: term.userId,
+      entityType: 'termination',
+      entityId: id,
+      detail: `Прекратяване (${term.basis})`,
+    });
+
+    return result;
   }
 }

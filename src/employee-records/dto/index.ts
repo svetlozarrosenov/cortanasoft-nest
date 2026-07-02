@@ -11,3 +11,5 @@ export * from './create-job-description.dto';
 export * from './update-job-description.dto';
 export * from './create-termination.dto';
 export * from './update-termination.dto';
+export * from './update-employee-profile.dto';
+export * from './compliance.dto';

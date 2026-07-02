@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmployeeRecordNumberingService } from './employee-record-numbering.service';
+import { EmployeeRecordAuditService } from './employee-record-audit.service';
 import {
   CreateEmploymentContractDto,
   UpdateEmploymentContractDto,
@@ -11,6 +12,7 @@ export class EmploymentContractsService {
   constructor(
     private prisma: PrismaService,
     private numbering: EmployeeRecordNumberingService,
+    private audit: EmployeeRecordAuditService,
   ) {}
 
   private readonly include = {
@@ -45,7 +47,7 @@ export class EmploymentContractsService {
     userId: string,
     dto: CreateEmploymentContractDto,
   ) {
-    return this.prisma.$transaction(async (tx) => {
+    const contract = await this.prisma.$transaction(async (tx) => {
       const number =
         dto.number || (await this.numbering.next('contract', companyId, tx));
       return tx.employmentContract.create({
@@ -69,15 +71,27 @@ export class EmploymentContractsService {
         include: this.include,
       });
     });
+
+    await this.audit.log(companyId, {
+      action: 'CREATE',
+      actorId: userId,
+      targetUserId: dto.userId,
+      entityType: 'employmentContract',
+      entityId: contract.id,
+      detail: `Трудов договор ${contract.number}`,
+    });
+
+    return contract;
   }
 
   async update(
     companyId: string,
     id: string,
     dto: UpdateEmploymentContractDto,
+    actorId?: string,
   ) {
-    await this.findOne(companyId, id);
-    return this.prisma.employmentContract.update({
+    const existing = await this.findOne(companyId, id);
+    const updated = await this.prisma.employmentContract.update({
       where: { id },
       data: {
         ...(dto.number !== undefined ? { number: dto.number } : {}),
@@ -103,31 +117,30 @@ export class EmploymentContractsService {
       },
       include: this.include,
     });
-  }
 
-  /** Уведомяване на служителя (наредба) — записва момента. */
-  async markNotified(companyId: string, id: string) {
-    await this.findOne(companyId, id);
-    return this.prisma.employmentContract.update({
-      where: { id },
-      data: { notifiedEmployeeAt: new Date() },
-      include: this.include,
+    await this.audit.log(companyId, {
+      action: 'UPDATE',
+      actorId: actorId ?? null,
+      targetUserId: existing.userId,
+      entityType: 'employmentContract',
+      entityId: id,
+      detail: `Трудов договор ${existing.number}`,
     });
+
+    return updated;
   }
 
-  /** Потвърждаване на получаване (наредба). */
-  async confirmDelivery(companyId: string, id: string) {
-    await this.findOne(companyId, id);
-    return this.prisma.employmentContract.update({
-      where: { id },
-      data: { deliveryConfirmedAt: new Date() },
-      include: this.include,
-    });
-  }
-
-  async remove(companyId: string, id: string) {
-    await this.findOne(companyId, id);
+  async remove(companyId: string, id: string, actorId?: string) {
+    const existing = await this.findOne(companyId, id);
     await this.prisma.employmentContract.delete({ where: { id } });
+    await this.audit.log(companyId, {
+      action: 'DELETE',
+      actorId: actorId ?? null,
+      targetUserId: existing.userId,
+      entityType: 'employmentContract',
+      entityId: id,
+      detail: `Трудов договор ${existing.number}`,
+    });
     return { message: 'Трудовият договор е изтрит успешно' };
   }
 }

@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmployeeRecordAuditService } from './employee-record-audit.service';
 import {
   CreateEmployeeDocumentDto,
   UpdateEmployeeDocumentDto,
@@ -7,7 +8,10 @@ import {
 
 @Injectable()
 export class EmployeeDocumentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: EmployeeRecordAuditService,
+  ) {}
 
   private readonly include = {
     files: { orderBy: { createdAt: 'desc' as const } },
@@ -39,7 +43,7 @@ export class EmployeeDocumentsService {
     userId: string,
     dto: CreateEmployeeDocumentDto,
   ) {
-    return this.prisma.employeeDocument.create({
+    const doc = await this.prisma.employeeDocument.create({
       data: {
         category: dto.category ?? 'OTHER',
         title: dto.title,
@@ -51,11 +55,27 @@ export class EmployeeDocumentsService {
       },
       include: this.include,
     });
+
+    await this.audit.log(companyId, {
+      action: 'CREATE',
+      actorId: userId,
+      targetUserId: dto.userId,
+      entityType: 'employeeDocument',
+      entityId: doc.id,
+      detail: doc.title,
+    });
+
+    return doc;
   }
 
-  async update(companyId: string, id: string, dto: UpdateEmployeeDocumentDto) {
-    await this.findOne(companyId, id);
-    return this.prisma.employeeDocument.update({
+  async update(
+    companyId: string,
+    id: string,
+    dto: UpdateEmployeeDocumentDto,
+    actorId?: string,
+  ) {
+    const existing = await this.findOne(companyId, id);
+    const updated = await this.prisma.employeeDocument.update({
       where: { id },
       data: {
         ...(dto.category !== undefined ? { category: dto.category } : {}),
@@ -71,11 +91,30 @@ export class EmployeeDocumentsService {
       },
       include: this.include,
     });
+
+    await this.audit.log(companyId, {
+      action: 'UPDATE',
+      actorId: actorId ?? null,
+      targetUserId: existing.userId,
+      entityType: 'employeeDocument',
+      entityId: id,
+      detail: existing.title,
+    });
+
+    return updated;
   }
 
-  async remove(companyId: string, id: string) {
-    await this.findOne(companyId, id);
+  async remove(companyId: string, id: string, actorId?: string) {
+    const existing = await this.findOne(companyId, id);
     await this.prisma.employeeDocument.delete({ where: { id } });
+    await this.audit.log(companyId, {
+      action: 'DELETE',
+      actorId: actorId ?? null,
+      targetUserId: existing.userId,
+      entityType: 'employeeDocument',
+      entityId: id,
+      detail: existing.title,
+    });
     return { message: 'Документът е изтрит успешно' };
   }
 }

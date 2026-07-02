@@ -28,7 +28,7 @@ export class CompanyEmploymentAnnexesController {
   constructor(private readonly service: EmploymentAnnexesService) {}
 
   @Post()
-  @RequireCreate('hr', 'employeeRecords')
+  @RequireCreate('employeeRecords', 'dossiers')
   create(
     @Param('companyId') companyId: string,
     @CurrentUser() user: any,
@@ -38,7 +38,7 @@ export class CompanyEmploymentAnnexesController {
   }
 
   @Get()
-  @RequireView('hr', 'employeeRecords')
+  @RequireView('employeeRecords', 'dossiers')
   findAll(
     @Param('companyId') companyId: string,
     @Query('contractId') contractId?: string,
@@ -48,24 +48,29 @@ export class CompanyEmploymentAnnexesController {
   }
 
   @Get(':id')
-  @RequireView('hr', 'employeeRecords')
+  @RequireView('employeeRecords', 'dossiers')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.service.findOne(companyId, id);
   }
 
   @Patch(':id')
-  @RequireEdit('hr', 'employeeRecords')
+  @RequireEdit('employeeRecords', 'dossiers')
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
     @Body() dto: UpdateEmploymentAnnexDto,
+    @CurrentUser() user: any,
   ) {
-    return this.service.update(companyId, id, dto);
+    return this.service.update(companyId, id, dto, user.id);
   }
 
   @Delete(':id')
-  @RequireDelete('hr', 'employeeRecords')
-  remove(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.service.remove(companyId, id);
+  @RequireDelete('employeeRecords', 'dossiers')
+  remove(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.service.remove(companyId, id, user.id);
   }
 }

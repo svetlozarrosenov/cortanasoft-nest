@@ -88,7 +88,7 @@ export class EmployeeRecordsCronService {
       .filter((uc) => {
         const p = uc.role?.permissions as any;
         return (
-          p?.modules?.hr?.pages?.employeeRecords?.actions?.view === true
+          p?.modules?.employeeRecords?.pages?.dossiers?.actions?.view === true
         );
       })
       .map((uc) => uc.userId);

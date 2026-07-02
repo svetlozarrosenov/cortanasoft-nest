@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmployeeRecordNumberingService } from './employee-record-numbering.service';
+import { EmployeeRecordAuditService } from './employee-record-audit.service';
 import { CreateEmploymentAnnexDto, UpdateEmploymentAnnexDto } from './dto';
 
 @Injectable()
@@ -8,6 +9,7 @@ export class EmploymentAnnexesService {
   constructor(
     private prisma: PrismaService,
     private numbering: EmployeeRecordNumberingService,
+    private audit: EmployeeRecordAuditService,
   ) {}
 
   private readonly include = {
@@ -46,10 +48,10 @@ export class EmploymentAnnexesService {
     });
     if (!contract) throw new NotFoundException('Трудовият договор не е намерен');
 
-    return this.prisma.$transaction(async (tx) => {
+    const annex = await this.prisma.$transaction(async (tx) => {
       const number =
         dto.number || (await this.numbering.next('annex', companyId, tx));
-      const annex = await tx.employmentAnnex.create({
+      const created = await tx.employmentAnnex.create({
         data: {
           number,
           effectiveDate: new Date(dto.effectiveDate),
@@ -71,13 +73,29 @@ export class EmploymentAnnexesService {
         where: { id: dto.contractId, status: 'ACTIVE' },
         data: { status: 'AMENDED' },
       });
-      return annex;
+      return created;
     });
+
+    await this.audit.log(companyId, {
+      action: 'CREATE',
+      actorId: userId,
+      targetUserId: dto.userId,
+      entityType: 'employmentAnnex',
+      entityId: annex.id,
+      detail: `Допълнително споразумение ${annex.number}`,
+    });
+
+    return annex;
   }
 
-  async update(companyId: string, id: string, dto: UpdateEmploymentAnnexDto) {
-    await this.findOne(companyId, id);
-    return this.prisma.employmentAnnex.update({
+  async update(
+    companyId: string,
+    id: string,
+    dto: UpdateEmploymentAnnexDto,
+    actorId?: string,
+  ) {
+    const existing = await this.findOne(companyId, id);
+    const updated = await this.prisma.employmentAnnex.update({
       where: { id },
       data: {
         ...(dto.number !== undefined ? { number: dto.number } : {}),
@@ -97,11 +115,30 @@ export class EmploymentAnnexesService {
       },
       include: this.include,
     });
+
+    await this.audit.log(companyId, {
+      action: 'UPDATE',
+      actorId: actorId ?? null,
+      targetUserId: existing.userId,
+      entityType: 'employmentAnnex',
+      entityId: id,
+      detail: `Допълнително споразумение ${existing.number}`,
+    });
+
+    return updated;
   }
 
-  async remove(companyId: string, id: string) {
-    await this.findOne(companyId, id);
+  async remove(companyId: string, id: string, actorId?: string) {
+    const existing = await this.findOne(companyId, id);
     await this.prisma.employmentAnnex.delete({ where: { id } });
+    await this.audit.log(companyId, {
+      action: 'DELETE',
+      actorId: actorId ?? null,
+      targetUserId: existing.userId,
+      entityType: 'employmentAnnex',
+      entityId: id,
+      detail: `Допълнително споразумение ${existing.number}`,
+    });
     return { message: 'Допълнителното споразумение е изтрито успешно' };
   }
 }
