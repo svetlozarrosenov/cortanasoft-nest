@@ -25,6 +25,11 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Post('login')
+  @UseGuards(ThrottlerGuard)
+  // Per real client IP (nginx sets X-Forwarded-For, trust proxy is on). Kept
+  // generous so an office behind one NAT IP isn't locked out during the morning
+  // login rush, while still throttling automated brute-force to a crawl.
+  @Throttle({ short: { limit: 15, ttl: 60000 }, long: { limit: 60, ttl: 600000 } })
   @HttpCode(HttpStatus.OK)
   async login(
     @Body() loginDto: LoginDto,
@@ -102,12 +107,16 @@ export class AuthController {
   }
 
   @Post('forgot-password')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ short: { limit: 3, ttl: 60000 }, long: { limit: 10, ttl: 600000 } })
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto.email);
   }
 
   @Post('reset-password')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ short: { limit: 5, ttl: 60000 }, long: { limit: 20, ttl: 600000 } })
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto.token, dto.newPassword);

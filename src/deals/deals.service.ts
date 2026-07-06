@@ -58,6 +58,15 @@ export class DealsService {
       currencyId = company?.currencyId || undefined;
     }
 
+    // Verify the customer belongs to this company (cross-tenant IDOR guard).
+    if (dto.customerId) {
+      const customer = await this.prisma.customer.findFirst({
+        where: { id: dto.customerId, companyId },
+        select: { id: true },
+      });
+      if (!customer) throw new NotFoundException('Клиентът не е намерен');
+    }
+
     return this.prisma.deal.create({
       data: {
         ...dto,
@@ -222,6 +231,15 @@ export class DealsService {
 
   async update(companyId: string, id: string, dto: UpdateDealDto) {
     await this.findOne(companyId, id);
+
+    // Verify a reassigned customer belongs to this company (IDOR guard).
+    if (dto.customerId) {
+      const customer = await this.prisma.customer.findFirst({
+        where: { id: dto.customerId, companyId },
+        select: { id: true },
+      });
+      if (!customer) throw new NotFoundException('Клиентът не е намерен');
+    }
 
     return this.prisma.deal.update({
       where: { id },

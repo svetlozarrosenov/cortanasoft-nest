@@ -66,6 +66,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
       if (exception.message.includes('Invalid `this.prisma')) {
         message = ErrorMessages.database.foreignKeyViolation;
         status = HttpStatus.CONFLICT;
+      } else if (process.env.NODE_ENV === 'production') {
+        // Don't leak internal error details (driver text, table/column names)
+        // to clients in production — keep the generic message, log the rest.
+        message = ErrorMessages.common.internalError;
       } else {
         message = exception.message;
       }

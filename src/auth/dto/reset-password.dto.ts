@@ -7,6 +7,6 @@ export class ResetPasswordDto {
 
   @TrimEnds()
   @IsString()
-  @MinLength(6)
+  @MinLength(8)
   newPassword: string;
 }

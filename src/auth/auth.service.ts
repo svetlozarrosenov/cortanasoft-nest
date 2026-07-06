@@ -9,6 +9,11 @@ import { normalizePermissions } from '../common/config/permissions.config';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
 
+// A valid bcrypt hash used to burn the same CPU time when an email doesn't
+// exist, so login response timing can't reveal whether an account is registered.
+const DUMMY_PASSWORD_HASH =
+  '$2b$10$wnjbajAkLYLtcKjDOuWJleLXWjLEd/ukaJDOV8LK28SUVt11nJguO';
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -40,26 +45,29 @@ export class AuthService {
       },
     });
 
-    if (!user || !user.isActive) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    if (user.userCompanies.length === 0) {
-      throw new UnauthorizedException('User has no company assigned');
-    }
-
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
+    // Always run a bcrypt compare (against a dummy hash when the user is
+    // missing) so response timing is the same whether or not the email exists.
+    const isPasswordValid = await bcrypt.compare(
+      password,
+      user?.password ?? DUMMY_PASSWORD_HASH,
+    );
 
     // Намираме компанията по подразбиране или първата активна
-    const defaultUserCompany =
-      user.userCompanies.find((uc) => uc.isDefault && uc.company.isActive) ||
-      user.userCompanies.find((uc) => uc.company.isActive);
+    const defaultUserCompany = user?.userCompanies.find(
+      (uc) => uc.isDefault && uc.company.isActive,
+    ) || user?.userCompanies.find((uc) => uc.company.isActive);
 
-    if (!defaultUserCompany) {
-      throw new UnauthorizedException('No active company found');
+    // Single generic error for every failure mode (unknown email, wrong
+    // password, inactive user, no/inactive company) to prevent account
+    // enumeration — never reveal which of these conditions failed.
+    if (
+      !user ||
+      !user.isActive ||
+      !isPasswordValid ||
+      user.userCompanies.length === 0 ||
+      !defaultUserCompany
+    ) {
+      throw new UnauthorizedException('Invalid credentials');
     }
 
     const { password: _, ...result } = user;

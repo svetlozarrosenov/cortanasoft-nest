@@ -57,6 +57,15 @@ export class OffersService {
     });
     if (!company) throw new NotFoundException('Компанията не е намерена');
 
+    // Verify the customer belongs to this company (cross-tenant IDOR guard).
+    if (dto.customerId) {
+      const customer = await this.prisma.customer.findFirst({
+        where: { id: dto.customerId, companyId },
+        select: { id: true },
+      });
+      if (!customer) throw new NotFoundException('Клиентът не е намерен');
+    }
+
     const defaultVatRate = company.vatNumber ? 20 : 0;
 
     // Validate products if provided
@@ -230,6 +239,15 @@ export class OffersService {
       throw new BadRequestException(
         'Може да редактирате само чернови оферти',
       );
+    }
+
+    // Verify a reassigned customer belongs to this company (IDOR guard).
+    if (dto.customerId) {
+      const customer = await this.prisma.customer.findFirst({
+        where: { id: dto.customerId, companyId },
+        select: { id: true },
+      });
+      if (!customer) throw new NotFoundException('Клиентът не е намерен');
     }
 
     if (!dto.items) {

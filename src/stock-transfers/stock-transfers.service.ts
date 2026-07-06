@@ -104,6 +104,23 @@ export class StockTransfersService {
       throw new BadRequestException('Някои продукти не са намерени');
     }
 
+    // Validate batch ids belong to this company so a client can't reference
+    // (and later decrement) another tenant's inventory batch (cross-tenant IDOR).
+    const batchIds = [
+      ...new Set(
+        dto.items.map((item) => item.inventoryBatchId).filter(Boolean),
+      ),
+    ] as string[];
+    if (batchIds.length > 0) {
+      const batches = await this.prisma.inventoryBatch.findMany({
+        where: { id: { in: batchIds }, companyId },
+        select: { id: true },
+      });
+      if (batches.length !== batchIds.length) {
+        throw new BadRequestException('Някои партиди не са намерени');
+      }
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const transferNumber = await this.generateTransferNumber(companyId, tx);
 
@@ -264,6 +281,22 @@ export class StockTransfersService {
       if (!loc) throw new NotFoundException('Локацията "до" не е намерена');
     }
 
+    // Validate batch ids belong to this company (cross-tenant IDOR guard).
+    if (dto.items && dto.items.length > 0) {
+      const batchIds = [
+        ...new Set(dto.items.map((item) => item.inventoryBatchId).filter(Boolean)),
+      ] as string[];
+      if (batchIds.length > 0) {
+        const batches = await this.prisma.inventoryBatch.findMany({
+          where: { id: { in: batchIds }, companyId },
+          select: { id: true },
+        });
+        if (batches.length !== batchIds.length) {
+          throw new BadRequestException('Някои партиди не са намерени');
+        }
+      }
+    }
+
     return this.prisma.$transaction(async (tx) => {
       // If items provided, replace all items
       if (dto.items && dto.items.length > 0) {
@@ -349,8 +382,9 @@ export class StockTransfersService {
         } else {
           // For batch/product — reduce quantity from source batch
           if (item.inventoryBatchId) {
-            const batch = await tx.inventoryBatch.findUnique({
-              where: { id: item.inventoryBatchId },
+            // Scope by companyId to prevent cross-tenant batch decrement (IDOR).
+            const batch = await tx.inventoryBatch.findFirst({
+              where: { id: item.inventoryBatchId, companyId },
             });
             if (!batch) {
               throw new BadRequestException(`Партида не е намерена за продукт ${product.name}`);

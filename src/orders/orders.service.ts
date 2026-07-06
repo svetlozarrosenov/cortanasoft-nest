@@ -183,6 +183,18 @@ export class OrdersService {
       throw new BadRequestException(ErrorMessages.orders.productsNotFound);
     }
 
+    // Verify the customer belongs to this company, so a client can't attach
+    // (and later read back / mutate) another tenant's customer record (IDOR).
+    if (dto.customerId) {
+      const customer = await this.prisma.customer.findFirst({
+        where: { id: dto.customerId, companyId },
+        select: { id: true },
+      });
+      if (!customer) {
+        throw new NotFoundException('Клиентът не е намерен');
+      }
+    }
+
     // Use company currency as default
     const currencyId = dto.currencyId || company.currencyId;
 
@@ -547,6 +559,17 @@ export class OrdersService {
   async update(companyId: string, id: string, dto: UpdateOrderDto) {
     const order = await this.findOne(companyId, id);
 
+    // Verify a reassigned customer belongs to this company (cross-tenant IDOR).
+    if (dto.customerId) {
+      const customer = await this.prisma.customer.findFirst({
+        where: { id: dto.customerId, companyId },
+        select: { id: true },
+      });
+      if (!customer) {
+        throw new NotFoundException('Клиентът не е намерен');
+      }
+    }
+
     // Status change
     if (dto.status && dto.status !== order.status) {
       // „Изпратена/Доставена" означава, че стоката физически излиза → всички
@@ -803,8 +826,13 @@ export class OrdersService {
 
           if (newItem.inventoryBatchId) {
             const newQty = Number(newItem.quantity);
-            const batch = await tx.inventoryBatch.findUnique({
-              where: { id: newItem.inventoryBatchId },
+            // Scope by companyId + productId to prevent cross-tenant batch IDOR.
+            const batch = await tx.inventoryBatch.findFirst({
+              where: {
+                id: newItem.inventoryBatchId,
+                companyId,
+                productId: newItem.productId,
+              },
             });
             if (!batch) {
               throw new BadRequestException(
@@ -1162,9 +1190,15 @@ export class OrdersService {
           const quantity = Number(item.quantity);
 
           if (item.inventoryBatchId) {
-            // Deduct from specific batch using atomic decrement
-            const batch = await tx.inventoryBatch.findUnique({
-              where: { id: item.inventoryBatchId },
+            // Deduct from specific batch using atomic decrement.
+            // Scope by companyId + productId so a client can't pass another
+            // tenant's batch id and decrement their stock (IDOR).
+            const batch = await tx.inventoryBatch.findFirst({
+              where: {
+                id: item.inventoryBatchId,
+                companyId,
+                productId: item.productId,
+              },
             });
 
             if (!batch) {

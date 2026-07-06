@@ -1,6 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Anthropic from '@anthropic-ai/sdk';
+import { lookup } from 'dns/promises';
+import { isIP } from 'net';
 
 export interface InvoiceLineItem {
   description: string;
@@ -53,6 +55,48 @@ export class DocumentAIService {
     return this.isConfigured;
   }
 
+  /** True if an IP literal is loopback, private, link-local or CGNAT. */
+  private isPrivateIp(ip: string): boolean {
+    if (isIP(ip) === 4) {
+      const [a, b] = ip.split('.').map(Number);
+      if (a === 0 || a === 10 || a === 127) return true;
+      if (a === 169 && b === 254) return true; // link-local / cloud metadata
+      if (a === 172 && b >= 16 && b <= 31) return true;
+      if (a === 192 && b === 168) return true;
+      if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+      return false;
+    }
+    const v6 = ip.toLowerCase();
+    if (v6 === '::1' || v6 === '::') return true;
+    if (v6.startsWith('fc') || v6.startsWith('fd')) return true; // ULA
+    if (v6.startsWith('fe80')) return true; // link-local
+    if (v6.startsWith('::ffff:')) return this.isPrivateIp(v6.slice(7));
+    return false;
+  }
+
+  /**
+   * Reject anything that isn't a plain http(s) URL resolving to a public IP,
+   * so a caller can't make the server reach internal services / cloud metadata.
+   */
+  private async assertSafePublicUrl(rawUrl: string): Promise<void> {
+    let url: URL;
+    try {
+      url = new URL(rawUrl);
+    } catch {
+      throw new BadRequestException('Невалиден URL адрес');
+    }
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+      throw new BadRequestException('Разрешени са само http(s) адреси');
+    }
+    const host = url.hostname;
+    const addresses = isIP(host)
+      ? [host]
+      : (await lookup(host, { all: true })).map((r) => r.address);
+    if (addresses.length === 0 || addresses.some((a) => this.isPrivateIp(a))) {
+      throw new BadRequestException('Достъпът до вътрешни адреси е забранен');
+    }
+  }
+
   /**
    * Parse an invoice image from URL using Claude Vision
    */
@@ -63,7 +107,11 @@ export class DocumentAIService {
     }
 
     try {
-      const imageResponse = await fetch(imageUrl);
+      // Guard against SSRF: imageUrl comes from the request body, so verify it
+      // points at a public host before the server fetches it, and refuse to
+      // follow redirects (which could bounce to an internal address).
+      await this.assertSafePublicUrl(imageUrl);
+      const imageResponse = await fetch(imageUrl, { redirect: 'error' });
       if (!imageResponse.ok) {
         throw new Error(`Failed to fetch image: ${imageResponse.statusText}`);
       }
