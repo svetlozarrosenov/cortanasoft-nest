@@ -7,10 +7,15 @@ import {
   Param,
   Delete,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   Query,
   Res,
   StreamableFile,
+  BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { ExpensesService } from './expenses.service';
 import {
@@ -26,10 +31,12 @@ import {
   RequireCreate,
   RequireEdit,
   RequireDelete,
+  RequireAnyPermission,
 } from '../common/guards/permissions.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ExportService } from '../common/export/export.service';
 import type { ExportFormat } from '../common/export/export.service';
+import { UploadsService } from '../uploads/uploads.service';
 
 @Controller('companies/:companyId/expenses')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)
@@ -37,7 +44,26 @@ export class ExpensesController {
   constructor(
     private readonly expensesService: ExpensesService,
     private readonly exportService: ExportService,
+    private readonly uploads: UploadsService,
   ) {}
+
+  // Качване на фактурата/бележката на разход (attachmentUrl пази R2 ключа).
+  // Отделен от uploads/invoice, който изисква warehouse.goodsReceipts права.
+  @Post('upload-attachment')
+  @RequireAnyPermission(
+    { module: 'erp', page: 'expenses', action: 'create' },
+    { module: 'erp', page: 'expenses', action: 'edit' },
+  )
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadAttachment(
+    @Param('companyId') companyId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Не е предоставен файл');
+    }
+    return this.uploads.uploadInvoice(companyId, file);
+  }
 
   @Post()
   @RequireCreate('erp', 'expenses')
@@ -89,6 +115,32 @@ export class ExpensesController {
   @RequireView('erp', 'expenses')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.expensesService.findOne(companyId, id);
+  }
+
+  // Стриймва прикачения файл на разхода (частен R2 ключ → през backend-а).
+  @Get(':id/attachment')
+  @RequireView('erp', 'expenses')
+  async attachment(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const expense = await this.expensesService.findOne(companyId, id);
+    if (!expense.attachmentUrl) {
+      throw new NotFoundException('Разходът няма прикачен файл');
+    }
+    // Легаси записи (Cortana scanner) може да пазят пълен URL вместо ключ.
+    if (/^https?:\/\//i.test(expense.attachmentUrl)) {
+      return res.redirect(expense.attachmentUrl);
+    }
+    const { stream, contentType, contentLength } = await this.uploads.getFile(
+      expense.attachmentUrl,
+    );
+    res.set({
+      'Content-Type': contentType,
+      ...(contentLength ? { 'Content-Length': String(contentLength) } : {}),
+    });
+    stream.pipe(res);
   }
 
   @Patch(':id')

@@ -147,11 +147,11 @@ export class AccountantService {
   }
 
   /**
-   * Expense register — purchase invoices for the month:
+   * Expense register — purchase documents for the month:
    *   • deliveries (goods receipts) that carry a supplier invoice
-   *   • standalone expenses with an invoice (not attached to a delivery)
-   * "Only records with an invoice" — a delivery-attached expense has no invoice
-   * of its own (it's on the delivery's invoice), so it is excluded.
+   *   • ALL standalone expenses (not attached to a delivery), with or without
+   *     an invoice number — the accountant decides what enters the дневник.
+   * A delivery-attached expense is excluded: its document lives on the delivery.
    * Merged + sorted by date, then paginated.
    */
   async expenses(companyId: string, query: QueryPeriodDto) {
@@ -186,13 +186,13 @@ export class AccountantService {
           companyId,
           status: { not: 'CANCELLED' },
           goodsReceiptId: null,
-          invoiceNumber: { not: null },
           expenseDate: { gte: start, lt: end },
         },
         select: {
           id: true,
           description: true,
           invoiceNumber: true,
+          receiptNumber: true,
           expenseDate: true,
           amount: true,
           vatAmount: true,
@@ -243,7 +243,8 @@ export class AccountantService {
         id: e.id,
         source: 'EXPENSE' as const,
         date: e.expenseDate,
-        documentNumber: e.invoiceNumber,
+        // Разход без фактура носи касов бон № (или нищо — пак влиза в описа).
+        documentNumber: e.invoiceNumber || e.receiptNumber,
         supplierName: e.supplier?.name || e.description,
         supplierEik: e.supplier?.eik || null,
         supplierVat: e.supplier?.vatNumber || null,
@@ -444,12 +445,12 @@ export class AccountantService {
           companyId,
           status: { not: 'CANCELLED' },
           goodsReceiptId: null,
-          invoiceNumber: { not: null },
           expenseDate: { gte: start, lt: end },
         },
         select: {
           description: true,
           invoiceNumber: true,
+          receiptNumber: true,
           expenseDate: true,
           amount: true,
           vatAmount: true,
@@ -480,7 +481,7 @@ export class AccountantService {
       ...expenses.map((e) => ({
         type: 'Разход',
         date: e.expenseDate,
-        documentNumber: e.invoiceNumber || '',
+        documentNumber: e.invoiceNumber || e.receiptNumber || '',
         supplierName: e.supplier?.name || e.description,
         supplierEik: e.supplier?.eik || '',
         supplierVat: e.supplier?.vatNumber || '',
@@ -808,7 +809,6 @@ export class AccountantService {
           companyId,
           status: { not: 'CANCELLED' },
           goodsReceiptId: null,
-          invoiceNumber: { not: null },
           expenseDate: { gte: start, lt: end },
         },
       }),

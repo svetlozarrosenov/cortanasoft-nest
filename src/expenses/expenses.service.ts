@@ -198,7 +198,7 @@ export class ExpensesService {
     if (dto.receiptNumber !== undefined)
       updateData.receiptNumber = dto.receiptNumber;
     if (dto.attachmentUrl !== undefined)
-      updateData.attachmentUrl = dto.attachmentUrl;
+      updateData.attachmentUrl = dto.attachmentUrl || null;
     if (dto.isRecurring !== undefined) updateData.isRecurring = dto.isRecurring;
     if (dto.recurringInterval !== undefined)
       updateData.recurringInterval = dto.recurringInterval;
