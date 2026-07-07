@@ -12,8 +12,10 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushNotificationsService } from '../push-notifications/push-notifications.service';
+import { UploadsService } from '../uploads/uploads.service';
 import { EmployeeRecordAuditService } from './employee-record-audit.service';
 import { EvrotrustService } from './evrotrust.service';
+import { EvrotrustIdentitiesService } from './evrotrust-identities.service';
 
 const REQUEST_INCLUDE = {
   file: {
@@ -46,8 +48,10 @@ export class EmployeeSignatureRequestsService {
   constructor(
     private prisma: PrismaService,
     private push: PushNotificationsService,
+    private uploads: UploadsService,
     private audit: EmployeeRecordAuditService,
     private evrotrust: EvrotrustService,
+    private identities: EvrotrustIdentitiesService,
   ) {}
 
   async create(
@@ -87,7 +91,7 @@ export class EmployeeSignatureRequestsService {
       throw new BadRequestException('Невалидно ниво на подпис');
     }
 
-    // AES/QES минават през Евротръст — засега заготовка
+    // AES/QES минават през Евротръст (OTP eSign по RefID)
     const provider = level === 'SES' ? 'INTERNAL' : 'EVROTRUST';
     if (provider === 'EVROTRUST' && !this.evrotrust.isConfigured()) {
       throw new BadRequestException(
@@ -95,6 +99,61 @@ export class EmployeeSignatureRequestsService {
           level +
           ' изисква интеграцията с Евротръст, която още не е активирана. Използвайте обикновен подпис (SES) или изчакайте активирането.',
       );
+    }
+
+    // EVROTRUST: файлът се изпраща веднага; providerRef = transactionID
+    let providerRef: string | null = null;
+    if (provider === 'EVROTRUST') {
+      const identity = await this.identities.activeIdentity(
+        companyId,
+        dto.signerUserId,
+      );
+      if (!identity) {
+        throw new BadRequestException(
+          'Служителят първо трябва да премине електронна идентификация през Евротръст („Моето досие" → „Електронна идентичност").',
+        );
+      }
+      if (!identity.documentNumber || !identity.firstNameLatin || !identity.lastNameLatin) {
+        throw new BadRequestException(
+          'Идентичността на служителя е непълна — необходима е нова идентификация.',
+        );
+      }
+
+      const signerUser = await this.prisma.user.findUnique({
+        where: { id: dto.signerUserId },
+        select: { email: true },
+      });
+      const { stream } = await this.uploads.getFile(file.fileKey);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) chunks.push(chunk as Buffer);
+
+      try {
+        const sent = await this.evrotrust.sendDocumentForSigning({
+          referenceId: identity.referenceId,
+          fileName: file.fileName,
+          content: Buffer.concat(chunks),
+          mimeType: file.mimeType,
+          user: {
+            documentNumber: identity.documentNumber,
+            firstNameLatin: identity.firstNameLatin,
+            lastNameLatin: identity.lastNameLatin,
+            phone: identity.phone || undefined,
+            email: signerUser?.email || undefined,
+            language: 'bg',
+          },
+          description: `Документ от трудовото досие: ${file.fileName}`,
+          certificateType: level === 'QES' ? 1 : 2,
+        });
+        providerRef = sent.transactionID;
+      } catch (err) {
+        if ((err as Error).message?.includes('EVROTRUST_REFID_INVALID')) {
+          await this.identities.invalidate(companyId, dto.signerUserId);
+          throw new BadRequestException(
+            'Идентификацията на служителя при Евротръст е невалидна/изтекла — необходима е нова идентификация.',
+          );
+        }
+        throw err;
+      }
     }
 
     const request = await this.prisma.employeeSignatureRequest.create({
@@ -105,17 +164,18 @@ export class EmployeeSignatureRequestsService {
         requestedById: actor.id,
         level,
         provider,
+        providerRef,
       },
       include: REQUEST_INCLUDE,
     });
 
-    // TODO(evrotrust): при provider EVROTRUST — качване на файла към
-    // EvrotrustService.createSignatureRequest() и запис на providerRef.
-
     this.push
       .sendToUser(dto.signerUserId, {
         title: 'Документ за подписване',
-        body: `Очаква вашия подпис: ${file.fileName}`,
+        body:
+          provider === 'EVROTRUST'
+            ? `Очаква вашия подпис: ${file.fileName}. Ще получите SMS код — въведете го в „Моето досие".`
+            : `Очаква вашия подпис: ${file.fileName}`,
         url: `/dashboard/${companyId}/employee-records/my`,
         tag: `signature-${request.id}`,
       })
@@ -179,10 +239,8 @@ export class EmployeeSignatureRequestsService {
     const request = await this.loadOwn(companyId, id, signer.id);
 
     if (request.provider !== 'INTERNAL') {
-      // TODO(evrotrust): подписването при Евротръст става в тяхното
-      // приложение; тук само ще проверяваме статуса по providerRef.
       throw new BadRequestException(
-        'Тази заявка се подписва през приложението на Евротръст',
+        'Тази заявка се подписва със SMS код от Евротръст — използвайте полето за код.',
       );
     }
 
@@ -294,5 +352,142 @@ export class EmployeeSignatureRequestsService {
   /** Има ли конфигуриран Евротръст — за UI бадж „очаква активиране". */
   providerStatus() {
     return { evrotrustConfigured: this.evrotrust.isConfigured() };
+  }
+
+  // ==================== Евротръст OTP + webhook ====================
+
+  /** Служителят въвежда SMS кода в нашия UI → активираме подписването. */
+  async submitOtp(
+    companyId: string,
+    id: string,
+    signer: { id: string; email?: string },
+    code: string,
+  ) {
+    const request = await this.loadOwn(companyId, id, signer.id);
+    if (request.provider !== 'EVROTRUST' || !request.providerRef) {
+      throw new BadRequestException('Заявката не се подписва със SMS код');
+    }
+    if (!code?.trim()) {
+      throw new BadRequestException('Въведете кода от SMS-а');
+    }
+
+    await this.evrotrust.activateSigning(request.providerRef, code.trim());
+
+    await this.audit.log(companyId, {
+      action: 'EVROTRUST_OTP',
+      actorId: signer.id,
+      actorEmail: signer.email ?? null,
+      targetUserId: signer.id,
+      entityType: 'employeeSignatureRequest',
+      entityId: id,
+      detail: `${request.file.fileName} — потвърден SMS код`,
+    });
+
+    // Статусът остава PENDING до webhook-а „Signed" от Евротръст
+    return { success: true };
+  }
+
+  async resendSms(companyId: string, id: string, signer: { id: string }) {
+    const request = await this.loadOwn(companyId, id, signer.id);
+    if (request.provider !== 'EVROTRUST' || !request.providerRef) {
+      throw new BadRequestException('Заявката не се подписва със SMS код');
+    }
+    const identity = await this.identities.activeIdentity(companyId, signer.id);
+    await this.evrotrust.resendActivationSms(
+      request.providerRef,
+      identity?.phone || undefined,
+    );
+    return { success: true };
+  }
+
+  /**
+   * Обработва callback-а /document/offline/ready от Евротръст (или polling
+   * резултат). Статуси: 1 Pending, 2 Signed, 3 Rejected, 4 Expired, 5 Failed,
+   * 6 Withdrawn, 7 Undeliverable, 8 Failed face recognition, 99 On hold.
+   */
+  async handleDocumentReady(
+    transactionId: string,
+    status: number,
+    errorDetail?: string,
+  ) {
+    const request = await this.prisma.employeeSignatureRequest.findFirst({
+      where: { providerRef: transactionId, provider: 'EVROTRUST' },
+      include: REQUEST_INCLUDE,
+    });
+    if (!request) {
+      this.logger.warn(
+        `Evrotrust callback за непознат transactionID: ${transactionId}`,
+      );
+      return { handled: false };
+    }
+    if (request.status !== 'PENDING') return { handled: true };
+
+    const now = new Date();
+    if (status === 2) {
+      // Signed — маркираме файла с реалното ниво на подписа.
+      // TODO(evrotrust-test): изтегляне на подписания файл (downloadSignedZip)
+      // и закачане като SIGNED_COPY — след уточняване на шифъра в тест средата.
+      await this.prisma.$transaction([
+        this.prisma.employeeSignatureRequest.update({
+          where: { id: request.id },
+          data: { status: 'SIGNED', signedAt: now },
+        }),
+        this.prisma.employeeDocumentFile.update({
+          where: { id: request.fileId },
+          data: { signatureType: request.level, signedAt: now },
+        }),
+      ]);
+      await this.audit.log(request.companyId, {
+        action: 'SIGN',
+        actorId: request.signerUserId,
+        targetUserId: request.signerUserId,
+        entityType: 'employeeSignatureRequest',
+        entityId: request.id,
+        detail: `${request.file.fileName} — подписан през Евротръст (${request.level})`,
+      });
+    } else if (status === 3) {
+      await this.prisma.employeeSignatureRequest.update({
+        where: { id: request.id },
+        data: {
+          status: 'DECLINED',
+          declinedAt: now,
+          declineReason: errorDetail || 'Отказано от подписващия (Евротръст)',
+        },
+      });
+    } else if (status === 6) {
+      await this.prisma.employeeSignatureRequest.update({
+        where: { id: request.id },
+        data: { status: 'CANCELLED' },
+      });
+    } else if ([4, 5, 7, 8].includes(status)) {
+      const reasons: Record<number, string> = {
+        4: 'Изтекъл срок за подписване',
+        5: 'Грешка при Евротръст',
+        7: 'Недоставим до потребителя',
+        8: 'Неуспешно лицево разпознаване',
+      };
+      await this.prisma.employeeSignatureRequest.update({
+        where: { id: request.id },
+        data: {
+          status: 'FAILED',
+          declineReason: errorDetail || reasons[status] || `Статус ${status}`,
+        },
+      });
+    } else {
+      return { handled: true }; // 1 Pending / 99 On hold — нищо за правене
+    }
+
+    if (request.requestedById) {
+      this.push
+        .sendToUser(request.requestedById, {
+          title: status === 2 ? 'Документ подписан (Евротръст)' : 'Неуспешно подписване',
+          body: request.file.fileName,
+          url: `/dashboard/${request.companyId}/employee-records`,
+          tag: `signature-${request.id}`,
+        })
+        .catch((err) => this.logger.error('Failed to push webhook result', err));
+    }
+
+    return { handled: true };
   }
 }

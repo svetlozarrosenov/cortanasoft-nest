@@ -25,6 +25,7 @@ import { EmployeeSubmissionsService } from './employee-submissions.service';
 import { DossierCopyRequestsService } from './dossier-copy-requests.service';
 import { EmployeeSignatureRequestsService } from './employee-signature-requests.service';
 import { EmployeeDocumentFilesService } from './employee-document-files.service';
+import { EvrotrustIdentitiesService } from './evrotrust-identities.service';
 import {
   CreateCopyRequestDto,
   CreateEmployeeSubmissionDto,
@@ -49,6 +50,7 @@ export class MyDossierController {
     private readonly copyRequests: DossierCopyRequestsService,
     private readonly signatures: EmployeeSignatureRequestsService,
     private readonly files: EmployeeDocumentFilesService,
+    private readonly evrotrustIdentities: EvrotrustIdentitiesService,
   ) {}
 
   @Get()
@@ -216,5 +218,70 @@ export class MyDossierController {
       { id: user.id, email: user.email },
       dto.reason,
     );
+  }
+
+  // ===== Евротръст: електронна идентичност (Поток 1) =====
+
+  @Get('evrotrust-identity')
+  @RequireView('employeeRecords', 'myDossier')
+  evrotrustIdentity(
+    @Param('companyId') companyId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.evrotrustIdentities.status(companyId, user.id);
+  }
+
+  @Post('evrotrust-identity/start')
+  @RequireView('employeeRecords', 'myDossier')
+  startEvrotrustIdentification(
+    @Param('companyId') companyId: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.evrotrustIdentities.startIdentification(companyId, {
+      id: user.id,
+      email: user.email,
+    });
+  }
+
+  @Post('evrotrust-identity/confirm')
+  @RequireView('employeeRecords', 'myDossier')
+  confirmEvrotrustIdentification(
+    @Param('companyId') companyId: string,
+    @CurrentUser() user: any,
+    @Body() dto: { referenceId: string },
+  ) {
+    return this.evrotrustIdentities.confirmIdentification(
+      companyId,
+      { id: user.id, email: user.email },
+      dto.referenceId,
+    );
+  }
+
+  // ===== Евротръст: SMS код за подписване (Поток 2) =====
+
+  @Post('signature-requests/:id/otp')
+  @RequireView('employeeRecords', 'myDossier')
+  submitOtp(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+    @Body() dto: { code: string },
+  ) {
+    return this.signatures.submitOtp(
+      companyId,
+      id,
+      { id: user.id, email: user.email },
+      dto.code,
+    );
+  }
+
+  @Post('signature-requests/:id/resend-sms')
+  @RequireView('employeeRecords', 'myDossier')
+  resendSms(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.signatures.resendSms(companyId, id, { id: user.id });
   }
 }

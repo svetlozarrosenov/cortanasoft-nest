@@ -265,6 +265,7 @@ model Company {
   employeeSubmissions   EmployeeSubmission[]
   dossierCopyRequests   DossierCopyRequest[]
   employeeSignatureRequests EmployeeSignatureRequest[]
+  evrotrustIdentities   EvrotrustIdentity[]
 
   // Договори
   contractTemplates ContractTemplate[]
@@ -4545,6 +4546,9 @@ enum EmployeeRecordAuditAction {
   COPY_REQUEST // Заявка за препис (чл. 5)
   COPY_FULFILLED // Изпълнена заявка за препис
   SETTINGS_UPDATE // Промяна на вътрешните правила
+  EVROTRUST_TERMS // Прието съгласие с ОУ на Евротръст (изискване на интеграцията)
+  EVROTRUST_IDENTIFICATION // Успешна идентификация през Evrotrust Web SDK
+  EVROTRUST_OTP // Потвърден SMS код за подписване (OTP eSign)
 }
 
 // Одит журнал (чл. 12): кой, кога, какво — append-only, БЕЗ update/delete
@@ -4654,6 +4658,44 @@ model DossierCopyRequest {
   @@index([companyId, status, dueAt])
   @@index([companyId, userId])
   @@map("dossier_copy_requests")
+}
+
+// Статус на Евротръст идентичност
+enum EvrotrustIdentityStatus {
+  ACTIVE // Валиден RefID (до 1 година от идентификацията)
+  EXPIRED // Изтекъл — нужна е нова идентификация
+  INVALIDATED // Обявен за невалиден от Евротръст (напр. грешка 485/487)
+}
+
+// Електронна идентичност на служител при Евротръст (Web SDK, Поток 1).
+// RefID-то се издава след еднократна идентификация (лична карта + биометрия)
+// и позволява OTP eSign подписване в рамките на 1 година, само със SMS код.
+// Пазим минимума данни, нужни за заявка за подпис — БЕЗ снимки (GDPR).
+model EvrotrustIdentity {
+  id     String                  @id @default(cuid())
+  status EvrotrustIdentityStatus @default(ACTIVE)
+
+  referenceId  String   @unique // RefID от Evrotrust Web SDK
+  identifiedAt DateTime @default(now())
+  expiresAt    DateTime // identifiedAt + 1 година
+
+  // Данни от getdata, изисквани при заявка за подпис
+  documentNumber  String? // Номер на лична карта
+  firstNameLatin  String?
+  lastNameLatin   String?
+  phone           String?
+
+  userId String // служителят
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, userId])
+  @@index([companyId, status])
+  @@map("evrotrust_identities")
 }
 
 // Доставчик на подписването

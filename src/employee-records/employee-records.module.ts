@@ -32,6 +32,8 @@ import { EmployeeSubmissionsService } from './employee-submissions.service';
 import { DossierCopyRequestsService } from './dossier-copy-requests.service';
 import { EmployeeSignatureRequestsService } from './employee-signature-requests.service';
 import { EvrotrustService } from './evrotrust.service';
+import { EvrotrustIdentitiesService } from './evrotrust-identities.service';
+import { EvrotrustWebhookController } from './evrotrust-webhook.controller';
 
 @Module({
   imports: [PrismaModule, UploadsModule, PushNotificationsModule],
@@ -49,6 +51,7 @@ import { EvrotrustService } from './evrotrust.service';
     CompanyEmployeeRecordNotificationsController,
     CompanyEmployeeProfilesController,
     MyDossierController,
+    EvrotrustWebhookController,
   ],
   providers: [
     EmployeeRecordNumberingService,
@@ -69,6 +72,7 @@ import { EvrotrustService } from './evrotrust.service';
     DossierCopyRequestsService,
     EmployeeSignatureRequestsService,
     EvrotrustService,
+    EvrotrustIdentitiesService,
     MyDossierService,
   ],
   exports: [
