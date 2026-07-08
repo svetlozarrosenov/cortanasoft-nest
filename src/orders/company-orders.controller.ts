@@ -126,6 +126,12 @@ export class CompanyOrdersController {
     return this.ordersService.cancel(companyId, id);
   }
 
+  @Post(':id/reopen')
+  @RequireEdit('erp', 'orders')
+  reopen(@Param('companyId') companyId: string, @Param('id') id: string) {
+    return this.ordersService.reopen(companyId, id);
+  }
+
   @Post(':id/issue-expedition')
   @RequireView('erp', 'expeditionNote')
   issueExpedition(

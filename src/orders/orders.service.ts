@@ -572,6 +572,13 @@ export class OrdersService {
 
     // Status change
     if (dto.status && dto.status !== order.status) {
+      // Анулирана поръчка е терминална за директни смени: cancel() е върнал
+      // стоката в склада, така че единственият валиден изход е reopen()
+      // (→ PENDING), откъдето confirm() изписва наличностите наново.
+      if (order.status === 'CANCELLED') {
+        throw new BadRequestException(ErrorMessages.orders.cancelledUseReopen);
+      }
+
       // „Изпратена/Доставена" означава, че стоката физически излиза → всички
       // партидни/складови редове трябва да са изписани преди това. Не можеш да
       // доставиш каквото нямаш. Серийните се обработват отделно и не блокират тук.
@@ -1421,6 +1428,28 @@ export class OrdersService {
         data: { status: 'CANCELLED' },
         include: ORDER_INCLUDE,
       });
+    });
+    await this.webhookDispatcher.emitOrderChanged(companyId, id);
+    return result;
+  }
+
+  // Възстановява грешно анулирана поръчка: CANCELLED → PENDING. Не пипа
+  // склада — cancel() вече е върнал количествата, а повторното изписване
+  // става по нормалния път при confirm() (с всички проверки за наличност).
+  // Гаранциите не се възстановяват (издават се наново при DELIVERED).
+  async reopen(companyId: string, id: string) {
+    const order = await this.findOne(companyId, id);
+
+    if (order.status !== 'CANCELLED') {
+      throw new BadRequestException(
+        ErrorMessages.orders.canOnlyReopenCancelled,
+      );
+    }
+
+    const result = await this.prisma.order.update({
+      where: { id },
+      data: { status: 'PENDING' },
+      include: ORDER_INCLUDE,
     });
     await this.webhookDispatcher.emitOrderChanged(companyId, id);
     return result;
