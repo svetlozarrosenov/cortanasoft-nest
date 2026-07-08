@@ -93,6 +93,67 @@ export class InvoicesService {
     _count: { select: { items: true } },
   };
 
+  // Кой стои на фактурата (bill-to). Приоритет: изричен override от диалога
+  // (dto.billToCustomerId) → полето „Фактурирай на" върху поръчката
+  // (order.billToCustomerId) → клиентът/данните по поръчката (запазено старо
+  // поведение: доставният адрес има приоритет). При bill-to клиент се вземат
+  // изцяло данните на CRM записа, вкл. неговият адрес: фактурният получател е
+  // различен субект от получателя на стоката, затова доставните данни на
+  // поръчката не се смесват.
+  private async resolveBillTo(
+    companyId: string,
+    order: {
+      customerId: string | null;
+      customerName: string;
+      billToCustomerId?: string | null;
+      shippingAddress: string | null;
+      shippingCity: string | null;
+      shippingPostalCode: string | null;
+      customer: {
+        eik: string | null;
+        vatNumber: string | null;
+        address: string | null;
+        city: string | null;
+        postalCode: string | null;
+      } | null;
+    },
+    billToOverrideId?: string,
+  ) {
+    const billToCustomerId = billToOverrideId || order.billToCustomerId;
+    if (billToCustomerId) {
+      const customer = await this.prisma.customer.findFirst({
+        where: { id: billToCustomerId, companyId },
+      });
+      if (!customer) {
+        throw new NotFoundException(ErrorMessages.invoices.billToCustomerNotFound);
+      }
+      const name =
+        customer.type === 'COMPANY'
+          ? customer.companyName
+          : [customer.firstName, customer.lastName].filter(Boolean).join(' ');
+      return {
+        customerId: customer.id,
+        customerName: name || order.customerName,
+        customerEik: customer.eik,
+        customerVatNumber: customer.vatNumber,
+        customerAddress: customer.address,
+        customerCity: customer.city,
+        customerPostalCode: customer.postalCode,
+      };
+    }
+
+    return {
+      customerId: order.customerId,
+      customerName: order.customerName,
+      customerEik: order.customer?.eik ?? null,
+      customerVatNumber: order.customer?.vatNumber ?? null,
+      customerAddress: order.shippingAddress || order.customer?.address || null,
+      customerCity: order.shippingCity || order.customer?.city || null,
+      customerPostalCode:
+        order.shippingPostalCode || order.customer?.postalCode || null,
+    };
+  }
+
   async createFromOrder(
     companyId: string,
     userId: string,
@@ -124,20 +185,8 @@ export class InvoicesService {
       throw new BadRequestException(ErrorMessages.invoices.canOnlyCreateFromConfirmed);
     }
 
-    // Get customer EIK and VAT from customer record if available
-    let customerEik: string | null = null;
-    let customerVatNumber: string | null = null;
-    let customerAddress = order.shippingAddress;
-    let customerCity = order.shippingCity;
-    let customerPostalCode = order.shippingPostalCode;
-
-    if (order.customer) {
-      customerEik = order.customer.eik;
-      customerVatNumber = order.customer.vatNumber;
-      customerAddress = customerAddress || order.customer.address;
-      customerCity = customerCity || order.customer.city;
-      customerPostalCode = customerPostalCode || order.customer.postalCode;
-    }
+    // Bill-to: клиентът по поръчката или изрично избран друг получател
+    const billTo = await this.resolveBillTo(companyId, order, dto.billToCustomerId);
 
     // Block REGULAR creation if there are unresolved ADVANCE invoices on this order
     const activeAdvances = await this.prisma.invoice.count({
@@ -231,13 +280,7 @@ export class InvoicesService {
           status: invoiceStatus,
           paidAmount: invoiceAllocatedPaid,
           orderId: order.id,
-          customerId: order.customerId,
-          customerName: order.customerName,
-          customerEik,
-          customerVatNumber,
-          customerAddress,
-          customerCity,
-          customerPostalCode,
+          ...billTo,
           subtotal: isFullFirstInvoice ? order.subtotal : partialSubtotal,
           vatAmount: isFullFirstInvoice ? order.vatAmount : partialVatAmount,
           discount: isFullFirstInvoice ? order.discount : partialDiscount,
@@ -318,19 +361,8 @@ export class InvoicesService {
       throw new BadRequestException(ErrorMessages.invoices.advanceExceedsOrder);
     }
 
-    // Customer denormalization
-    let customerEik: string | null = null;
-    let customerVatNumber: string | null = null;
-    let customerAddress = order.shippingAddress;
-    let customerCity = order.shippingCity;
-    let customerPostalCode = order.shippingPostalCode;
-    if (order.customer) {
-      customerEik = order.customer.eik;
-      customerVatNumber = order.customer.vatNumber;
-      customerAddress = customerAddress || order.customer.address;
-      customerCity = customerCity || order.customer.city;
-      customerPostalCode = customerPostalCode || order.customer.postalCode;
-    }
+    // Bill-to: клиентът по поръчката или изрично избран друг получател
+    const billTo = await this.resolveBillTo(companyId, order, dto.billToCustomerId);
 
     // Pro-rata split based on order's VAT structure
     const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -351,13 +383,7 @@ export class InvoicesService {
           status: 'ISSUED',
           paidAmount: 0,
           orderId: order.id,
-          customerId: order.customerId,
-          customerName: order.customerName,
-          customerEik,
-          customerVatNumber,
-          customerAddress,
-          customerCity,
-          customerPostalCode,
+          ...billTo,
           subtotal: partialSubtotal,
           vatAmount: partialVatAmount,
           discount: 0,
@@ -472,19 +498,8 @@ export class InvoicesService {
       throw new BadRequestException(ErrorMessages.invoices.deductionsExceedOrder);
     }
 
-    // Customer denormalization
-    let customerEik: string | null = null;
-    let customerVatNumber: string | null = null;
-    let customerAddress = order.shippingAddress;
-    let customerCity = order.shippingCity;
-    let customerPostalCode = order.shippingPostalCode;
-    if (order.customer) {
-      customerEik = order.customer.eik;
-      customerVatNumber = order.customer.vatNumber;
-      customerAddress = customerAddress || order.customer.address;
-      customerCity = customerCity || order.customer.city;
-      customerPostalCode = customerPostalCode || order.customer.postalCode;
-    }
+    // Bill-to: клиентът по поръчката или изрично избран друг получател
+    const billTo = await this.resolveBillTo(companyId, order, dto.billToCustomerId);
 
     const effectiveVatRate = this.effectiveVatRateForOrder(order);
 
@@ -542,13 +557,7 @@ export class InvoicesService {
           status: finalStatus,
           paidAmount: Math.min(allocatedPaid, Math.max(finalTotal, 0)),
           orderId: order.id,
-          customerId: order.customerId,
-          customerName: order.customerName,
-          customerEik,
-          customerVatNumber,
-          customerAddress,
-          customerCity,
-          customerPostalCode,
+          ...billTo,
           subtotal: finalSubtotal,
           vatAmount: finalVat,
           discount: orderDiscount,

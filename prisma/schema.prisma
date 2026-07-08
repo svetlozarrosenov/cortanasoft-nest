@@ -1306,6 +1306,7 @@ model Customer {
   assignedTo   User?   @relation("CustomerAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
 
   orders                 Order[]
+  billToOrders           Order[]                 @relation("OrderBillTo")
   offers                 Offer[]
   invoices               Invoice[]
   proformas              Proforma[]
@@ -1555,6 +1556,14 @@ model Order {
   customerName  String // Име на клиента
   customerEmail String? // Имейл
   customerPhone String? // Телефон
+
+  // Получател на фактурата (bill-to), когато е различен от клиента по
+  // поръчката — напр. физическо лице поръчва, но фактурата е на фирмата му
+  // (SAP bill-to party / Dynamics BC Bill-to Customer). NULL = фактурира се
+  // клиентът по поръчката. Фактурите наследяват това при издаване; в диалога
+  // за фактура може да се override-не еднократно.
+  billToCustomerId String?
+  billToCustomer   Customer? @relation("OrderBillTo", fields: [billToCustomerId], references: [id], onDelete: SetNull)
 
   // Доставка
   deliveryMethod     String  @default("none") // none, manual, econt_office, econt_address

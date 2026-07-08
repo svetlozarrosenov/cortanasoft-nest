@@ -25,6 +25,11 @@ export class UpdateOrderDto {
   @IsOptional()
   customerId?: string;
 
+  // Получател на фактурата (bill-to); празен string изчиства полето
+  @IsString()
+  @IsOptional()
+  billToCustomerId?: string;
+
   @IsString()
   @IsOptional()
   customerName?: string;

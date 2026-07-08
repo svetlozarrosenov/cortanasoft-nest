@@ -34,6 +34,9 @@ const mockPrisma: any = {
   invoiceAdvanceDeduction: {
     findMany: jest.fn(),
   },
+  customer: {
+    findFirst: jest.fn(),
+  },
   $transaction: jest.fn(async (cb: any) => cb(mockPrisma)),
 };
 
@@ -134,6 +137,114 @@ describe('InvoicesService', () => {
 
       const result = await service.createFromOrder('c1', 'u1', { orderId: 'ord1' } as any);
       expect(result.invoiceNumber).toBe('0000000008');
+    });
+
+    it('should denormalize order customer data when no bill-to override is given', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue(makeOrder('CONFIRMED'));
+      mockPrisma.invoice.findFirst.mockResolvedValue(null);
+      mockPrisma.invoice.create.mockImplementation(({ data }) => Promise.resolve({ id: 'inv1', ...data }));
+
+      const result = await service.createFromOrder('c1', 'u1', { orderId: 'ord1' } as any);
+      expect(result.customerId).toBe('cust1');
+      expect(result.customerName).toBe('Client');
+      expect(result.customerEik).toBe('123');
+      expect(result.customerAddress).toBe('Addr'); // shipping address wins (legacy)
+      expect(mockPrisma.customer.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('should bill a different customer when billToCustomerId is given (bill-to override)', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue(makeOrder('CONFIRMED'));
+      mockPrisma.invoice.findFirst.mockResolvedValue(null);
+      mockPrisma.customer.findFirst.mockResolvedValue({
+        id: 'firm1',
+        type: 'COMPANY',
+        companyName: 'Фирма ЕООД',
+        eik: '999888777',
+        vatNumber: 'BG999888777',
+        address: 'ул. Управление 1',
+        city: 'София',
+        postalCode: '1407',
+      });
+      mockPrisma.invoice.create.mockImplementation(({ data }) => Promise.resolve({ id: 'inv1', ...data }));
+
+      const result = await service.createFromOrder('c1', 'u1', {
+        orderId: 'ord1',
+        billToCustomerId: 'firm1',
+      } as any);
+
+      // Scoped lookup (IDOR guard)
+      expect(mockPrisma.customer.findFirst).toHaveBeenCalledWith({
+        where: { id: 'firm1', companyId: 'c1' },
+      });
+      // Invoice carries the bill-to company, not the order's individual
+      expect(result.customerId).toBe('firm1');
+      expect(result.customerName).toBe('Фирма ЕООД');
+      expect(result.customerEik).toBe('999888777');
+      expect(result.customerVatNumber).toBe('BG999888777');
+      // Company registered address, NOT the order's shipping address
+      expect(result.customerAddress).toBe('ул. Управление 1');
+      expect(result.customerCity).toBe('София');
+    });
+
+    it('should inherit bill-to from order.billToCustomerId when dialog gives no override', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue({
+        ...makeOrder('CONFIRMED'),
+        billToCustomerId: 'firm1',
+      });
+      mockPrisma.invoice.findFirst.mockResolvedValue(null);
+      mockPrisma.customer.findFirst.mockResolvedValue({
+        id: 'firm1',
+        type: 'COMPANY',
+        companyName: 'Фирма ЕООД',
+        eik: '999888777',
+        vatNumber: 'BG999888777',
+        address: 'ул. Управление 1',
+        city: 'София',
+        postalCode: '1407',
+      });
+      mockPrisma.invoice.create.mockImplementation(({ data }) => Promise.resolve({ id: 'inv1', ...data }));
+
+      const result = await service.createFromOrder('c1', 'u1', { orderId: 'ord1' } as any);
+      expect(result.customerId).toBe('firm1');
+      expect(result.customerEik).toBe('999888777');
+    });
+
+    it('should prefer the dialog override over order.billToCustomerId', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue({
+        ...makeOrder('CONFIRMED'),
+        billToCustomerId: 'firm1',
+      });
+      mockPrisma.invoice.findFirst.mockResolvedValue(null);
+      mockPrisma.customer.findFirst.mockResolvedValue({
+        id: 'firm2',
+        type: 'COMPANY',
+        companyName: 'Друга Фирма ООД',
+        eik: '111222333',
+        vatNumber: null,
+        address: null,
+        city: null,
+        postalCode: null,
+      });
+      mockPrisma.invoice.create.mockImplementation(({ data }) => Promise.resolve({ id: 'inv1', ...data }));
+
+      const result = await service.createFromOrder('c1', 'u1', {
+        orderId: 'ord1',
+        billToCustomerId: 'firm2',
+      } as any);
+      expect(mockPrisma.customer.findFirst).toHaveBeenCalledWith({
+        where: { id: 'firm2', companyId: 'c1' },
+      });
+      expect(result.customerId).toBe('firm2');
+    });
+
+    it('should throw NotFoundException when bill-to customer is not in the company', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue(makeOrder('CONFIRMED'));
+      mockPrisma.customer.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.createFromOrder('c1', 'u1', { orderId: 'ord1', billToCustomerId: 'foreign' } as any),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.invoice.create).not.toHaveBeenCalled();
     });
   });
 

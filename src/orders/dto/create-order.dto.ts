@@ -66,6 +66,11 @@ export class CreateOrderDto {
   @IsOptional()
   customerId?: string;
 
+  // Получател на фактурата (bill-to), ако е различен от клиента по поръчката
+  @IsString()
+  @IsOptional()
+  billToCustomerId?: string;
+
   @IsString()
   customerName: string;
 

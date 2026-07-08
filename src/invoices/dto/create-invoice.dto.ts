@@ -23,4 +23,11 @@ export class CreateInvoiceDto {
   @IsNumber()
   @Min(0.01)
   amount?: number;
+
+  // Bill-to override: издай фактурата на друг клиент от CRM (напр. поръчка,
+  // направена от физическо лице, но фактурирана на неговата фирма).
+  // Данните за доставка по поръчката остават непроменени.
+  @IsOptional()
+  @IsString()
+  billToCustomerId?: string;
 }

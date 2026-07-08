@@ -30,4 +30,9 @@ export class CreateAdvanceInvoiceDto {
   @IsOptional()
   @IsString()
   itemDescription?: string;
+
+  // Bill-to override: издай авансовата на друг клиент от CRM (виж CreateInvoiceDto).
+  @IsOptional()
+  @IsString()
+  billToCustomerId?: string;
 }

@@ -25,6 +25,20 @@ function round2(n: number): number {
 const ORDER_INCLUDE = {
   location: true,
   customer: true,
+  billToCustomer: {
+    select: {
+      id: true,
+      type: true,
+      companyName: true,
+      firstName: true,
+      lastName: true,
+      eik: true,
+      vatNumber: true,
+      address: true,
+      city: true,
+      postalCode: true,
+    },
+  },
   currency: true,
   createdBy: {
     select: { id: true, firstName: true, lastName: true },
@@ -195,6 +209,17 @@ export class OrdersService {
       }
     }
 
+    // Same tenant check for the bill-to customer (получател на фактурата)
+    if (dto.billToCustomerId) {
+      const billToCustomer = await this.prisma.customer.findFirst({
+        where: { id: dto.billToCustomerId, companyId },
+        select: { id: true },
+      });
+      if (!billToCustomer) {
+        throw new NotFoundException('Клиентът за фактуриране не е намерен');
+      }
+    }
+
     // Use company currency as default
     const currencyId = dto.currencyId || company.currencyId;
 
@@ -225,6 +250,7 @@ export class OrdersService {
           status: 'DRAFT',
           paymentStatus: 'PENDING',
           customerId: dto.customerId,
+          billToCustomerId: dto.billToCustomerId,
           customerName: dto.customerName,
           customerEmail: dto.customerEmail,
           customerPhone: dto.customerPhone,
@@ -570,6 +596,17 @@ export class OrdersService {
       }
     }
 
+    // Same tenant check for the bill-to customer (получател на фактурата)
+    if (dto.billToCustomerId) {
+      const billToCustomer = await this.prisma.customer.findFirst({
+        where: { id: dto.billToCustomerId, companyId },
+        select: { id: true },
+      });
+      if (!billToCustomer) {
+        throw new NotFoundException('Клиентът за фактуриране не е намерен');
+      }
+    }
+
     // Status change
     if (dto.status && dto.status !== order.status) {
       // Анулирана поръчка е терминална за директни смени: cancel() е върнал
@@ -759,6 +796,7 @@ export class OrdersService {
           data: {
             ...(dto.orderDate && { orderDate: new Date(dto.orderDate) }),
             ...(dto.customerId !== undefined && { customerId: dto.customerId || null }),
+            ...(dto.billToCustomerId !== undefined && { billToCustomerId: dto.billToCustomerId || null }),
             ...(dto.customerName && { customerName: dto.customerName }),
             ...(dto.customerEmail !== undefined && { customerEmail: dto.customerEmail }),
             ...(dto.customerPhone !== undefined && { customerPhone: dto.customerPhone }),
@@ -886,6 +924,7 @@ export class OrdersService {
       data: {
         ...(dto.orderDate && { orderDate: new Date(dto.orderDate) }),
         ...(dto.customerId !== undefined && { customerId: dto.customerId || null }),
+        ...(dto.billToCustomerId !== undefined && { billToCustomerId: dto.billToCustomerId || null }),
         ...(dto.customerName && { customerName: dto.customerName }),
         ...(dto.customerEmail !== undefined && { customerEmail: dto.customerEmail }),
         ...(dto.customerPhone !== undefined && { customerPhone: dto.customerPhone }),

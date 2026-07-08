@@ -34,4 +34,9 @@ export class CreateFinalInvoiceDto {
   @IsOptional()
   @IsString()
   deductionDescriptionTemplate?: string;
+
+  // Bill-to override: издай финалната на друг клиент от CRM (виж CreateInvoiceDto).
+  @IsOptional()
+  @IsString()
+  billToCustomerId?: string;
 }
