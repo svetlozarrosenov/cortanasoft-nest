@@ -196,6 +196,23 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
+        key: 'priceLists',
+        labelKey: 'modules.erp.priceLists.title',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'priceListsList',
+            labelKey: 'modules.erp.priceLists.listTable',
+            columns: [
+              { key: 'name', labelKey: 'common.name' },
+              { key: 'products', labelKey: 'modules.erp.products' },
+              { key: 'customers', labelKey: 'modules.crm.customers' },
+              { key: 'status', labelKey: 'common.status' },
+            ],
+          },
+        ],
+      },
+      {
         key: 'orders',
         labelKey: 'modules.erp.sales',
         actions: ['view', 'create', 'edit', 'delete'],

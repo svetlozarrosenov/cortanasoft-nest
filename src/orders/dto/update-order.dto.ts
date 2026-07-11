@@ -21,6 +21,16 @@ export class UpdateOrderDto {
   @IsOptional()
   status?: OrderStatus;
 
+  // Кога стоката реално е изпратена/доставена (подават се от модала за
+  // окомплектоване заедно със смяната на статус; ISO date string)
+  @IsString()
+  @IsOptional()
+  shippedAt?: string;
+
+  @IsString()
+  @IsOptional()
+  deliveredAt?: string;
+
   @IsString()
   @IsOptional()
   customerId?: string;

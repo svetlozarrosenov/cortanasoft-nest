@@ -617,28 +617,42 @@ export class OrdersService {
       }
 
       // „Изпратена/Доставена" означава, че стоката физически излиза → всички
-      // партидни/складови редове трябва да са изписани преди това. Не можеш да
-      // доставиш каквото нямаш. Серийните се обработват отделно и не блокират тук.
+      // проследими редове трябва да са изписани преди това: партидните — със
+      // stockDeducted, серийните — със закачен сериен номер. Не можеш да
+      // доставиш каквото не си извадил от склада.
       if (dto.status === 'SHIPPED' || dto.status === 'DELIVERED') {
         const unfulfilled = order.items.filter(
           (it) =>
             it.product &&
             it.product.type !== 'SERVICE' &&
-            it.product.type !== 'SERIAL' &&
             it.product.trackInventory &&
-            !it.stockDeducted,
+            (it.product.type === 'SERIAL'
+              ? !it.inventorySerialId
+              : !it.stockDeducted),
         );
         if (unfulfilled.length > 0) {
           throw new BadRequestException(
-            'Поръчката има неизписани редове. Окомплектовайте (изберете партиди), преди да я маркирате като изпратена/доставена.',
+            'Поръчката има неизписани редове. Окомплектовайте (изберете партиди/серийни номера), преди да я маркирате като изпратена/доставена.',
           );
         }
       }
 
       // Simple status transitions (CONFIRMED→PROCESSING, PROCESSING→SHIPPED, SHIPPED→DELIVERED)
+      // При преход към SHIPPED/DELIVERED записваме и реалната дата на
+      // изпращане/доставка: подадената от модала или момента на прехода.
+      // Веднъж попълнена дата не се презаписва автоматично при повторен преход.
       const updated = await this.prisma.order.update({
         where: { id },
-        data: { status: dto.status },
+        data: {
+          status: dto.status,
+          ...(dto.status === 'SHIPPED' && {
+            shippedAt: dto.shippedAt ? new Date(dto.shippedAt) : order.shippedAt || new Date(),
+          }),
+          ...(dto.status === 'DELIVERED' && {
+            ...(dto.shippedAt && { shippedAt: new Date(dto.shippedAt) }),
+            deliveredAt: dto.deliveredAt ? new Date(dto.deliveredAt) : order.deliveredAt || new Date(),
+          }),
+        },
         include: ORDER_INCLUDE,
       });
 
@@ -992,12 +1006,14 @@ export class OrdersService {
   }
 
   // Връща плана за окомплектоване: за всеки неизписан партиден ред — наличните
-  // партиди (FEFO подредени) + предложено разпределение. Серийните и
-  // непроследимите редове се прескачат (обработват се другаде).
+  // партиди (FEFO подредени) + предложено разпределение; за всеки сериен ред
+  // без закачен номер — свободните серийни номера за избор. Непроследимите
+  // редове се прескачат.
   async getFulfillmentPlan(companyId: string, id: string) {
     const order = await this.findOne(companyId, id);
     const lines: Array<{
       orderItemId: string;
+      kind: 'batch' | 'serial';
       productId: string;
       productName: string;
       unit: string;
@@ -1010,20 +1026,57 @@ export class OrdersService {
         expiryDate: Date | null;
         locationName: string | null;
       }>;
+      availableSerials: Array<{
+        id: string;
+        serialNumber: string;
+        locationName: string | null;
+      }>;
       suggested: Array<{ inventoryBatchId: string; quantity: number }>;
     }> = [];
 
     for (const item of order.items) {
       const product = item.product;
-      if (
-        !product ||
-        product.type === 'SERVICE' ||
-        product.type === 'SERIAL' ||
-        !product.trackInventory ||
-        item.stockDeducted
-      ) {
+      if (!product || product.type === 'SERVICE' || !product.trackInventory) {
         continue;
       }
+
+      // Сериен ред без закачен номер: изисква избор при окомплектоване.
+      // Гледаме inventorySerialId, не stockDeducted — интеграционни поръчки
+      // може да носят грешен флаг, а липсващият номер е фактът, който тежи.
+      if (product.type === 'SERIAL') {
+        if (item.inventorySerialId) continue;
+        const serialLocId = item.locationId || order.locationId;
+        const serials = await this.prisma.inventorySerial.findMany({
+          where: {
+            companyId,
+            productId: item.productId,
+            status: 'IN_STOCK',
+            orderItems: { none: {} },
+            ...(serialLocId && { locationId: serialLocId }),
+          },
+          orderBy: { createdAt: 'asc' },
+          include: { location: { select: { name: true } } },
+        });
+        lines.push({
+          orderItemId: item.id,
+          kind: 'serial',
+          productId: item.productId,
+          productName: product.name,
+          unit: product.unit,
+          quantity: Number(item.quantity),
+          totalAvailable: serials.length,
+          availableBatches: [],
+          availableSerials: serials.map((s) => ({
+            id: s.id,
+            serialNumber: s.serialNumber,
+            locationName: s.location?.name ?? null,
+          })),
+          suggested: [],
+        });
+        continue;
+      }
+
+      if (item.stockDeducted) continue;
 
       const locId = item.locationId || order.locationId;
       const batches = await this.prisma.inventoryBatch.findMany({
@@ -1052,6 +1105,7 @@ export class OrdersService {
 
       lines.push({
         orderItemId: item.id,
+        kind: 'batch',
         productId: item.productId,
         productName: product.name,
         unit: product.unit,
@@ -1066,6 +1120,7 @@ export class OrdersService {
           expiryDate: b.expiryDate,
           locationName: b.location?.name ?? null,
         })),
+        availableSerials: [],
         suggested,
       });
     }
@@ -1073,9 +1128,10 @@ export class OrdersService {
     return { orderId: id, lines };
   }
 
-  // Окомплектоване/изписване: изписва посочените редове от избраните партиди,
-  // записва разпределенията и маркира редовете като изписани. Сумата на
-  // избраните партиди по ред трябва да е точно количеството на реда.
+  // Окомплектоване/изписване: изписва посочените редове от избраните партиди
+  // (сумата по ред трябва да е точно количеството) или от избран сериен номер
+  // (маркира го SOLD и го закача към реда). Записва разпределенията и маркира
+  // редовете като изписани.
   async fulfill(companyId: string, id: string, dto: FulfillOrderDto) {
     const order = await this.findOne(companyId, id);
 
@@ -1085,7 +1141,6 @@ export class OrdersService {
         if (!item) {
           throw new BadRequestException('Невалиден ред в поръчката');
         }
-        if (item.stockDeducted) continue; // вече е изписан
 
         const product = await tx.product.findUnique({
           where: { id: item.productId },
@@ -1093,11 +1148,43 @@ export class OrdersService {
         if (!product || product.type === 'SERVICE' || !product.trackInventory) {
           continue;
         }
+
+        // Серийни: закача избрания номер, ако съществува и е свободен.
+        // Проверката е по inventorySerialId (не stockDeducted) — виж плана.
         if (product.type === 'SERIAL') {
-          throw new BadRequestException(
-            `Серийните продукти се изписват чрез избор на сериен номер: "${product.name}"`,
-          );
+          if (item.inventorySerialId) continue; // вече е изписан
+          if (!lineAlloc.inventorySerialId) {
+            throw new BadRequestException(
+              `Изберете сериен номер за "${product.name}"`,
+            );
+          }
+          const serial = await tx.inventorySerial.findFirst({
+            where: {
+              id: lineAlloc.inventorySerialId,
+              companyId,
+              productId: item.productId,
+            },
+          });
+          if (!serial) {
+            throw new BadRequestException(ErrorMessages.inventory.serialNotFound);
+          }
+          if (serial.status !== 'IN_STOCK') {
+            throw new BadRequestException(
+              `${ErrorMessages.inventory.serialNotInStock}: "${product.name}" - SN: ${serial.serialNumber}`,
+            );
+          }
+          await tx.inventorySerial.update({
+            where: { id: serial.id },
+            data: { status: 'SOLD' },
+          });
+          await tx.orderItem.update({
+            where: { id: item.id },
+            data: { inventorySerialId: serial.id, stockDeducted: true },
+          });
+          continue;
         }
+
+        if (item.stockDeducted) continue; // вече е изписан
 
         const sum = lineAlloc.batches.reduce(
           (s, b) => s + Number(b.quantity),

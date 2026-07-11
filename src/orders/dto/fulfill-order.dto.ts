@@ -1,5 +1,6 @@
 import {
   IsString,
+  IsOptional,
   IsArray,
   ValidateNested,
   IsNumber,
@@ -26,6 +27,12 @@ export class FulfillOrderItemDto {
   @ValidateNested({ each: true })
   @Type(() => FulfillBatchAllocationDto)
   batches: FulfillBatchAllocationDto[];
+
+  // За серийни редове: избраният свободен сериен номер, който се изписва
+  // (маркира се SOLD и се закача към реда). batches остава празен масив.
+  @IsOptional()
+  @IsString()
+  inventorySerialId?: string;
 }
 
 export class FulfillOrderDto {

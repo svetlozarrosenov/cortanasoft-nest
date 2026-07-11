@@ -360,6 +360,10 @@ export class IntegrationsService {
       bacs: PaymentMethod.BANK_TRANSFER,
       cheque: PaymentMethod.BANK_TRANSFER,
       cash: PaymentMethod.CASH,
+      // Кредит от банка (TBI / PBPF): shop-ът праща 'financing'; банката
+      // превежда сумата по сметка, така че счетоводно това е банков превод —
+      // без този ред падаше в default-а CARD и кредитите излизаха "С карта".
+      financing: PaymentMethod.BANK_TRANSFER,
     };
 
     return map[method.toLowerCase()] || PaymentMethod.CARD;

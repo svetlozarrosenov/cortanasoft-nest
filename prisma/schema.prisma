@@ -205,6 +205,7 @@ model Company {
   orders                       Order[]
   offers                       Offer[]
   customers                    Customer[]
+  priceLists                   PriceList[]
   invoices                     Invoice[]
   proformas                    Proforma[]
   deals                        Deal[]
@@ -1009,6 +1010,7 @@ model Product {
   inventoryBatches        InventoryBatch[]
   inventorySerials        InventorySerial[]
   orderItems              OrderItem[]
+  priceListItems          PriceListItem[]
   offerItems              OfferItem[]
   invoiceItems            InvoiceItem[]
   proformaItems           ProformaItem[]
@@ -1305,6 +1307,12 @@ model Customer {
   assignedToId String?
   assignedTo   User?   @relation("CustomerAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
 
+  // Ценова листа на клиента: продажбите взимат дефолтната единична цена от
+  // нея (ако продуктът присъства), иначе от Product.salePrice. Назначава се
+  // от страницата на ценовата листа, не от формата на клиента.
+  priceListId String?
+  priceList   PriceList? @relation(fields: [priceListId], references: [id], onDelete: SetNull)
+
   orders                 Order[]
   billToOrders           Order[]                 @relation("OrderBillTo")
   offers                 Offer[]
@@ -1459,6 +1467,50 @@ model DealTask {
   @@map("deal_tasks")
 }
 
+// ==================== ЦЕНОВИ ЛИСТИ ====================
+
+// Ценова листа: договорени цени по продукт, назначавана на клиенти.
+// Единствената ѝ роля е при продажба дефолтната единична цена да идва от нея
+// (щом клиентът е в листата и продуктът има ред), с възможност за ръчна
+// промяна на реда. Няколко клиенти могат да споделят една листа.
+model PriceList {
+  id       String  @id @default(cuid())
+  name     String // Име (напр. „Дистрибутори", „Цени Клиент Х")
+  isActive Boolean @default(true) // Неактивна листа не влияе на продажбите
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  items     PriceListItem[]
+  customers Customer[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@map("price_lists")
+}
+
+// Ред от ценова листа: договорена единична продажна цена (без ДДС) за продукт
+model PriceListItem {
+  id    String  @id @default(cuid())
+  price Decimal @db.Decimal(10, 2)
+
+  priceListId String
+  priceList   PriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([priceListId, productId])
+  @@index([productId])
+  @@map("price_list_items")
+}
+
 // ==================== КЛИЕНТСКИ ПОРЪЧКИ (ПРОДАЖБИ) ====================
 
 // Статус на клиентска поръчка
@@ -1580,6 +1632,12 @@ model Order {
   // полето служи само да издаваме веднъж и да маркираме в UI (зелена иконка),
   // че листът вече е изваден.
   expeditionIssuedAt DateTime?
+
+  // Кога стоката реално е изпратена/доставена. Попълват се от модала за
+  // окомплектоване при смяна на статуса (редактируеми дати), а при директна
+  // смяна без модал — автоматично с момента на прехода.
+  shippedAt   DateTime?
+  deliveredAt DateTime?
 
   // Плащане
   paymentMethod  PaymentMethod @default(CASH)

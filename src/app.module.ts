@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
 import { ProductsModule } from './products/products.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
+import { PriceListsModule } from './price-lists/price-lists.module';
 import { LocationsModule } from './locations/locations.module';
 import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
 import { InventoryModule } from './inventory/inventory.module';
@@ -86,6 +87,7 @@ import { SupportModule } from './support/support.module';
     AdminModule,
     ProductsModule,
     SuppliersModule,
+    PriceListsModule,
     LocationsModule,
     GoodsReceiptsModule,
     InventoryModule,
