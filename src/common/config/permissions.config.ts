@@ -131,6 +131,14 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
+        // Управление на партньори (прекупвачи): edit позволява маркиране на
+        // клиент като партньор, задаване „Доведен от" и прехвърляне на
+        // клиенти между партньори.
+        key: 'partners',
+        labelKey: 'modules.crm.partnersPermission',
+        actions: ['view', 'edit'],
+      },
+      {
         key: 'deals',
         labelKey: 'modules.crm.deals',
         actions: ['view', 'create', 'edit', 'delete'],
@@ -731,6 +739,13 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
       {
         key: 'products',
         labelKey: 'modules.bi.products',
+        actions: ['view'],
+      },
+      {
+        // Оборот по партньори (snapshot от Order.partnerCustomerId —
+        // историята на бивши партньори се пази)
+        key: 'partners',
+        labelKey: 'modules.bi.partners',
         actions: ['view'],
       },
     ],

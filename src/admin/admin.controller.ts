@@ -288,6 +288,7 @@ export class AdminController {
       dto.userId,
       dto.roleId,
       dto.isDefault,
+      dto.partnerCustomerId,
     );
     return {
       success: true,
@@ -300,15 +301,27 @@ export class AdminController {
     @Param('companyId') companyId: string,
     @Param('userId') userId: string,
     @Body('roleId') roleId: string,
+    @Body('partnerCustomerId') partnerCustomerId?: string | null,
   ) {
     const userCompany = await this.adminService.updateUserCompanyRole(
       companyId,
       userId,
       roleId,
+      partnerCustomerId,
     );
     return {
       success: true,
       userCompany,
+    };
+  }
+
+  // Клиенти-партньори на компанията (за партньорски акаунти)
+  @Get('companies/:companyId/partners')
+  async getCompanyPartners(@Param('companyId') companyId: string) {
+    const partners = await this.adminService.findPartnersByCompany(companyId);
+    return {
+      success: true,
+      partners,
     };
   }
 

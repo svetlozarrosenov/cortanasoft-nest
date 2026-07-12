@@ -29,6 +29,7 @@ interface UserCompanyAssignmentData {
   companyId: string;
   roleId: string;
   isDefault?: boolean;
+  partnerCustomerId?: string | null;
 }
 
 @Injectable()
@@ -342,12 +343,18 @@ export class AdminService {
 
     // Добавяне на потребителя към компании
     if (dto.companies && dto.companies.length > 0) {
+      for (const c of dto.companies as UserCompanyAssignmentData[]) {
+        if (c.partnerCustomerId) {
+          await this.validatePartnerCustomer(c.companyId, c.partnerCustomerId);
+        }
+      }
       await this.prisma.userCompany.createMany({
         data: dto.companies.map((c: UserCompanyAssignmentData) => ({
           userId: user.id,
           companyId: c.companyId,
           roleId: c.roleId,
           isDefault: c.isDefault ?? false,
+          partnerCustomerId: c.partnerCustomerId || null,
         })),
       });
     }
@@ -437,12 +444,20 @@ export class AdminService {
         : dto.companies;
 
       if (companiesToAdd.length > 0) {
+        for (const c of companiesToAdd as UserCompanyAssignmentData[]) {
+          if (c.partnerCustomerId) {
+            await this.validatePartnerCustomer(c.companyId, c.partnerCustomerId);
+          }
+        }
         await this.prisma.userCompany.createMany({
           data: companiesToAdd.map((c: UserCompanyAssignmentData) => ({
             userId: id,
             companyId: c.companyId,
             roleId: c.roleId,
             isDefault: c.isDefault ?? false,
+            // Връзките се трият и пресъздават при update — без това поле
+            // партньорската асоциация би се губила при всяка редакция
+            partnerCustomerId: c.partnerCustomerId || null,
           })),
         });
       }
@@ -686,12 +701,46 @@ export class AdminService {
           },
         },
         role: true,
+        partnerCustomer: {
+          select: {
+            id: true,
+            type: true,
+            companyName: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
       },
       orderBy: {
         user: {
           firstName: 'asc',
         },
       },
+    });
+  }
+
+  // Клиенти-партньори на компанията — за select-а „Партньорски акаунт" в
+  // админ формата за потребител
+  async findPartnersByCompany(companyId: string) {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+    });
+
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
+    return this.prisma.customer.findMany({
+      where: { companyId, isPartner: true, isActive: true },
+      select: {
+        id: true,
+        type: true,
+        companyName: true,
+        firstName: true,
+        lastName: true,
+        city: true,
+      },
+      orderBy: { companyName: 'asc' },
     });
   }
 
@@ -739,11 +788,34 @@ export class AdminService {
     });
   }
 
+  // Партньорският акаунт се връзва само към клиент-партньор от СЪЩАТА
+  // компания — иначе customers-филтърът би сочил чужд tenant.
+  private async validatePartnerCustomer(
+    companyId: string,
+    partnerCustomerId: string,
+  ) {
+    const partner = await this.prisma.customer.findFirst({
+      where: { id: partnerCustomerId, companyId },
+      select: { id: true, isPartner: true },
+    });
+    if (!partner) {
+      throw new BadRequestException(
+        'Избраният партньор не е намерен в тази компания',
+      );
+    }
+    if (!partner.isPartner) {
+      throw new BadRequestException(
+        'Избраният клиент не е маркиран като партньор',
+      );
+    }
+  }
+
   async assignUserToCompany(
     companyId: string,
     userId: string,
     roleId: string,
     isDefault?: boolean,
+    partnerCustomerId?: string | null,
   ) {
     // Проверка дали компанията съществува
     const company = await this.prisma.company.findUnique({
@@ -786,6 +858,10 @@ export class AdminService {
       throw new BadRequestException('User is already assigned to this company');
     }
 
+    if (partnerCustomerId) {
+      await this.validatePartnerCustomer(companyId, partnerCustomerId);
+    }
+
     // Създаване на връзката
     return this.prisma.userCompany.create({
       data: {
@@ -793,6 +869,7 @@ export class AdminService {
         companyId,
         roleId,
         isDefault: isDefault ?? false,
+        partnerCustomerId: partnerCustomerId || null,
       },
       include: {
         user: {
@@ -853,6 +930,7 @@ export class AdminService {
     companyId: string,
     userId: string,
     roleId: string,
+    partnerCustomerId?: string | null,
   ) {
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
@@ -884,6 +962,10 @@ export class AdminService {
       throw new NotFoundException('User is not assigned to this company');
     }
 
+    if (partnerCustomerId) {
+      await this.validatePartnerCustomer(companyId, partnerCustomerId);
+    }
+
     return this.prisma.userCompany.update({
       where: {
         userId_companyId: {
@@ -893,6 +975,10 @@ export class AdminService {
       },
       data: {
         roleId,
+        // undefined = не пипаме; null/'' = сваляме партньорската асоциация
+        ...(partnerCustomerId !== undefined && {
+          partnerCustomerId: partnerCustomerId || null,
+        }),
       },
       include: {
         user: {

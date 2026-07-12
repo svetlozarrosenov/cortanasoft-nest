@@ -118,6 +118,7 @@ export class AuthService {
         termsAcceptedAt: user.termsAcceptedAt,
         currentCompany,
         currentRole,
+        partnerCustomerId: user.defaultUserCompany.partnerCustomerId ?? null,
         companies: user.userCompanies.map((uc) => ({
           id: uc.company.id,
           name: uc.company.name,
@@ -175,6 +176,7 @@ export class AuthService {
         permissions: normalizePermissions(userCompany.role.permissions as any),
       },
       isSuperAdmin: userCompany.company.role === 'OWNER',
+      partnerCustomerId: userCompany.partnerCustomerId ?? null,
     };
   }
 

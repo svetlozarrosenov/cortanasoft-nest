@@ -511,13 +511,19 @@ export class CustomWebsiteService {
     // Look up or create the Customer record for this email.
     const email = (shopOrder.customer.email || '').toLowerCase();
     let customerId: string | null = null;
+    // Партньорска атрибуция (snapshot) — същата логика като orders.service:
+    // партньорът, довел клиента, или самият клиент, ако е партньор.
+    let partnerCustomerId: string | null = null;
     if (email) {
       const existingCustomer = await this.prisma.customer.findFirst({
         where: { companyId, email },
-        select: { id: true },
+        select: { id: true, isPartner: true, referredById: true },
       });
       if (existingCustomer) {
         customerId = existingCustomer.id;
+        partnerCustomerId =
+          existingCustomer.referredById ??
+          (existingCustomer.isPartner ? existingCustomer.id : null);
       } else {
         const created = await this.prisma.customer.create({
           data: {
@@ -599,6 +605,7 @@ export class CustomWebsiteService {
         orderDate: new Date(shopOrder.createdAt),
         status,
         customerId,
+        partnerCustomerId,
         customerName: `${shopOrder.customer.firstName || ''} ${shopOrder.customer.lastName || ''}`.trim() || email || 'Unknown',
         customerEmail: email || null,
         customerPhone: shopOrder.customer.phone || null,

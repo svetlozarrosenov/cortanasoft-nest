@@ -13,16 +13,35 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { CustomersService } from './customers.service';
-import { CreateCustomerDto, UpdateCustomerDto, QueryCustomersDto } from './dto';
+import {
+  CreateCustomerDto,
+  UpdateCustomerDto,
+  QueryCustomersDto,
+  TransferReferralsDto,
+} from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import {
   PermissionsGuard,
   RequireAnyPermission,
+  RequireEdit,
+  checkPermission,
 } from '../common/guards/permissions.guard';
 import { ExportService } from '../common/export/export.service';
 import type { ExportFormat } from '../common/export/export.service';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CustomerStage, CustomerSource } from '@prisma/client';
+
+// Партньорски scope: потребител с UserCompany.partnerCustomerId вижда/пипа
+// само своя партньорски картон + доведените от него клиенти. null = пълен
+// достъп (обикновен потребител).
+const partnerScopeOf = (user: any): string | null =>
+  user?.partnerCustomerId ?? null;
+
+// Право за управление на партньорските полета (isPartner / referredById) —
+// дава се от Администрация > Компании > Роли > CRM > Партньори (редакция)
+const canManagePartnersOf = (user: any): boolean =>
+  checkPermission(user?.currentRole?.permissions, 'crm', 'partners', 'edit');
 
 // Customers and Leads are the same entity (leads = customers with stage LEAD)
 // served by these endpoints. Allow either the 'customers' or the 'contacts'
@@ -47,8 +66,25 @@ export class CompanyCustomersController {
   create(
     @Param('companyId') companyId: string,
     @Body() dto: CreateCustomerDto,
+    @CurrentUser() user: any,
   ) {
-    return this.customersService.create(companyId, dto);
+    return this.customersService.create(
+      companyId,
+      dto,
+      partnerScopeOf(user),
+      canManagePartnersOf(user),
+    );
+  }
+
+  // Прехвърляне на клиентите на партньор към друг (при смяна на договор).
+  // Историята остава по snapshot-а в поръчките.
+  @Post('transfer-referrals')
+  @RequireEdit('crm', 'partners')
+  transferReferrals(
+    @Param('companyId') companyId: string,
+    @Body() dto: TransferReferralsDto,
+  ) {
+    return this.customersService.transferReferrals(companyId, dto);
   }
 
   @Get()
@@ -56,8 +92,13 @@ export class CompanyCustomersController {
   async findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryCustomersDto,
+    @CurrentUser() user: any,
   ) {
-    return await this.customersService.findAll(companyId, query);
+    return await this.customersService.findAll(
+      companyId,
+      query,
+      partnerScopeOf(user),
+    );
   }
 
   @Get('export')
@@ -67,8 +108,13 @@ export class CompanyCustomersController {
     @Query() query: QueryCustomersDto,
     @Query('format') format: ExportFormat = 'xlsx',
     @Res({ passthrough: true }) res: Response,
+    @CurrentUser() user: any,
   ) {
-    const { data } = await this.customersService.findAll(companyId, { ...query, page: 1, limit: 100000 } as any);
+    const { data } = await this.customersService.findAll(
+      companyId,
+      { ...query, page: 1, limit: 100000 } as any,
+      partnerScopeOf(user),
+    );
     const columns = [
       { header: 'Company Name', key: 'companyName', width: 25 },
       { header: 'First Name', key: 'firstName', width: 20 },
@@ -105,8 +151,12 @@ export class CompanyCustomersController {
 
   @Get(':id')
   @crmCustomersOrLeads('view')
-  findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.customersService.findOne(companyId, id);
+  findOne(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.customersService.findOne(companyId, id, partnerScopeOf(user));
   }
 
   @Patch(':id')
@@ -115,13 +165,24 @@ export class CompanyCustomersController {
     @Param('companyId') companyId: string,
     @Param('id') id: string,
     @Body() dto: UpdateCustomerDto,
+    @CurrentUser() user: any,
   ) {
-    return this.customersService.update(companyId, id, dto);
+    return this.customersService.update(
+      companyId,
+      id,
+      dto,
+      partnerScopeOf(user),
+      canManagePartnersOf(user),
+    );
   }
 
   @Delete(':id')
   @crmCustomersOrLeads('delete')
-  remove(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.customersService.remove(companyId, id);
+  remove(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.customersService.remove(companyId, id, partnerScopeOf(user));
   }
 }

@@ -8,6 +8,7 @@ import {
   IsArray,
   Min,
   Max,
+  ValidateIf,
 } from 'class-validator';
 import {
   CustomerType,
@@ -144,7 +145,23 @@ export class CreateCustomerDto {
   @IsOptional()
   tags?: string[];
 
+  // Ключови думи за търсене (търговски имена/псевдоними) — виж schema.prisma
+  @IsString()
+  @IsOptional()
+  searchTerms?: string;
+
   @IsString()
   @IsOptional()
   assignedToId?: string;
+
+  // Партньор (прекупвач) — виж коментара в schema.prisma при Customer
+  @IsBoolean()
+  @IsOptional()
+  isPartner?: boolean;
+
+  // Партньорът, довел този клиент. Празен стринг/null = без партньор.
+  @ValidateIf((o) => o.referredById !== null)
+  @IsString()
+  @IsOptional()
+  referredById?: string | null;
 }

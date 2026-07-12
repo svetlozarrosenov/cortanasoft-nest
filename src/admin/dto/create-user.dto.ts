@@ -6,6 +6,7 @@ import {
   IsBoolean,
   IsArray,
   ValidateNested,
+  ValidateIf,
   MinLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -23,6 +24,12 @@ class UserCompanyAssignment {
   @IsBoolean()
   @IsOptional()
   isDefault?: boolean;
+
+  // Партньорски акаунт: клиент-партньор (isPartner=true) от същата компания
+  @ValidateIf((o) => o.partnerCustomerId !== null)
+  @IsOptional()
+  @IsString()
+  partnerCustomerId?: string | null;
 }
 
 export class CreateUserDto {

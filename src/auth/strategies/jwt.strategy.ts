@@ -87,6 +87,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       currentCompany: currentUserCompany.company,
       currentRole: normalizedRole,
       isSuperAdmin: currentUserCompany.company.role === 'OWNER',
+      // Партньорски акаунт (виж UserCompany.partnerCustomerId): customers
+      // endpoint-ите ограничават видимостта до този партньор и клиентите му
+      partnerCustomerId: currentUserCompany.partnerCustomerId ?? null,
       companies: user.userCompanies.map((uc) => ({
         id: uc.company.id,
         name: uc.company.name,

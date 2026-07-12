@@ -646,6 +646,15 @@ model UserCompany {
   roleId String // Задължителна роля за всеки потребител в компания
   role   Role   @relation(fields: [roleId], references: [id], onDelete: Restrict)
 
+  // Партньорски акаунт: когато е попълнено, потребителят (в рамките на ТАЗИ
+  // компания) е акаунт на партньора-прекупвач и в CRM > Клиенти вижда само
+  // самия партньор + доведените от него клиенти (Customer.referredById).
+  // Останалите модули не се филтрират — достъпът им се ограничава през
+  // ролята. Сочи Customer с isPartner=true от същата компания (пази се в
+  // admin.service).
+  partnerCustomerId String?
+  partnerCustomer   Customer? @relation("UserCompanyPartner", fields: [partnerCustomerId], references: [id], onDelete: SetNull)
+
   @@unique([userId, companyId])
   @@map("user_companies")
 }
@@ -1292,6 +1301,13 @@ model Customer {
   notes       String? // Бележки
   description String?  @db.Text // Описание
   tags        String[] @default([]) // Тагове
+
+  // Ключови думи за търсене (SAP „Search Term" стил): търговски имена,
+  // псевдоними, стари имена — свободен текст („Хепи, Хепи Варна"). Участва
+  // в search OR-а на customers.findAll, така че работи навсякъде, където се
+  // търси клиент (CRM списък, избор на клиент в продажба/оферта/фактура).
+  searchTerms String?
+
   creditLimit Decimal? @db.Decimal(12, 2) // Кредитен лимит
   discount    Decimal? @db.Decimal(5, 2) // Процент отстъпка по подразбиране
 
@@ -1312,6 +1328,25 @@ model Customer {
   // от страницата на ценовата листа, не от формата на клиента.
   priceListId String?
   priceList   PriceList? @relation(fields: [priceListId], references: [id], onDelete: SetNull)
+
+  // Партньори (прекупвачи) — Odoo-style resellers: клиент с isPartner=true е
+  // партньор; крайните клиенти сочат към него през referredById („доведен
+  // от"). Един клиент има най-много един партньор (1:N). Инварианти (пазят се
+  // в customers.service, не в базата): партньор не може сам да има
+  // referredById; referredById сочи само клиент от СЪЩАТА компания с
+  // isPartner=true.
+  isPartner    Boolean    @default(false)
+  referredById String?
+  referredBy   Customer?  @relation("CustomerReferredBy", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals    Customer[] @relation("CustomerReferredBy")
+
+  // Партньорски потребителски акаунти, асоциирани с този клиент (виж
+  // UserCompany.partnerCustomerId)
+  partnerUserCompanies UserCompany[] @relation("UserCompanyPartner")
+
+  // Поръчки, чийто оборот се числи на този партньор (snapshot — виж
+  // Order.partnerCustomerId)
+  partnerOrders Order[] @relation("OrderPartner")
 
   orders                 Order[]
   billToOrders           Order[]                 @relation("OrderBillTo")
@@ -1335,6 +1370,8 @@ model Customer {
   @@index([companyId, stage])
   @@index([companyId, companyName])
   @@index([companyId, lastName])
+  @@index([companyId, isPartner])
+  @@index([referredById])
   @@map("customers")
 }
 
@@ -1617,6 +1654,15 @@ model Order {
   billToCustomerId String?
   billToCustomer   Customer? @relation("OrderBillTo", fields: [billToCustomerId], references: [id], onDelete: SetNull)
 
+  // Snapshot на партньорската атрибуция към момента на сделката: партньорът,
+  // довел клиента (customer.referredById), или самият клиент, ако той е
+  // партньор. Пише се само от orders.service (create / смяна на клиента),
+  // никога директно от API клиента. Отчетът „оборот по партньор" чете това
+  // поле — така пренавързването на клиент към друг партньор НЕ пренаписва
+  // историческия оборот.
+  partnerCustomerId String?
+  partnerCustomer   Customer? @relation("OrderPartner", fields: [partnerCustomerId], references: [id], onDelete: SetNull)
+
   // Доставка
   deliveryMethod     String  @default("none") // none, manual, econt_office, econt_address
   shippingAddress    String? // Адрес за доставка
@@ -1689,6 +1735,7 @@ model Order {
   @@unique([companyId, externalId])
   @@index([companyId, status])
   @@index([companyId, orderDate])
+  @@index([companyId, partnerCustomerId])
   @@map("orders")
 }
 

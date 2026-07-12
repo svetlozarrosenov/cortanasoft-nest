@@ -199,14 +199,20 @@ export class OrdersService {
 
     // Verify the customer belongs to this company, so a client can't attach
     // (and later read back / mutate) another tenant's customer record (IDOR).
+    // Партньорска атрибуция (snapshot): партньорът, довел клиента, или самият
+    // клиент, ако той е партньор. Пише се тук, не от API клиента — виж
+    // коментара при Order.partnerCustomerId в schema.prisma.
+    let partnerCustomerId: string | null = null;
     if (dto.customerId) {
       const customer = await this.prisma.customer.findFirst({
         where: { id: dto.customerId, companyId },
-        select: { id: true },
+        select: { id: true, isPartner: true, referredById: true },
       });
       if (!customer) {
         throw new NotFoundException('Клиентът не е намерен');
       }
+      partnerCustomerId =
+        customer.referredById ?? (customer.isPartner ? customer.id : null);
     }
 
     // Same tenant check for the bill-to customer (получател на фактурата)
@@ -251,6 +257,7 @@ export class OrdersService {
           paymentStatus: 'PENDING',
           customerId: dto.customerId,
           billToCustomerId: dto.billToCustomerId,
+          partnerCustomerId,
           customerName: dto.customerName,
           customerEmail: dto.customerEmail,
           customerPhone: dto.customerPhone,
@@ -586,14 +593,22 @@ export class OrdersService {
     const order = await this.findOne(companyId, id);
 
     // Verify a reassigned customer belongs to this company (cross-tenant IDOR).
+    // При смяна на клиента преизчисляваме и партньорския snapshot; undefined =
+    // клиентът не се пипа → snapshot-ът остава какъвто е бил.
+    let partnerCustomerId: string | null | undefined = undefined;
+    if (dto.customerId !== undefined) {
+      partnerCustomerId = null;
+    }
     if (dto.customerId) {
       const customer = await this.prisma.customer.findFirst({
         where: { id: dto.customerId, companyId },
-        select: { id: true },
+        select: { id: true, isPartner: true, referredById: true },
       });
       if (!customer) {
         throw new NotFoundException('Клиентът не е намерен');
       }
+      partnerCustomerId =
+        customer.referredById ?? (customer.isPartner ? customer.id : null);
     }
 
     // Same tenant check for the bill-to customer (получател на фактурата)
@@ -809,7 +824,10 @@ export class OrdersService {
           where: { id },
           data: {
             ...(dto.orderDate && { orderDate: new Date(dto.orderDate) }),
-            ...(dto.customerId !== undefined && { customerId: dto.customerId || null }),
+            ...(dto.customerId !== undefined && {
+              customerId: dto.customerId || null,
+              partnerCustomerId: partnerCustomerId ?? null,
+            }),
             ...(dto.billToCustomerId !== undefined && { billToCustomerId: dto.billToCustomerId || null }),
             ...(dto.customerName && { customerName: dto.customerName }),
             ...(dto.customerEmail !== undefined && { customerEmail: dto.customerEmail }),
@@ -937,7 +955,10 @@ export class OrdersService {
       where: { id },
       data: {
         ...(dto.orderDate && { orderDate: new Date(dto.orderDate) }),
-        ...(dto.customerId !== undefined && { customerId: dto.customerId || null }),
+        ...(dto.customerId !== undefined && {
+          customerId: dto.customerId || null,
+          partnerCustomerId: partnerCustomerId ?? null,
+        }),
         ...(dto.billToCustomerId !== undefined && { billToCustomerId: dto.billToCustomerId || null }),
         ...(dto.customerName && { customerName: dto.customerName }),
         ...(dto.customerEmail !== undefined && { customerEmail: dto.customerEmail }),

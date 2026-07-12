@@ -33,6 +33,17 @@ export class QueryCustomersDto {
   @IsOptional()
   source?: CustomerSource;
 
+  // Само партньори (прекупвачи) — ползва се от select-а „Доведен от"
+  @IsBoolean()
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  isPartner?: boolean;
+
+  // Клиенти, доведени от конкретен партньор
+  @IsString()
+  @IsOptional()
+  referredById?: string;
+
   @IsDateString()
   @IsOptional()
   createdFrom?: string;
