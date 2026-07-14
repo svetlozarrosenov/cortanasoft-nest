@@ -31,6 +31,10 @@ export class UpdateEcontConfigDto {
   @IsOptional()
   senderName?: string;
 
+  @IsOptional()
+  @IsString()
+  senderFace?: string;
+
   @IsString()
   @IsOptional()
   senderPhone?: string;

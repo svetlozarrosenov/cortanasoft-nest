@@ -494,7 +494,15 @@ export class CustomWebsiteService {
       paymentMethod: string;
       paymentStatus: string;
       customer: { email: string; phone: string; firstName: string; lastName: string };
-      shipping: { address: string; city: string; postalCode: string; country: string; method: string | null };
+      shipping: {
+        address: string;
+        city: string;
+        postalCode: string;
+        country: string;
+        method: string | null;
+        // Изборът на клиента от checkout-а (офис или адрес) — виж по-долу
+        econtData?: unknown;
+      };
       totals: { subtotal: number; shippingCost: number; discount: number; total: number };
       items: Array<{ sku: string; name: string; quantity: number; unitPrice: number; lineTotal: number }>;
       notes: string | null;
@@ -543,20 +551,58 @@ export class CustomWebsiteService {
       }
     }
 
+    // Еконт данните, които клиентът е избрал на checkout-а в магазина
+    // (офис или адрес). Пренасяме ги в поръчката, за да може операторът
+    // да създаде товарителницата от кортана с точно същите параметри —
+    // без да пита клиента наново и без разминаване с котираната цена.
+    const econt = (shopOrder.shipping.econtData || null) as {
+      deliveryType?: 'office' | 'address';
+      officeCode?: string;
+      officeName?: string;
+    } | null;
+    const isEcont = shopOrder.shipping.method === 'econt';
+    const econtOfficeCode =
+      isEcont && econt?.deliveryType === 'office' ? econt.officeCode || null : null;
+    const econtOfficeName =
+      isEcont && econt?.deliveryType === 'office' ? econt.officeName || null : null;
+    // 'econt' (не legacy 'econt_office') — това е стойността, при която
+    // orders UI показва ShipmentPanel/модала за товарителница.
+    const deliveryMethod = isEcont
+      ? 'econt'
+      : shopOrder.shipping.address
+        ? 'manual'
+        : 'none';
+    const receiverName =
+      `${shopOrder.customer.firstName || ''} ${shopOrder.customer.lastName || ''}`.trim() || null;
+
     // Idempotency — if an Order with this number exists, just refresh
     // status/payment fields. We do NOT rewrite OrderItems on update,
     // since the admin may have already assigned inventorySerials.
     const existing = await this.prisma.order.findFirst({
       where: { companyId, orderNumber: shopOrder.orderNumber },
-      select: { id: true },
+      select: { id: true, deliveryMethod: true, econtOfficeCode: true },
     });
     if (existing) {
+      // Поръчки, синкирани преди Еконт данните да се пренасят (или с
+      // legacy 'econt_office' стойност), се донасят еднократно — но само
+      // ако операторът още не е попълнил офис ръчно.
+      const shouldBackfillEcont =
+        isEcont &&
+        !existing.econtOfficeCode &&
+        (existing.deliveryMethod === 'econt_office' || existing.deliveryMethod === 'econt');
       await this.prisma.order.update({
         where: { id: existing.id },
         data: {
           status,
           paymentStatus,
           paymentMethod,
+          ...(shouldBackfillEcont && {
+            deliveryMethod: 'econt',
+            econtOfficeCode,
+            econtOfficeName,
+            receiverName,
+            receiverPhone: shopOrder.customer.phone || null,
+          }),
         },
       });
       return 'updated';
@@ -609,7 +655,11 @@ export class CustomWebsiteService {
         customerName: `${shopOrder.customer.firstName || ''} ${shopOrder.customer.lastName || ''}`.trim() || email || 'Unknown',
         customerEmail: email || null,
         customerPhone: shopOrder.customer.phone || null,
-        deliveryMethod: shopOrder.shipping.method === 'econt' ? 'econt_office' : (shopOrder.shipping.address ? 'manual' : 'none'),
+        deliveryMethod,
+        econtOfficeCode,
+        econtOfficeName,
+        receiverName,
+        receiverPhone: shopOrder.customer.phone || null,
         shippingAddress: shopOrder.shipping.address || null,
         shippingCity: shopOrder.shipping.city || null,
         shippingPostalCode: shopOrder.shipping.postalCode || null,

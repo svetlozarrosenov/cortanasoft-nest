@@ -1,5 +1,7 @@
 export interface EcontSettings {
   senderName?: string;
+  // Упълномощено лице (МОЛ) — задължително при подател юридическо лице
+  senderFace?: string;
   senderPhone?: string;
   senderOfficeCode?: string;
   shipmentType?: string;

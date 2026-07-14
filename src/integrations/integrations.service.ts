@@ -74,6 +74,23 @@ export class IntegrationsService {
     // Map payment method
     const paymentMethod = this.mapPaymentMethod(order?.paymentMethod);
 
+    // Еконт данните от checkout-а на магазина (офис или адрес). При
+    // method='econt' поръчката получава deliveryMethod 'econt' — стойността,
+    // при която orders UI показва панела за товарителница — плюс избрания
+    // от клиента офис, така че модалът е предварително попълнен и цената
+    // съвпада с котираната на клиента.
+    const econt = (shipping?.econtData || null) as {
+      deliveryType?: 'office' | 'address';
+      officeCode?: string;
+      officeName?: string;
+    } | null;
+    const isEcont = shipping?.method === 'econt';
+    const deliveryMethod = isEcont
+      ? 'econt'
+      : shippingAddress
+        ? 'manual'
+        : 'none';
+
     // Build notes
     const notes = source
       ? `${source} #${order?.orderNumber || order?.externalId || ''}`
@@ -90,6 +107,13 @@ export class IntegrationsService {
       shippingAddress,
       shippingCity: shipping?.city || undefined,
       shippingPostalCode: shipping?.postcode || undefined,
+      deliveryMethod,
+      receiverName: customerName !== 'Unknown' ? customerName : undefined,
+      receiverPhone: billing?.phone || undefined,
+      econtOfficeCode:
+        isEcont && econt?.deliveryType === 'office' ? econt.officeCode || undefined : undefined,
+      econtOfficeName:
+        isEcont && econt?.deliveryType === 'office' ? econt.officeName || undefined : undefined,
       paymentMethod,
       shippingCost: totals?.shippingTotal || 0,
       discount: totals?.discountTotal || 0,

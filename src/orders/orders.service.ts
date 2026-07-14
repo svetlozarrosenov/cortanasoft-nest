@@ -24,7 +24,14 @@ function round2(n: number): number {
 
 const ORDER_INCLUDE = {
   location: true,
-  customer: true,
+  // referredBy — за бързия преглед на поръчка (партньорска атрибуция)
+  customer: {
+    include: {
+      referredBy: {
+        select: { id: true, type: true, companyName: true, firstName: true, lastName: true },
+      },
+    },
+  },
   billToCustomer: {
     select: {
       id: true,
@@ -55,6 +62,14 @@ const ORDER_INCLUDE = {
   acceptanceProtocols: {
     where: { status: { not: 'CANCELLED' as const } },
     select: { id: true, documentNumber: true },
+  },
+  // Последната активна товарителница — badge върху иконката „Създай
+  // пратка" в списъка с продажби
+  shipments: {
+    where: { status: { not: 'CANCELLED' } },
+    orderBy: { createdAt: 'desc' as const },
+    take: 1,
+    select: { id: true, shipmentNumber: true, status: true, provider: true },
   },
   creditApplication: {
     select: {

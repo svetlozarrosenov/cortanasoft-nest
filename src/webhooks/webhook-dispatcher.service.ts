@@ -54,9 +54,18 @@ export class WebhookDispatcherService {
           paymentStatus: true,
           paidAmount: true,
           total: true,
+          // Последната реално създадена товарителница — shop я записва в
+          // econtData.shipmentNumber, за да работи клиентското проследяване
+          shipments: {
+            where: { shipmentNumber: { not: null }, status: { not: 'CANCELLED' } },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: { shipmentNumber: true, provider: true },
+          },
         },
       });
       if (!order || !order.externalId) return;
+      const shipment = order.shipments[0] || null;
       await this.dispatch(companyId, 'order.changed', {
         externalId: order.externalId,
         orderId: order.id,
@@ -65,6 +74,9 @@ export class WebhookDispatcherService {
         paymentStatus: order.paymentStatus,
         paidAmount: Number(order.paidAmount),
         total: Number(order.total),
+        // Добавъчни полета — стар shop код ги игнорира безвредно
+        shipmentNumber: shipment?.shipmentNumber || null,
+        shipmentProvider: shipment?.provider || null,
       });
     } catch (err) {
       this.logger.warn(`emitOrderChanged(${orderId}) failed: ${err instanceof Error ? err.message : err}`);

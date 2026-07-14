@@ -3566,6 +3566,10 @@ model EcontConfig {
 
   // Подател
   senderName       String?
+  // Упълномощено лице (МОЛ): Еконт го изисква, когато подателят е
+  // юридическо лице — иначе createLabel връща "За юридическо лице,
+  // задължително се попълва упълномощено лице." (Client.face в API-то)
+  senderFace       String?
   senderPhone      String?
   senderCountryId  String? // ISO country id (например "BGR")
   senderOfficeCode String? // Код на офис подател

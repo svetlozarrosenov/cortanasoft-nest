@@ -265,6 +265,7 @@ export class EcontService implements ShippingProvider {
   private configToSettings(config: any): EcontSettings {
     return {
       senderName: config.senderName,
+      senderFace: config.senderFace,
       senderPhone: config.senderPhone,
       senderOfficeCode: config.senderOfficeCode,
       shipmentType: config.shipmentType,

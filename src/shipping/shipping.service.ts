@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { EcontService } from '../econt/econt.service';
 import { SpeedyService } from '../speedy/speedy.service';
+import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import { ShippingProvider } from './interfaces';
 import {
   CreateShipmentDto,
@@ -36,6 +37,7 @@ export class ShippingService {
     private prisma: PrismaService,
     private econtService: EcontService,
     private speedyService: SpeedyService,
+    private webhookDispatcher: WebhookDispatcherService,
   ) {
     this.providers.set(econtService.name, econtService);
     this.providers.set(speedyService.name, speedyService);
@@ -72,7 +74,18 @@ export class ShippingService {
       throw new NotFoundException('Поръчката не е намерена');
     }
 
-    return this.getProvider(dto.provider).createShipment(companyId, dto, order);
+    const shipment = await this.getProvider(dto.provider).createShipment(
+      companyId,
+      dto,
+      order,
+    );
+
+    // Уведомяваме shop-а (ако поръчката е от там): order.changed вече носи
+    // shipmentNumber, така че клиентът вижда проследяване на сайта. За
+    // чисто кортана поръчки (без externalId) emit-ът е no-op.
+    await this.webhookDispatcher.emitOrderChanged(companyId, dto.orderId);
+
+    return shipment;
   }
 
   async getOrderShipments(companyId: string, orderId: string) {
