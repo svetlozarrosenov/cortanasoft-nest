@@ -71,6 +71,19 @@ const ORDER_INCLUDE = {
     take: 1,
     select: { id: true, shipmentNumber: true, status: true, provider: true },
   },
+  // Издадени гаранции — показват се в бързия преглед на поръчката
+  // (срок + оставащи дни)
+  issuedWarranties: {
+    select: {
+      id: true,
+      warrantyNumber: true,
+      startDate: true,
+      endDate: true,
+      status: true,
+      serialNumber: true,
+      productId: true,
+    },
+  },
   creditApplication: {
     select: {
       id: true,
@@ -856,7 +869,9 @@ export class OrdersService {
             ...(dto.econtOfficeCode !== undefined && { econtOfficeCode: dto.econtOfficeCode }),
             ...(dto.econtOfficeName !== undefined && { econtOfficeName: dto.econtOfficeName }),
             ...(dto.paymentMethod && { paymentMethod: dto.paymentMethod }),
-            ...(dto.paymentStatus && { paymentStatus: dto.paymentStatus }),
+            // REFUNDED е ръчен override; останалите платежни статуси минават
+            // през PaymentsService по-долу, за да са консистентни с плащанията
+            ...(dto.paymentStatus === 'REFUNDED' && { paymentStatus: 'REFUNDED' as const }),
             ...(dto.locationId && { locationId: dto.locationId }),
             ...(dto.notes !== undefined && { notes: dto.notes }),
             shippingCost,
@@ -870,6 +885,26 @@ export class OrdersService {
           },
           include: ORDER_INCLUDE,
         });
+
+        // Смяна на платежния статус — ВИНАГИ през PaymentsService, за да
+        // останат плащанията авторитетни: PAID създава синтетично плащане
+        // за остатъка, PENDING трие автоматичните. Директен запис на
+        // статуса без плащанията оставя paidAmount разминат (оранжев бар
+        // „PENDING с пари") и касовите отчети броят несъществуващи пари.
+        if (
+          dto.paymentStatus &&
+          dto.paymentStatus !== 'REFUNDED' &&
+          dto.paymentStatus !== order.paymentStatus
+        ) {
+          await this.paymentsService.syncPaymentsFromStatus(
+            tx,
+            companyId,
+            id,
+            dto.paymentStatus as 'PENDING' | 'PARTIAL' | 'PAID',
+            Number(updatedOrder.total),
+            updatedOrder.paymentMethod,
+          );
+        }
 
         // 4. Apply inventory deduction for new items that carry an explicit
         //    allocation (inventorySerialId / inventoryBatchId). Items without
@@ -987,7 +1022,8 @@ export class OrdersService {
         ...(dto.econtOfficeCode !== undefined && { econtOfficeCode: dto.econtOfficeCode }),
         ...(dto.econtOfficeName !== undefined && { econtOfficeName: dto.econtOfficeName }),
         ...(dto.paymentMethod && { paymentMethod: dto.paymentMethod }),
-        ...(dto.paymentStatus && { paymentStatus: dto.paymentStatus }),
+        // REFUNDED е ръчен override; останалите минават през PaymentsService
+        ...(dto.paymentStatus === 'REFUNDED' && { paymentStatus: 'REFUNDED' as const }),
         ...(dto.locationId && { locationId: dto.locationId }),
         ...(dto.shippingCost !== undefined && { shippingCost: dto.shippingCost }),
         ...(dto.discount !== undefined && { discount: dto.discount }),
@@ -995,8 +1031,35 @@ export class OrdersService {
       },
       include: ORDER_INCLUDE,
     });
+
+    // Смяна на платежния статус — през PaymentsService (виж коментара в
+    // items клона по-горе): плащанията остават източникът на истината,
+    // paidAmount и статусът се преизчисляват заедно.
+    let result = updated;
+    if (
+      dto.paymentStatus &&
+      dto.paymentStatus !== 'REFUNDED' &&
+      dto.paymentStatus !== order.paymentStatus
+    ) {
+      await this.prisma.$transaction(async (tx) => {
+        await this.paymentsService.syncPaymentsFromStatus(
+          tx,
+          companyId,
+          id,
+          dto.paymentStatus as 'PENDING' | 'PARTIAL' | 'PAID',
+          Number(updated.total),
+          updated.paymentMethod,
+        );
+      });
+      result =
+        (await this.prisma.order.findFirst({
+          where: { id, companyId },
+          include: ORDER_INCLUDE,
+        })) || updated;
+    }
+
     await this.webhookDispatcher.emitOrderChanged(companyId, id);
-    return updated;
+    return result;
   }
 
   // Записва от кои партиди (и по колко) е изписан даден ред — за проследимост

@@ -1,6 +1,11 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EcontApiService } from './econt-api.service';
+import {
+  encryptSecret,
+  decryptSecretIfNeeded,
+  isEncryptedSecret,
+} from '../common/utils/secret-crypto.util';
 import { EcontCredentials, EcontSettings } from './interfaces';
 import { ShippingProvider } from '../shipping/interfaces';
 import {
@@ -12,13 +17,38 @@ import { UpdateEcontConfigDto } from './dto/update-econt-config.dto';
 const PROVIDER = 'econt';
 
 @Injectable()
-export class EcontService implements ShippingProvider {
+export class EcontService implements ShippingProvider, OnModuleInit {
   readonly name = PROVIDER;
+  private readonly logger = new Logger(EcontService.name);
 
   constructor(
     private prisma: PrismaService,
     private api: EcontApiService,
   ) {}
+
+  // Самолечение: заварени plaintext пароли (отпреди шифроването) се
+  // шифроват еднократно при старт — без ръчна миграция при deploy.
+  async onModuleInit() {
+    try {
+      const configs = await this.prisma.econtConfig.findMany({
+        where: { password: { not: null } },
+        select: { companyId: true, password: true },
+      });
+      for (const c of configs) {
+        if (c.password && !isEncryptedSecret(c.password)) {
+          await this.prisma.econtConfig.update({
+            where: { companyId: c.companyId },
+            data: { password: encryptSecret(c.password) },
+          });
+          this.logger.log(`Encrypted legacy Econt password for company ${c.companyId}`);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Econt password self-encryption skipped: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
 
   // ==================== ShippingProvider implementation ====================
 
@@ -202,6 +232,10 @@ export class EcontService implements ShippingProvider {
     if (data.password === '••••••••' || data.password === '') {
       delete data.password;
     }
+    // Паролата се пази шифрована (AES-256-GCM) — plaintext само в паметта
+    if (data.password) {
+      data.password = encryptSecret(data.password);
+    }
 
     const existing = await this.prisma.econtConfig.findUnique({
       where: { companyId },
@@ -241,7 +275,7 @@ export class EcontService implements ShippingProvider {
     }
     return {
       username: config.username,
-      password: config.password,
+      password: decryptSecretIfNeeded(config.password),
       mode: config.mode as 'test' | 'live',
     };
   }
@@ -257,7 +291,7 @@ export class EcontService implements ShippingProvider {
   private configToCredentials(config: any): EcontCredentials {
     return {
       username: config.username,
-      password: config.password,
+      password: decryptSecretIfNeeded(config.password),
       mode: config.mode as 'test' | 'live',
     };
   }

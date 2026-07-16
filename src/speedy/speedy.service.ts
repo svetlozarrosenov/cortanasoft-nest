@@ -2,9 +2,16 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SpeedyApiService } from './speedy-api.service';
+import {
+  encryptSecret,
+  decryptSecretIfNeeded,
+  isEncryptedSecret,
+} from '../common/utils/secret-crypto.util';
 import { SpeedyCredentials, SpeedySettings } from './interfaces';
 import { ShippingProvider } from '../shipping/interfaces';
 import {
@@ -16,13 +23,38 @@ import { UpdateSpeedyConfigDto } from './dto/update-speedy-config.dto';
 const PROVIDER = 'speedy';
 
 @Injectable()
-export class SpeedyService implements ShippingProvider {
+export class SpeedyService implements ShippingProvider, OnModuleInit {
   readonly name = PROVIDER;
+  private readonly logger = new Logger(SpeedyService.name);
 
   constructor(
     private prisma: PrismaService,
     private api: SpeedyApiService,
   ) {}
+
+  // Самолечение: заварени plaintext пароли се шифроват еднократно при старт
+  // (виж common/utils/secret-crypto.util)
+  async onModuleInit() {
+    try {
+      const configs = await this.prisma.speedyConfig.findMany({
+        where: { password: { not: null } },
+        select: { companyId: true, password: true },
+      });
+      for (const c of configs) {
+        if (c.password && !isEncryptedSecret(c.password)) {
+          await this.prisma.speedyConfig.update({
+            where: { companyId: c.companyId },
+            data: { password: encryptSecret(c.password) },
+          });
+          this.logger.log(`Encrypted legacy Speedy password for company ${c.companyId}`);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Speedy password self-encryption skipped: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
 
   // ==================== ShippingProvider implementation ====================
 
@@ -287,7 +319,8 @@ export class SpeedyService implements ShippingProvider {
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
     if (dto.username !== undefined) data.username = dto.username;
     if (dto.password !== undefined && dto.password !== '••••••••' && dto.password !== '') {
-      data.password = dto.password;
+      // Паролата се пази шифрована (AES-256-GCM) — plaintext само в паметта
+      data.password = encryptSecret(dto.password);
     }
     if (dto.senderName !== undefined) data.senderName = dto.senderName;
     if (dto.senderPhone !== undefined) data.senderPhone = dto.senderPhone;
@@ -366,7 +399,7 @@ export class SpeedyService implements ShippingProvider {
 
     return {
       username: config.username,
-      password: config.password,
+      password: decryptSecretIfNeeded(config.password),
     };
   }
 
@@ -381,7 +414,7 @@ export class SpeedyService implements ShippingProvider {
   private configToCredentials(config: any): SpeedyCredentials {
     return {
       username: config.username,
-      password: config.password,
+      password: decryptSecretIfNeeded(config.password),
     };
   }
 
