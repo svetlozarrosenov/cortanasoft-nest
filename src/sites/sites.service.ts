@@ -110,8 +110,10 @@ export class SitesService {
           orderDate: true,
           status: true,
           paymentStatus: true,
+          customerId: true,
           customerName: true,
           total: true,
+          paidAmount: true,
         },
         orderBy: { orderDate: 'desc' },
       }),
@@ -130,6 +132,8 @@ export class SitesService {
           totalAmount: true,
           expenseDate: true,
           status: true,
+          invoiceNumber: true,
+          supplier: { select: { id: true, name: true } },
         },
         orderBy: { expenseDate: 'desc' },
       }),
@@ -137,21 +141,48 @@ export class SitesService {
 
     // Приход по конвенцията на dashboard/erp-analytics: само реални продажби
     // (CONFIRMED+). DRAFT/PENDING остават видими в списъка, но не влизат в сумите.
-    const revenue = orders
-      .filter((o) =>
-        ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'].includes(o.status),
-      )
-      .reduce((sum, o) => sum + Number(o.total), 0);
-    const expensesTotal = expenses
-      .filter((e) => e.status !== 'CANCELLED')
-      .reduce((sum, e) => sum + Number(e.totalAmount), 0);
+    const REVENUE_STATUSES = ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'];
+    const revenueOrders = orders.filter((o) =>
+      REVENUE_STATUSES.includes(o.status),
+    );
+    const revenue = revenueOrders.reduce((sum, o) => sum + Number(o.total), 0);
+    const paid = revenueOrders.reduce(
+      (sum, o) => sum + Number(o.paidAmount ?? 0),
+      0,
+    );
+    const activeExpenses = expenses.filter((e) => e.status !== 'CANCELLED');
+    const expensesTotal = activeExpenses.reduce(
+      (sum, e) => sum + Number(e.totalAmount),
+      0,
+    );
+
+    // Месечна разбивка за графиката (само редовете, които участват в сумите)
+    const monthKey = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const monthlyMap = new Map<string, { revenue: number; expenses: number }>();
+    const bump = (key: string, field: 'revenue' | 'expenses', amount: number) => {
+      const entry = monthlyMap.get(key) || { revenue: 0, expenses: 0 };
+      entry[field] += amount;
+      monthlyMap.set(key, entry);
+    };
+    for (const o of revenueOrders) {
+      bump(monthKey(new Date(o.orderDate)), 'revenue', Number(o.total));
+    }
+    for (const e of activeExpenses) {
+      bump(monthKey(new Date(e.expenseDate)), 'expenses', Number(e.totalAmount));
+    }
+    const monthly = [...monthlyMap.entries()]
+      .map(([month, values]) => ({ month, ...values }))
+      .sort((a, b) => a.month.localeCompare(b.month));
 
     return {
       site,
       orders,
       expenses,
+      monthly,
       totals: {
         revenue,
+        paid,
         expenses: expensesTotal,
         result: revenue - expensesTotal,
       },
