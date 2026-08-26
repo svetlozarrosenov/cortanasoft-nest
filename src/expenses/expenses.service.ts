@@ -11,10 +11,25 @@ import { Prisma } from '@prisma/client';
 export class ExpensesService {
   constructor(private prisma: PrismaService) {}
 
+  // Обектът (siteId) трябва да е на същата компания
+  private async assertSiteInCompany(companyId: string, siteId: string) {
+    const site = await this.prisma.site.findFirst({
+      where: { id: siteId, companyId },
+      select: { id: true },
+    });
+    if (!site) {
+      throw new NotFoundException('Обектът не е намерен');
+    }
+  }
+
   async create(companyId: string, userId: string, dto: CreateExpenseDto) {
     const amount = dto.amount;
     const vatAmount = dto.vatAmount || 0;
     const totalAmount = amount + vatAmount;
+
+    if (dto.siteId) {
+      await this.assertSiteInCompany(companyId, dto.siteId);
+    }
 
     return this.prisma.expense.create({
       data: {
@@ -34,10 +49,12 @@ export class ExpensesService {
         recurringInterval: dto.recurringInterval,
         companyId,
         supplierId: dto.supplierId,
+        siteId: dto.siteId || undefined,
         createdById: userId,
       },
       include: {
         supplier: true,
+        site: { select: { id: true, name: true } },
         createdBy: {
           select: {
             id: true,
@@ -87,6 +104,10 @@ export class ExpensesService {
       where.supplierId = query.supplierId;
     }
 
+    if (query.siteId) {
+      where.siteId = query.siteId;
+    }
+
     if (query.dateFrom || query.dateTo) {
       where.expenseDate = {};
       if (query.dateFrom) {
@@ -112,6 +133,7 @@ export class ExpensesService {
         orderBy,
         include: {
           supplier: true,
+          site: { select: { id: true, name: true } },
           createdBy: {
             select: {
               id: true,
@@ -158,6 +180,7 @@ export class ExpensesService {
       },
       include: {
         supplier: true,
+        site: { select: { id: true, name: true } },
         createdBy: {
           select: {
             id: true,
@@ -230,6 +253,15 @@ export class ExpensesService {
       }
     }
 
+    if (dto.siteId !== undefined) {
+      if (dto.siteId) {
+        await this.assertSiteInCompany(companyId, dto.siteId);
+        updateData.site = { connect: { id: dto.siteId } };
+      } else {
+        updateData.site = { disconnect: true };
+      }
+    }
+
     if (dto.approvedById !== undefined) {
       if (dto.approvedById) {
         updateData.approvedBy = { connect: { id: dto.approvedById } };
@@ -242,6 +274,7 @@ export class ExpensesService {
       data: updateData,
       include: {
         supplier: true,
+        site: { select: { id: true, name: true } },
         createdBy: {
           select: {
             id: true,

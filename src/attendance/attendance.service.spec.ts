@@ -141,8 +141,8 @@ describe('AttendanceService', () => {
         .mockResolvedValueOnce({ id: 'u2', firstName: 'Admin' }); // approver
 
       const result = await service.findOne('c1', 'a1');
-      expect(result.user.firstName).toBe('John');
-      expect(result.approvedBy.firstName).toBe('Admin');
+      expect(result.user?.firstName).toBe('John');
+      expect(result.approvedBy?.firstName).toBe('Admin');
     });
 
     it('should return null approvedBy when no approver', async () => {
@@ -385,7 +385,7 @@ describe('AttendanceService', () => {
 
       const result = await service.findAll('c1', { page: 1, limit: 10 } as any);
       expect(result.data).toHaveLength(1);
-      expect(result.data[0].user.firstName).toBe('John');
+      expect(result.data[0].user?.firstName).toBe('John');
       expect(result.meta.total).toBe(1);
     });
 

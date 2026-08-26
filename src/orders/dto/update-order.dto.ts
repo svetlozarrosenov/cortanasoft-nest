@@ -40,6 +40,11 @@ export class UpdateOrderDto {
   @IsOptional()
   billToCustomerId?: string;
 
+  // Обект (ферма/площадка); празен string изчиства полето
+  @IsString()
+  @IsOptional()
+  siteId?: string;
+
   @IsString()
   @IsOptional()
   customerName?: string;

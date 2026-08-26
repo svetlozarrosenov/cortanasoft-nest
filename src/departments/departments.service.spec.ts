@@ -122,8 +122,8 @@ describe('DepartmentsService', () => {
         .mockResolvedValueOnce({ id: 'mgr1', firstName: 'Boss' }); // manager
 
       const result = await service.findOne('c1', 'd1');
-      expect(result.members[0].user.firstName).toBe('John');
-      expect(result.manager.firstName).toBe('Boss');
+      expect(result.members[0].user?.firstName).toBe('John');
+      expect(result.manager?.firstName).toBe('Boss');
     });
   });
 
@@ -256,7 +256,7 @@ describe('DepartmentsService', () => {
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1', firstName: 'John' });
 
       const result = await service.addMember('c1', 'd1', { userId: 'u1', position: 'Developer' } as any);
-      expect(result.user.firstName).toBe('John');
+      expect(result.user?.firstName).toBe('John');
     });
 
     it('should remove others head status when adding as head', async () => {

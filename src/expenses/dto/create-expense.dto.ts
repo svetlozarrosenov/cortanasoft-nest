@@ -66,4 +66,8 @@ export class CreateExpenseDto {
   @IsString()
   @IsOptional()
   supplierId?: string;
+
+  @IsString()
+  @IsOptional()
+  siteId?: string;
 }

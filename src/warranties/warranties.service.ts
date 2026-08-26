@@ -336,7 +336,9 @@ export class WarrantiesService {
       const template = item.product?.warrantyTemplate;
       if (!template || !template.isActive) continue;
 
-      const startDate = order.orderDate;
+      // Гаранцията тече от реалното предаване на стоката (deliveredAt), не от
+      // датата на поръчката — клиентът може да е поръчал седмици по-рано.
+      const startDate = order.deliveredAt || order.orderDate;
       const endDate = this.calculateEndDate(startDate, template.duration, template.durationUnit);
       const warrantyNumber = await this.generateWarrantyNumber(companyId, client);
 

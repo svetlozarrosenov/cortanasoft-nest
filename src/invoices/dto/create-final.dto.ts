@@ -4,11 +4,18 @@ import {
   IsDateString,
   IsArray,
   ArrayNotEmpty,
+  IsEnum,
 } from 'class-validator';
+import { PaymentMethod } from '@prisma/client';
 
 export class CreateFinalInvoiceDto {
   @IsString()
   orderId: string;
+
+  // Начин на плащане върху фактурата (по подразбиране — от поръчката)
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
 
   // ADVANCE invoices to deduct in this final invoice
   @IsArray()

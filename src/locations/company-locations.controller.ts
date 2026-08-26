@@ -16,6 +16,7 @@ import {
   QueryLocationsDto,
   CreateStorageZoneDto,
   UpdateStorageZoneDto,
+  SetLocationMembersDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -72,6 +73,17 @@ export class CompanyLocationsController {
   @RequireDelete('warehouse', 'locations')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.locationsService.remove(companyId, id);
+  }
+
+  // Екип на локацията (бус) — заменя списъка със зачислени служители
+  @Patch(':id/members')
+  @RequireEdit('warehouse', 'locations')
+  setMembers(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: SetLocationMembersDto,
+  ) {
+    return this.locationsService.setMembers(companyId, id, dto.userIds);
   }
 
   // ==================== STORAGE ZONE ENDPOINTS ====================

@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -12,6 +13,18 @@ import {
   UpdateStorageZoneDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
+
+// Екип на локацията (бус) — кой служител е зачислен към нея
+const MEMBERS_INCLUDE = {
+  members: {
+    include: {
+      user: {
+        select: { id: true, firstName: true, lastName: true, email: true },
+      },
+    },
+    orderBy: { createdAt: 'asc' as const },
+  },
+};
 
 @Injectable()
 export class LocationsService {
@@ -106,6 +119,7 @@ export class LocationsService {
             where: { isActive: true },
             orderBy: { code: 'asc' },
           },
+          ...MEMBERS_INCLUDE,
           _count: {
             select: {
               inventoryBatches: true,
@@ -139,6 +153,7 @@ export class LocationsService {
         storageZones: {
           orderBy: { code: 'asc' },
         },
+        ...MEMBERS_INCLUDE,
         _count: {
           select: {
             inventoryBatches: true,
@@ -217,6 +232,42 @@ export class LocationsService {
     return this.prisma.location.delete({
       where: { id },
     });
+  }
+
+  // ==================== LOCATION MEMBERS (ЕКИП) ====================
+
+  // Синхронизира екипа на локацията (бус) към подадения списък от служители.
+  async setMembers(companyId: string, locationId: string, userIds: string[]) {
+    await this.findOne(companyId, locationId);
+
+    const uniqueIds = [...new Set(userIds)];
+
+    // Всички подадени потребители трябва да са служители на компанията
+    if (uniqueIds.length > 0) {
+      const validCount = await this.prisma.userCompany.count({
+        where: { companyId, userId: { in: uniqueIds } },
+      });
+      if (validCount !== uniqueIds.length) {
+        throw new BadRequestException(
+          'Някои от избраните служители не принадлежат на компанията',
+        );
+      }
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.locationMember.deleteMany({
+        where: { locationId, userId: { notIn: uniqueIds } },
+      }),
+      ...uniqueIds.map((userId) =>
+        this.prisma.locationMember.upsert({
+          where: { locationId_userId: { locationId, userId } },
+          create: { locationId, userId },
+          update: {},
+        }),
+      ),
+    ]);
+
+    return this.findOne(companyId, locationId);
   }
 
   // ==================== STORAGE ZONE METHODS ====================

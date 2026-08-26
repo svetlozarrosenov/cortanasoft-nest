@@ -139,12 +139,12 @@ describe('PERMISSIONS_CONFIG structure', () => {
   });
 
   it('CRM customers page should have customersList table with expected columns', () => {
-    const crm = PERMISSIONS_CONFIG.find((m) => m.key === 'crm');
-    const customersPage = crm.pages.find((p) => p.key === 'customers');
+    const crm = PERMISSIONS_CONFIG.find((m) => m.key === 'crm')!;
+    const customersPage = crm.pages.find((p) => p.key === 'customers')!;
     expect(customersPage.tables).toBeDefined();
-    expect(customersPage.tables.length).toBeGreaterThan(0);
+    expect(customersPage.tables!.length).toBeGreaterThan(0);
 
-    const customersList = customersPage.tables.find((t) => t.key === 'customersList');
+    const customersList = customersPage.tables!.find((t) => t.key === 'customersList')!;
     expect(customersList).toBeDefined();
 
     const colKeys = customersList.columns.map((c) => c.key);
@@ -156,9 +156,9 @@ describe('PERMISSIONS_CONFIG structure', () => {
   });
 
   it('ERP orders page should have ordersList table with expected columns', () => {
-    const erp = PERMISSIONS_CONFIG.find((m) => m.key === 'erp');
-    const ordersPage = erp.pages.find((p) => p.key === 'orders');
-    const ordersList = ordersPage.tables.find((t) => t.key === 'ordersList');
+    const erp = PERMISSIONS_CONFIG.find((m) => m.key === 'erp')!;
+    const ordersPage = erp.pages.find((p) => p.key === 'orders')!;
+    const ordersList = ordersPage.tables!.find((t) => t.key === 'ordersList')!;
     expect(ordersList).toBeDefined();
 
     const colKeys = ordersList.columns.map((c) => c.key);
@@ -282,9 +282,9 @@ describe('createFullPermissions', () => {
     expect(cols.length).toBe(6);
   });
 
-  it('ERP ordersList should have all 6 columns by default', () => {
+  it('ERP ordersList should have all 7 columns by default', () => {
     const cols = getVisibleColumns(full, 'erp', 'orders', 'ordersList');
-    expect(cols).toEqual(['orderNumber', 'customer', 'date', 'total', 'status', 'paymentStatus']);
+    expect(cols).toEqual(['orderNumber', 'customer', 'date', 'total', 'status', 'paymentStatus', 'credit']);
   });
 });
 

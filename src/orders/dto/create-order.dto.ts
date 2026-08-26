@@ -71,6 +71,11 @@ export class CreateOrderDto {
   @IsOptional()
   billToCustomerId?: string;
 
+  // Обект (ферма/площадка), към който се причислява продажбата
+  @IsString()
+  @IsOptional()
+  siteId?: string;
+
   @IsString()
   customerName: string;
 

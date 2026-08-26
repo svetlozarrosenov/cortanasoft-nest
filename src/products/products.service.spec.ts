@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { WordPressService } from '../wordpress/wordpress.service';
+import { CloudCartService } from '../cloudcart/cloudcart.service';
 
 const mockPrisma = {
   product: {
@@ -24,6 +26,7 @@ const mockPrisma = {
   company: {
     findUnique: jest.fn(),
   },
+  $transaction: jest.fn((cb: any) => cb(mockPrisma)),
 };
 
 describe('ProductsService', () => {
@@ -35,6 +38,14 @@ describe('ProductsService', () => {
       providers: [
         ProductsService,
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: WordPressService,
+          useValue: { syncProduct: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: CloudCartService,
+          useValue: { syncProductToCloudCart: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile();
     service = module.get<ProductsService>(ProductsService);

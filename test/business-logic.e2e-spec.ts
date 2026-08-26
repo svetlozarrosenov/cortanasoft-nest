@@ -13,8 +13,17 @@ import { PrismaClient } from '@prisma/client';
 import { OrdersService } from '../src/orders/orders.service';
 
 const prisma = new PrismaClient();
-// Cast PrismaClient as PrismaService — compatible since PrismaService only adds lifecycle hooks
-const ordersService = new OrdersService(prisma as any);
+// Cast PrismaClient as PrismaService — compatible since PrismaService only adds lifecycle hooks.
+// Collaborator services са no-op стъбове: тестът покрива inventory/ДДС/валутната
+// логика на OrdersService, не гаранции/плащания/webhooks/push.
+const noop = async () => undefined;
+const ordersService = new OrdersService(
+  prisma as any,
+  { createWarrantiesForOrder: noop, voidWarrantiesForOrder: noop } as any,
+  { syncPaymentsFromStatus: noop } as any,
+  { emitOrderChanged: noop } as any,
+  {} as any,
+);
 
 // Уникален prefix за тестовите данни, за да не конфликтуват
 const TEST_PREFIX = `TEST_${Date.now()}`;
@@ -235,7 +244,7 @@ async function testInventoryIncrease() {
   await prisma.$transaction(async (tx) => {
     await tx.goodsReceipt.update({
       where: { id: goodsReceipt.id },
-      data: { status: 'DELIVERED_PAID' },
+      data: { status: 'DELIVERED' },
     });
 
     for (const item of goodsReceipt.items) {
@@ -522,7 +531,7 @@ async function testCurrencyConversion() {
   await prisma.$transaction(async (tx) => {
     await tx.goodsReceipt.update({
       where: { id: goodsReceipt.id },
-      data: { status: 'DELIVERED_PAID' },
+      data: { status: 'DELIVERED' },
     });
 
     for (const item of goodsReceipt.items) {
@@ -845,7 +854,7 @@ async function testGoodsReceiptCancellation() {
   await prisma.$transaction(async (tx) => {
     await tx.goodsReceipt.update({
       where: { id: gr.id },
-      data: { status: 'DELIVERED_PAID' },
+      data: { status: 'DELIVERED' },
     });
     for (const item of gr.items) {
       await tx.inventoryBatch.create({

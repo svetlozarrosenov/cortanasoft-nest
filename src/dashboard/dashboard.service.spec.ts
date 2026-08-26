@@ -3,14 +3,15 @@ import { DashboardService } from './dashboard.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 const mockPrisma = {
-  ticket: { count: jest.fn() },
   customer: { count: jest.fn(), findMany: jest.fn() },
   deal: { count: jest.fn() },
   product: { count: jest.fn() },
-  order: { count: jest.fn(), findMany: jest.fn() },
+  order: { count: jest.fn(), aggregate: jest.fn(), findMany: jest.fn() },
+  invoice: { count: jest.fn(), aggregate: jest.fn() },
   userCompany: { count: jest.fn() },
   department: { count: jest.fn() },
   ticket: { count: jest.fn(), findMany: jest.fn() },
+  $queryRaw: jest.fn(),
 };
 
 describe('DashboardService', () => {
@@ -29,14 +30,19 @@ describe('DashboardService', () => {
 
   describe('getDashboardStats', () => {
     beforeEach(() => {
-      // Default: all counts return 0
+      // Defaults: everything empty/zero
       mockPrisma.ticket.count.mockResolvedValue(0);
       mockPrisma.customer.count.mockResolvedValue(0);
       mockPrisma.deal.count.mockResolvedValue(0);
       mockPrisma.product.count.mockResolvedValue(0);
       mockPrisma.order.count.mockResolvedValue(0);
+      mockPrisma.order.aggregate.mockResolvedValue({ _sum: { total: null, paidAmount: null } });
+      mockPrisma.order.findMany.mockResolvedValue([]);
+      mockPrisma.invoice.count.mockResolvedValue(0);
+      mockPrisma.invoice.aggregate.mockResolvedValue({ _sum: { total: null } });
       mockPrisma.userCompany.count.mockResolvedValue(0);
       mockPrisma.department.count.mockResolvedValue(0);
+      mockPrisma.$queryRaw.mockResolvedValue([{ count: 0n }]);
     });
 
     it('should return all stats sections', async () => {
@@ -44,131 +50,114 @@ describe('DashboardService', () => {
 
       expect(result).toHaveProperty('quickStats');
       expect(result).toHaveProperty('modules');
+      expect(result).toHaveProperty('recentOrders');
       expect(result.modules).toHaveProperty('crm');
       expect(result.modules).toHaveProperty('erp');
       expect(result.modules).toHaveProperty('hr');
       expect(result.modules).toHaveProperty('tickets');
     });
 
-    it('should return correct ticket stats', async () => {
-      // 6 calls: active, pending, completed, overdue, activeLastMonth, completedLastMonth
-      mockPrisma.ticket.count
-        .mockResolvedValueOnce(5)   // activeTickets
-        .mockResolvedValueOnce(3)   // pendingTickets
-        .mockResolvedValueOnce(10)  // completedTickets
-        .mockResolvedValueOnce(2)   // overdueTickets
-        .mockResolvedValueOnce(4)   // activeTicketsLastMonth
-        .mockResolvedValueOnce(8);  // completedTicketsLastMonth
-
-      // CRM
-      mockPrisma.customer.count.mockResolvedValue(0);
-      mockPrisma.deal.count.mockResolvedValue(0);
-
-      // ERP
-      mockPrisma.product.count.mockResolvedValue(0);
-      mockPrisma.order.count.mockResolvedValue(0);
-
-      // HR
-      mockPrisma.userCompany.count.mockResolvedValue(0);
-      mockPrisma.department.count.mockResolvedValue(0);
+    it('should compute revenue and paid quick stats from order aggregates', async () => {
+      // order.aggregate call order: revenueThisMonth, revenueLastMonth, paidThisMonth, paidLastMonth
+      mockPrisma.order.aggregate
+        .mockResolvedValueOnce({ _sum: { total: 1000 } })
+        .mockResolvedValueOnce({ _sum: { total: 500 } })
+        .mockResolvedValueOnce({ _sum: { paidAmount: 800 } })
+        .mockResolvedValueOnce({ _sum: { paidAmount: 400 } });
 
       const result = await service.getDashboardStats('c1', 'u1');
 
-      expect(result.quickStats.activeTasks.value).toBe(5);
-      expect(result.quickStats.pending.value).toBe(3);
-      expect(result.quickStats.completed.value).toBe(10);
-      expect(result.quickStats.overdue.value).toBe(2);
+      expect(result.quickStats.revenue.value).toBe(1000);
+      expect(result.quickStats.revenue.change).toBe('+100%'); // 500 → 1000
+      expect(result.quickStats.paid.value).toBe(800);
+      expect(result.quickStats.paid.change).toBe('+100%'); // 400 → 800
     });
 
-    it('should calculate percentage change correctly (positive growth)', async () => {
-      // active: 10 now, 5 last month → +100%
-      mockPrisma.ticket.count
-        .mockResolvedValueOnce(10)  // activeTickets
-        .mockResolvedValueOnce(0)   // pending
-        .mockResolvedValueOnce(0)   // completed
-        .mockResolvedValueOnce(0)   // overdue
-        .mockResolvedValueOnce(5)   // activeTicketsLastMonth
-        .mockResolvedValueOnce(0);  // completedTicketsLastMonth
-
-      mockPrisma.customer.count.mockResolvedValue(0);
-      mockPrisma.deal.count.mockResolvedValue(0);
-      mockPrisma.product.count.mockResolvedValue(0);
-      mockPrisma.order.count.mockResolvedValue(0);
-      mockPrisma.userCompany.count.mockResolvedValue(0);
-      mockPrisma.department.count.mockResolvedValue(0);
+    it('should handle zero previous revenue (0→N = +100%)', async () => {
+      mockPrisma.order.aggregate
+        .mockResolvedValueOnce({ _sum: { total: 700 } })
+        .mockResolvedValueOnce({ _sum: { total: null } })
+        .mockResolvedValueOnce({ _sum: { paidAmount: null } })
+        .mockResolvedValueOnce({ _sum: { paidAmount: null } });
 
       const result = await service.getDashboardStats('c1', 'u1');
-      expect(result.quickStats.activeTasks.change).toBe('+100%');
-    });
-
-    it('should handle zero previous (0→N = +100%)', async () => {
-      mockPrisma.ticket.count
-        .mockResolvedValueOnce(7)   // activeTickets
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)   // activeTicketsLastMonth = 0
-        .mockResolvedValueOnce(0);
-
-      mockPrisma.customer.count.mockResolvedValue(0);
-      mockPrisma.deal.count.mockResolvedValue(0);
-      mockPrisma.product.count.mockResolvedValue(0);
-      mockPrisma.order.count.mockResolvedValue(0);
-      mockPrisma.userCompany.count.mockResolvedValue(0);
-      mockPrisma.department.count.mockResolvedValue(0);
-
-      const result = await service.getDashboardStats('c1', 'u1');
-      expect(result.quickStats.activeTasks.change).toBe('+100%');
+      expect(result.quickStats.revenue.change).toBe('+100%');
     });
 
     it('should handle zero both (0→0 = 0%)', async () => {
-      mockPrisma.ticket.count
-        .mockResolvedValueOnce(0)   // activeTickets = 0
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)   // activeTicketsLastMonth = 0
-        .mockResolvedValueOnce(0);
-
-      mockPrisma.customer.count.mockResolvedValue(0);
-      mockPrisma.deal.count.mockResolvedValue(0);
-      mockPrisma.product.count.mockResolvedValue(0);
-      mockPrisma.order.count.mockResolvedValue(0);
-      mockPrisma.userCompany.count.mockResolvedValue(0);
-      mockPrisma.department.count.mockResolvedValue(0);
-
       const result = await service.getDashboardStats('c1', 'u1');
-      expect(result.quickStats.activeTasks.change).toBe('0%');
+      expect(result.quickStats.revenue.change).toBe('0%');
+      expect(result.quickStats.paid.change).toBe('0%');
     });
 
-    it('should return correct ERP stats (products and orders)', async () => {
-      mockPrisma.ticket.count.mockResolvedValue(0);
-      mockPrisma.customer.count.mockResolvedValue(0);
-      mockPrisma.deal.count.mockResolvedValue(0);
-      mockPrisma.product.count.mockResolvedValue(25);
+    it('should handle negative change (decrease)', async () => {
+      // revenue: 300 now, 1000 last month → -70%
+      mockPrisma.order.aggregate
+        .mockResolvedValueOnce({ _sum: { total: 300 } })
+        .mockResolvedValueOnce({ _sum: { total: 1000 } })
+        .mockResolvedValueOnce({ _sum: { paidAmount: null } })
+        .mockResolvedValueOnce({ _sum: { paidAmount: null } });
+
+      const result = await service.getDashboardStats('c1', 'u1');
+      expect(result.quickStats.revenue.change).toBe('-70%');
+    });
+
+    it('should compute ordersThisMonth change from counts', async () => {
+      // order.count call order: totalOrders, ordersThisMonth, ordersLastMonth
       mockPrisma.order.count
-        .mockResolvedValueOnce(100)  // totalOrders
-        .mockResolvedValueOnce(15);  // ordersThisMonth
-      mockPrisma.userCompany.count.mockResolvedValue(0);
-      mockPrisma.department.count.mockResolvedValue(0);
+        .mockResolvedValueOnce(100)
+        .mockResolvedValueOnce(15)
+        .mockResolvedValueOnce(10);
 
       const result = await service.getDashboardStats('c1', 'u1');
 
-      expect(result.modules.erp.products).toBe(25);
+      expect(result.quickStats.ordersThisMonth.value).toBe(15);
+      expect(result.quickStats.ordersThisMonth.change).toBe('+50%'); // 10 → 15
       expect(result.modules.erp.orders).toBe(100);
       expect(result.modules.erp.ordersThisMonth).toBe(15);
     });
 
+    it('should report unpaid invoices count and amount', async () => {
+      mockPrisma.invoice.count.mockResolvedValue(4);
+      mockPrisma.invoice.aggregate.mockResolvedValue({ _sum: { total: 2500 } });
+
+      const result = await service.getDashboardStats('c1', 'u1');
+
+      expect(result.quickStats.unpaidInvoices.value).toBe(4);
+      expect(result.quickStats.unpaidInvoices.amount).toBe(2500);
+    });
+
+    it('should report low stock count from the raw query', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([{ count: 3n }]);
+
+      const result = await service.getDashboardStats('c1', 'u1');
+      expect(result.quickStats.lowStock.value).toBe(3);
+    });
+
+    it('should map recent orders with numeric totals', async () => {
+      mockPrisma.order.findMany.mockResolvedValue([
+        {
+          id: 'o1',
+          orderNumber: 'ORD-2026-0001',
+          customerName: 'Иван Иванов',
+          total: '123.45',
+          status: 'CONFIRMED',
+          createdAt: new Date('2026-02-01T10:00:00Z'),
+        },
+      ]);
+
+      const result = await service.getDashboardStats('c1', 'u1');
+
+      expect(result.recentOrders).toHaveLength(1);
+      expect(result.recentOrders[0].orderNumber).toBe('ORD-2026-0001');
+      expect(result.recentOrders[0].total).toBe(123.45);
+    });
+
     it('should return correct CRM stats', async () => {
-      mockPrisma.ticket.count.mockResolvedValue(0);
       mockPrisma.customer.count
-        .mockResolvedValueOnce(50)   // totalContacts
-        .mockResolvedValueOnce(5);   // newContactsThisMonth
+        .mockResolvedValueOnce(50) // totalLeads
+        .mockResolvedValueOnce(5); // newLeadsThisMonth
       mockPrisma.deal.count.mockResolvedValue(20);
-      mockPrisma.product.count.mockResolvedValue(0);
-      mockPrisma.order.count.mockResolvedValue(0);
-      mockPrisma.userCompany.count.mockResolvedValue(0);
-      mockPrisma.department.count.mockResolvedValue(0);
 
       const result = await service.getDashboardStats('c1', 'u1');
 
@@ -178,11 +167,6 @@ describe('DashboardService', () => {
     });
 
     it('should return correct HR stats', async () => {
-      mockPrisma.ticket.count.mockResolvedValue(0);
-      mockPrisma.customer.count.mockResolvedValue(0);
-      mockPrisma.deal.count.mockResolvedValue(0);
-      mockPrisma.product.count.mockResolvedValue(0);
-      mockPrisma.order.count.mockResolvedValue(0);
       mockPrisma.userCompany.count.mockResolvedValue(10);
       mockPrisma.department.count.mockResolvedValue(3);
 
@@ -193,46 +177,20 @@ describe('DashboardService', () => {
     });
 
     it('should combine active + pending as tickets.active in modules', async () => {
+      // ticket.count call order: active, pending, completed, overdue,
+      // activeLastMonth, completedLastMonth
       mockPrisma.ticket.count
-        .mockResolvedValueOnce(5)   // activeTickets
-        .mockResolvedValueOnce(3)   // pendingTickets
-        .mockResolvedValueOnce(7)   // completedTickets
+        .mockResolvedValueOnce(5)
+        .mockResolvedValueOnce(3)
+        .mockResolvedValueOnce(7)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0)
         .mockResolvedValueOnce(0);
-
-      mockPrisma.customer.count.mockResolvedValue(0);
-      mockPrisma.deal.count.mockResolvedValue(0);
-      mockPrisma.product.count.mockResolvedValue(0);
-      mockPrisma.order.count.mockResolvedValue(0);
-      mockPrisma.userCompany.count.mockResolvedValue(0);
-      mockPrisma.department.count.mockResolvedValue(0);
 
       const result = await service.getDashboardStats('c1', 'u1');
 
       expect(result.modules.tickets.active).toBe(8); // 5 + 3
       expect(result.modules.tickets.completed).toBe(7);
-    });
-
-    it('should handle negative change (decrease)', async () => {
-      // completed: 3 now, 10 last month → -70%
-      mockPrisma.ticket.count
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(3)   // completedTickets = 3
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(0)
-        .mockResolvedValueOnce(10); // completedTicketsLastMonth = 10
-
-      mockPrisma.customer.count.mockResolvedValue(0);
-      mockPrisma.deal.count.mockResolvedValue(0);
-      mockPrisma.product.count.mockResolvedValue(0);
-      mockPrisma.order.count.mockResolvedValue(0);
-      mockPrisma.userCompany.count.mockResolvedValue(0);
-      mockPrisma.department.count.mockResolvedValue(0);
-
-      const result = await service.getDashboardStats('c1', 'u1');
-      expect(result.quickStats.completed.change).toBe('-70%');
     });
   });
 
@@ -259,7 +217,7 @@ describe('DashboardService', () => {
       expect(result[0].id).toBe('o1');
       expect(result[0].type).toBe('order_created');
       expect(result[1].id).toBe('c1');
-      expect(result[1].type).toBe('contact_created');
+      expect(result[1].type).toBe('lead_created');
       expect(result[2].id).toBe('t1');
       expect(result[2].type).toBe('ticket_created');
     });
@@ -294,8 +252,10 @@ describe('DashboardService', () => {
       mockPrisma.order.findMany.mockResolvedValue([]);
       mockPrisma.ticket.findMany.mockResolvedValue([]);
 
-      const result = await service.getRecentActivity('c1', 3);
-      expect(result).toHaveLength(3);
+      const result = await service.getRecentActivity('c1');
+      const limited = await service.getRecentActivity('c1', 3);
+      expect(result).toHaveLength(5);
+      expect(limited).toHaveLength(3);
     });
 
     it('should handle empty results', async () => {

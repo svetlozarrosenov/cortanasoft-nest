@@ -199,6 +199,7 @@ model Company {
   productCategories            ProductCategory[]
   suppliers                    Supplier[]
   locations                    Location[]
+  sites                        Site[]
   goodsReceipts                GoodsReceipt[]
   inventoryBatches             InventoryBatch[]
   inventorySerials             InventorySerial[]
@@ -556,6 +557,9 @@ model User {
   // Трансфери между складове
   responsibleStockTransfers StockTransfer[] @relation("StockTransferResponsible")
   createdStockTransfers     StockTransfer[] @relation("StockTransferCreator")
+
+  // Екипи на локации (бусове)
+  locationMemberships LocationMember[] @relation("LocationMemberUser")
 
   // Гаранции
   createdWarrantyTemplates WarrantyTemplate[] @relation("WarrantyTemplateCreator")
@@ -937,6 +941,7 @@ enum StockTransferStatus {
 enum LocationType {
   WAREHOUSE // Склад
   STORE // Магазин
+  VEHICLE // Превозно средство (бус на монтажен екип — мобилен склад)
 }
 
 // Категория продукти
@@ -1124,6 +1129,7 @@ model Location {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   storageZones        StorageZone[]
+  members             LocationMember[]
   goodsReceipts       GoodsReceipt[]
   inventoryBatches    InventoryBatch[]
   inventorySerials    InventorySerial[]
@@ -1156,6 +1162,25 @@ model StorageZone {
 
   @@unique([locationId, code])
   @@map("storage_zones")
+}
+
+// Екип на локация — кой служител е зачислен към коя локация. Използва се
+// основно за бусове (VEHICLE): кой монтажник с кой бус се движи. Many-to-many,
+// защото хората се местят между бусове.
+model LocationMember {
+  id String @id @default(cuid())
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation("LocationMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([locationId, userId])
+  @@index([userId])
+  @@map("location_members")
 }
 
 // ==================== ПРИЕМАНЕ НА СТОКА ====================
@@ -1625,6 +1650,34 @@ enum CreditBank {
   OTHER // Друга / неуказана
 }
 
+// ==================== ОБЕКТИ ====================
+
+// Обект — физическо място (ферма, стопанство, площадка), на което се извършват
+// продажби/монтажи. Един клиент може да има много обекти. Обектът е чист
+// контейнер: продажбите (Order.siteId) и разходите (Expense.siteId) се
+// причисляват към него и от тях се смятат приход/разход/резултат. Изцяло
+// опционален — фирми без нужда от обекти не го виждат (permission erp.sites).
+model Site {
+  id       String  @id @default(cuid())
+  name     String // Име на обекта („Кравеферма Раздол")
+  address  String?
+  city     String?
+  notes    String? @db.Text
+  isActive Boolean @default(true)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  orders   Order[]
+  expenses Expense[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, isActive])
+  @@map("sites")
+}
+
 // Клиентска поръчка (продажба)
 model Order {
   id          String      @id @default(cuid())
@@ -1662,6 +1715,10 @@ model Order {
   // историческия оборот.
   partnerCustomerId String?
   partnerCustomer   Customer? @relation("OrderPartner", fields: [partnerCustomerId], references: [id], onDelete: SetNull)
+
+  // Обект (ферма/площадка), към който е причислена продажбата. Опционално.
+  siteId String?
+  site   Site?   @relation(fields: [siteId], references: [id], onDelete: SetNull)
 
   // Доставка
   deliveryMethod     String  @default("none") // none, manual, econt_office, econt_address
@@ -1736,6 +1793,7 @@ model Order {
   @@index([companyId, status])
   @@index([companyId, orderDate])
   @@index([companyId, partnerCustomerId])
+  @@index([siteId])
   @@map("orders")
 }
 
@@ -3033,6 +3091,10 @@ model Expense {
   goodsReceiptId String?
   goodsReceipt   GoodsReceipt? @relation(fields: [goodsReceiptId], references: [id], onDelete: SetNull)
 
+  // Обект (ферма/площадка), към който е причислен разходът. Опционално.
+  siteId String?
+  site   Site?   @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
   // Създател
   createdById String?
   createdBy   User?   @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -3052,6 +3114,7 @@ model Expense {
   @@index([companyId, category])
   @@index([companyId, status])
   @@index([companyId, expenseDate])
+  @@index([siteId])
   @@map("expenses")
 }
 

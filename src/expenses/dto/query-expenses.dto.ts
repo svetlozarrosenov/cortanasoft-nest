@@ -19,6 +19,10 @@ export class QueryExpensesDto {
   @IsOptional()
   supplierId?: string;
 
+  @IsString()
+  @IsOptional()
+  siteId?: string;
+
   @IsDateString()
   @IsOptional()
   dateFrom?: string;

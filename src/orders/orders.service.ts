@@ -46,6 +46,7 @@ const ORDER_INCLUDE = {
       postalCode: true,
     },
   },
+  site: { select: { id: true, name: true } },
   currency: true,
   createdBy: {
     select: { id: true, firstName: true, lastName: true },
@@ -254,6 +255,17 @@ export class OrdersService {
       }
     }
 
+    // Same tenant check for the site (обект)
+    if (dto.siteId) {
+      const site = await this.prisma.site.findFirst({
+        where: { id: dto.siteId, companyId },
+        select: { id: true },
+      });
+      if (!site) {
+        throw new NotFoundException('Обектът не е намерен');
+      }
+    }
+
     // Use company currency as default
     const currencyId = dto.currencyId || company.currencyId;
 
@@ -285,6 +297,7 @@ export class OrdersService {
           paymentStatus: 'PENDING',
           customerId: dto.customerId,
           billToCustomerId: dto.billToCustomerId,
+          siteId: dto.siteId || undefined,
           partnerCustomerId,
           customerName: dto.customerName,
           customerEmail: dto.customerEmail,
@@ -650,6 +663,17 @@ export class OrdersService {
       }
     }
 
+    // Same tenant check for the site (обект)
+    if (dto.siteId) {
+      const site = await this.prisma.site.findFirst({
+        where: { id: dto.siteId, companyId },
+        select: { id: true },
+      });
+      if (!site) {
+        throw new NotFoundException('Обектът не е намерен');
+      }
+    }
+
     // Status change
     if (dto.status && dto.status !== order.status) {
       // Анулирана поръчка е терминална за директни смени: cancel() е върнал
@@ -857,6 +881,7 @@ export class OrdersService {
               partnerCustomerId: partnerCustomerId ?? null,
             }),
             ...(dto.billToCustomerId !== undefined && { billToCustomerId: dto.billToCustomerId || null }),
+            ...(dto.siteId !== undefined && { siteId: dto.siteId || null }),
             ...(dto.customerName && { customerName: dto.customerName }),
             ...(dto.customerEmail !== undefined && { customerEmail: dto.customerEmail }),
             ...(dto.customerPhone !== undefined && { customerPhone: dto.customerPhone }),

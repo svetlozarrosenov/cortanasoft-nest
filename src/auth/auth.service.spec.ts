@@ -4,6 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { MailService } from '../mail/mail.service';
 import * as bcrypt from 'bcrypt';
 
 jest.mock('bcrypt', () => ({
@@ -13,6 +14,7 @@ jest.mock('bcrypt', () => ({
 const mockPrisma = {
   user: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
   },
   userCompany: {
     findUnique: jest.fn(),
@@ -38,6 +40,7 @@ describe('AuthService', () => {
         { provide: PrismaService, useValue: mockPrisma },
         { provide: JwtService, useValue: mockJwtService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: MailService, useValue: { send: jest.fn() } },
       ],
     }).compile();
     service = module.get<AuthService>(AuthService);
@@ -64,7 +67,7 @@ describe('AuthService', () => {
 
   describe('validateUser', () => {
     it('should validate user with correct credentials', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(makeUser());
+      mockPrisma.user.findFirst.mockResolvedValue(makeUser());
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
       const result = await service.validateUser('test@test.com', 'password123');
@@ -73,22 +76,22 @@ describe('AuthService', () => {
     });
 
     it('should throw UnauthorizedException for non-existent user', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.findFirst.mockResolvedValue(null);
       await expect(service.validateUser('bad@test.com', 'pass')).rejects.toThrow(UnauthorizedException);
     });
 
     it('should throw UnauthorizedException for inactive user', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(makeUser({ isActive: false }));
+      mockPrisma.user.findFirst.mockResolvedValue(makeUser({ isActive: false }));
       await expect(service.validateUser('test@test.com', 'pass')).rejects.toThrow(UnauthorizedException);
     });
 
     it('should throw UnauthorizedException when user has no companies', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(makeUser({ userCompanies: [] }));
+      mockPrisma.user.findFirst.mockResolvedValue(makeUser({ userCompanies: [] }));
       await expect(service.validateUser('test@test.com', 'pass')).rejects.toThrow(UnauthorizedException);
     });
 
     it('should throw UnauthorizedException for wrong password', async () => {
-      mockPrisma.user.findUnique.mockResolvedValue(makeUser());
+      mockPrisma.user.findFirst.mockResolvedValue(makeUser());
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
       await expect(service.validateUser('test@test.com', 'wrong')).rejects.toThrow(UnauthorizedException);
     });
@@ -100,7 +103,7 @@ describe('AuthService', () => {
           { companyId: 'c2', isDefault: true, company: { id: 'c2', isActive: true, role: 'CLIENT' }, role: { id: 'r2' }, roleId: 'r2' },
         ],
       });
-      mockPrisma.user.findUnique.mockResolvedValue(user);
+      mockPrisma.user.findFirst.mockResolvedValue(user);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
       const result = await service.validateUser('test@test.com', 'pass');
@@ -114,7 +117,7 @@ describe('AuthService', () => {
           { companyId: 'c2', isDefault: false, company: { id: 'c2', isActive: true, role: 'CLIENT' }, role: { id: 'r2' }, roleId: 'r2' },
         ],
       });
-      mockPrisma.user.findUnique.mockResolvedValue(user);
+      mockPrisma.user.findFirst.mockResolvedValue(user);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
       const result = await service.validateUser('test@test.com', 'pass');
@@ -127,7 +130,7 @@ describe('AuthService', () => {
           { companyId: 'c1', isDefault: true, company: { id: 'c1', isActive: false }, role: { id: 'r1' }, roleId: 'r1' },
         ],
       });
-      mockPrisma.user.findUnique.mockResolvedValue(user);
+      mockPrisma.user.findFirst.mockResolvedValue(user);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
       await expect(service.validateUser('test@test.com', 'pass')).rejects.toThrow(UnauthorizedException);
@@ -136,7 +139,7 @@ describe('AuthService', () => {
 
   describe('login', () => {
     beforeEach(() => {
-      mockPrisma.user.findUnique.mockResolvedValue(makeUser());
+      mockPrisma.user.findFirst.mockResolvedValue(makeUser());
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
     });
 
@@ -217,13 +220,15 @@ describe('AuthService', () => {
   });
 
   describe('getCookieOptions', () => {
-    it('should return production options with secure=true and sameSite=strict', () => {
+    it('should return production options with secure=true and sameSite=none', () => {
       mockConfigService.get.mockReturnValue('production');
       const opts = service.getCookieOptions(false);
 
       expect(opts.httpOnly).toBe(true);
       expect(opts.secure).toBe(true);
-      expect(opts.sameSite).toBe('strict');
+      // Cross-site cookie за .cortanasoft.com субдомейните (secure=true го изисква)
+      expect(opts.sameSite).toBe('none');
+      expect(opts.domain).toBe('.cortanasoft.com');
     });
 
     it('should return dev options with secure=false and sameSite=lax', () => {

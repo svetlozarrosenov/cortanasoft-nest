@@ -29,7 +29,7 @@ describe('ExportService', () => {
     it('should contain correct data in xlsx', async () => {
       const buffer = await service.generateFile(columns, data, 'xlsx', 'TestSheet');
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
+      await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
 
       const worksheet = workbook.getWorksheet('TestSheet');
       expect(worksheet).toBeDefined();
@@ -50,7 +50,7 @@ describe('ExportService', () => {
     it('should style header row with bold and blue background', async () => {
       const buffer = await service.generateFile(columns, data, 'xlsx');
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
+      await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
 
       const worksheet = workbook.worksheets[0];
       const headerRow = worksheet.getRow(1);
@@ -91,7 +91,7 @@ describe('ExportService', () => {
 
       const buffer = await service.generateFile(nestedColumns, nestedData, 'xlsx');
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
+      await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
       const ws = workbook.worksheets[0];
 
       expect(ws.getRow(2).getCell(1).value).toBe('Acme Corp');
@@ -105,7 +105,7 @@ describe('ExportService', () => {
 
       const buffer = await service.generateFile(cols, items, 'xlsx');
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
+      await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
       const ws = workbook.worksheets[0];
 
       expect(ws.getRow(2).getCell(1).value).toBe('');
@@ -123,7 +123,7 @@ describe('ExportService', () => {
 
       const buffer = await service.generateFile(cols, items, 'xlsx');
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
+      await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
       const ws = workbook.worksheets[0];
 
       expect(ws.getRow(2).getCell(1).value).toBe(19.99);
@@ -138,7 +138,7 @@ describe('ExportService', () => {
 
       const buffer = await service.generateFile(cols, items, 'xlsx');
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
+      await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
       const ws = workbook.worksheets[0];
 
       expect(ws.getRow(2).getCell(1).value).toBe('2024-06-15 10:30:00');
@@ -149,7 +149,7 @@ describe('ExportService', () => {
     it('should generate file with only headers when data is empty', async () => {
       const buffer = await service.generateFile(columns, [], 'xlsx');
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
+      await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
       const ws = workbook.worksheets[0];
 
       expect(ws.getRow(1).getCell(1).value).toBe('Name');
@@ -161,7 +161,7 @@ describe('ExportService', () => {
     it('should use "Data" as default sheet name', async () => {
       const buffer = await service.generateFile(columns, data, 'xlsx');
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
+      await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
 
       expect(workbook.getWorksheet('Data')).toBeDefined();
     });
@@ -174,7 +174,7 @@ describe('ExportService', () => {
 
       const buffer = await service.generateFile(cols, items, 'xlsx');
       const workbook = new ExcelJS.Workbook();
-      await workbook.xlsx.load(buffer);
+      await workbook.xlsx.load(buffer as unknown as ArrayBuffer);
       const ws = workbook.worksheets[0];
 
       expect(ws.getColumn(1).width).toBe(20);

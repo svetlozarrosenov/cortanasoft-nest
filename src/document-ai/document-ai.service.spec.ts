@@ -345,6 +345,7 @@ describe('DocumentAIService', () => {
         expect(result.invoiceNumber).toBe('URL-001');
         expect(global.fetch).toHaveBeenCalledWith(
           'https://example.com/invoice.png',
+          { redirect: 'error' },
         );
       });
 

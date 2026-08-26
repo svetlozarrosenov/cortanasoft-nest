@@ -1,9 +1,15 @@
-import { IsString, IsOptional, IsDateString, IsNumber, Min } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsNumber, Min, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PaymentMethod } from '@prisma/client';
 
 export class CreateAdvanceInvoiceDto {
   @IsString()
   orderId: string;
+
+  // Начин на плащане върху фактурата (по подразбиране — от поръчката)
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
 
   // Gross amount (incl. VAT) of the advance payment
   @Type(() => Number)

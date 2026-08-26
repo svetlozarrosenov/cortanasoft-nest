@@ -315,6 +315,24 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
+        key: 'sites',
+        labelKey: 'modules.erp.sites.title',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'sitesList',
+            labelKey: 'modules.erp.sites.listTable',
+            columns: [
+              { key: 'name', labelKey: 'common.name' },
+              { key: 'address', labelKey: 'common.address' },
+              { key: 'city', labelKey: 'common.city' },
+              { key: 'orders', labelKey: 'modules.erp.sales' },
+              { key: 'status', labelKey: 'common.status' },
+            ],
+          },
+        ],
+      },
+      {
         key: 'protocols',
         labelKey: 'modules.erp.protocols',
         actions: ['view', 'create', 'edit', 'delete'],
