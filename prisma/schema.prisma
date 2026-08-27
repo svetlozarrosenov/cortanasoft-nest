@@ -560,6 +560,7 @@ model User {
 
   // Екипи на локации (бусове)
   locationMemberships LocationMember[] @relation("LocationMemberUser")
+  orderCrewSnapshots  OrderCrewMember[] @relation("OrderCrewUser")
 
   // Гаранции
   createdWarrantyTemplates WarrantyTemplate[] @relation("WarrantyTemplateCreator")
@@ -1787,6 +1788,7 @@ model Order {
   issuedWarranties    IssuedWarranty[]
   payments            Payment[]
   creditApplication   CreditApplication?
+  crewMembers         OrderCrewMember[]
 
   @@unique([companyId, orderNumber])
   @@unique([companyId, externalId])
@@ -1795,6 +1797,30 @@ model Order {
   @@index([companyId, partnerCustomerId])
   @@index([siteId])
   @@map("orders")
+}
+
+// Snapshot на екипа, изпълнил поръчката. Пълни се при първия преход към
+// SHIPPED/DELIVERED от екипа (LocationMember) на буса на поръчката към ТОЗИ
+// момент — съставите на бусовете се менят, а отчетът „кой е работил на
+// обекта" трябва да остане исторически верен. Имената са дублирани, за да
+// преживее записът изтриване на потребителя.
+model OrderCrewMember {
+  id String @id @default(cuid())
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation("OrderCrewUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  firstName String
+  lastName  String
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@index([userId])
+  @@map("order_crew_members")
 }
 
 // Ред от клиентска поръчка

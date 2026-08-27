@@ -18,6 +18,12 @@ export class QueryLocationsDto {
   @IsEnum(LocationType)
   type?: LocationType;
 
+  // Изключва тип от списъка (напр. страницата „Локации" крие бусовете,
+  // защото те имат собствено меню „Превозни средства")
+  @IsOptional()
+  @IsEnum(LocationType)
+  excludeType?: LocationType;
+
   @IsOptional()
   @Transform(({ value }) => value === 'true')
   @IsBoolean()

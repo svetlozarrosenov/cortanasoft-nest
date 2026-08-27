@@ -78,6 +78,7 @@ export class LocationsService {
     const {
       search,
       type,
+      excludeType,
       isActive,
       page = 1,
       limit = 20,
@@ -100,6 +101,8 @@ export class LocationsService {
 
     if (type) {
       where.type = type;
+    } else if (excludeType) {
+      where.type = { not: excludeType };
     }
 
     if (isActive !== undefined) {

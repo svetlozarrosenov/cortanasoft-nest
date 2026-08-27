@@ -114,6 +114,11 @@ export class SitesService {
           customerName: true,
           total: true,
           paidAmount: true,
+          location: { select: { id: true, name: true, type: true } },
+          // Snapshot на екипа, изпълнил поръчката (пълни се при SHIPPED/DELIVERED)
+          crewMembers: {
+            select: { userId: true, firstName: true, lastName: true },
+          },
         },
         orderBy: { orderDate: 'desc' },
       }),
@@ -175,11 +180,70 @@ export class SitesService {
       .map(([month, values]) => ({ month, ...values }))
       .sort((a, b) => a.month.localeCompare(b.month));
 
+    // „Работили на обекта": бусовете от поръчките + хората по тях. Хората
+    // идват от snapshot-ите; за стари поръчки без snapshot падаме към
+    // ТЕКУЩИЯ екип на буса (isCurrent: true — UI-ят го маркира като такъв).
+    type WorkforceMember = {
+      userId: string | null;
+      firstName: string;
+      lastName: string;
+      isCurrent: boolean;
+    };
+    const workforceMap = new Map<
+      string,
+      { vehicle: { id: string; name: string }; members: Map<string, WorkforceMember> }
+    >();
+    const vehiclesWithoutSnapshot = new Set<string>();
+    for (const o of revenueOrders) {
+      if (!o.location || o.location.type !== 'VEHICLE') continue;
+      let entry = workforceMap.get(o.location.id);
+      if (!entry) {
+        entry = {
+          vehicle: { id: o.location.id, name: o.location.name },
+          members: new Map(),
+        };
+        workforceMap.set(o.location.id, entry);
+      }
+      if (o.crewMembers.length === 0) {
+        vehiclesWithoutSnapshot.add(o.location.id);
+      }
+      for (const member of o.crewMembers) {
+        const key = member.userId || `${member.firstName} ${member.lastName}`;
+        if (!entry.members.has(key)) {
+          entry.members.set(key, { ...member, isCurrent: false });
+        }
+      }
+    }
+    if (vehiclesWithoutSnapshot.size > 0) {
+      const currentMembers = await this.prisma.locationMember.findMany({
+        where: { locationId: { in: [...vehiclesWithoutSnapshot] } },
+        include: {
+          user: { select: { id: true, firstName: true, lastName: true } },
+        },
+      });
+      for (const member of currentMembers) {
+        const entry = workforceMap.get(member.locationId);
+        if (entry && !entry.members.has(member.user.id)) {
+          entry.members.set(member.user.id, {
+            userId: member.user.id,
+            firstName: member.user.firstName,
+            lastName: member.user.lastName,
+            isCurrent: true,
+          });
+        }
+      }
+    }
+    const workforce = [...workforceMap.values()].map((entry) => ({
+      vehicle: entry.vehicle,
+      members: [...entry.members.values()],
+    }));
+
     return {
       site,
       orders,
       expenses,
       monthly,
+      workforce,
       totals: {
         revenue,
         paid,

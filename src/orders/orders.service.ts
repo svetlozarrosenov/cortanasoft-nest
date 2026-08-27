@@ -723,6 +723,16 @@ export class OrdersService {
         include: ORDER_INCLUDE,
       });
 
+      // Snapshot на екипа при първия преход към SHIPPED/DELIVERED — съставът
+      // на буса се записва такъв, какъвто е в момента на изпълнението.
+      if (dto.status === 'SHIPPED' || dto.status === 'DELIVERED') {
+        try {
+          await this.snapshotOrderCrew(id, order.locationId);
+        } catch {
+          // Non-blocking: snapshot failure should not block the status flip.
+        }
+      }
+
       // Issue warranties on DELIVERED — this is when the customer actually
       // takes possession of the goods, so it's the correct moment to start
       // the warranty clock. createWarrantiesForOrder is idempotent.
@@ -1101,6 +1111,41 @@ export class OrdersService {
         inventoryBatchId: a.batchId,
         batchNumber: a.batchNumber,
         quantity: a.quantity,
+      })),
+    });
+  }
+
+  // Snapshot на екипа на буса към момента на изпълнение. Идемпотентно:
+  // веднъж записан, съставът не се презаписва при повторни преходи.
+  private async snapshotOrderCrew(orderId: string, locationId: string | null) {
+    if (!locationId) return;
+
+    const existing = await this.prisma.orderCrewMember.count({
+      where: { orderId },
+    });
+    if (existing > 0) return;
+
+    const location = await this.prisma.location.findUnique({
+      where: { id: locationId },
+      select: {
+        type: true,
+        members: {
+          include: {
+            user: { select: { id: true, firstName: true, lastName: true } },
+          },
+        },
+      },
+    });
+    if (!location || location.type !== 'VEHICLE' || location.members.length === 0) {
+      return;
+    }
+
+    await this.prisma.orderCrewMember.createMany({
+      data: location.members.map((member) => ({
+        orderId,
+        userId: member.user.id,
+        firstName: member.user.firstName,
+        lastName: member.user.lastName,
       })),
     });
   }
