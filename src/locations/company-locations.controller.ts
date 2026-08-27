@@ -26,7 +26,17 @@ import {
   RequireCreate,
   RequireEdit,
   RequireDelete,
+  RequireAnyPermission,
 } from '../common/guards/permissions.guard';
+
+// Локациите обслужват и страницата „Превозни средства" (бусове = Location с
+// type VEHICLE, собствено право warehouse.vehicles) — CRUD/екип endpoint-ите
+// приемат което и да е от двете права. Складовите зони остават само locations.
+const anyLocationPerm = (action: 'view' | 'create' | 'edit' | 'delete') =>
+  RequireAnyPermission(
+    { module: 'warehouse', page: 'locations', action },
+    { module: 'warehouse', page: 'vehicles', action },
+  );
 
 @Controller('companies/:companyId/locations')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)
@@ -36,7 +46,7 @@ export class CompanyLocationsController {
   // ==================== LOCATION ENDPOINTS ====================
 
   @Post()
-  @RequireCreate('warehouse', 'locations')
+  @anyLocationPerm('create')
   create(
     @Param('companyId') companyId: string,
     @Body() dto: CreateLocationDto,
@@ -45,7 +55,7 @@ export class CompanyLocationsController {
   }
 
   @Get()
-  @RequireView('warehouse', 'locations')
+  @anyLocationPerm('view')
   findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryLocationsDto,
@@ -54,13 +64,13 @@ export class CompanyLocationsController {
   }
 
   @Get(':id')
-  @RequireView('warehouse', 'locations')
+  @anyLocationPerm('view')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.locationsService.findOne(companyId, id);
   }
 
   @Patch(':id')
-  @RequireEdit('warehouse', 'locations')
+  @anyLocationPerm('edit')
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -70,14 +80,14 @@ export class CompanyLocationsController {
   }
 
   @Delete(':id')
-  @RequireDelete('warehouse', 'locations')
+  @anyLocationPerm('delete')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.locationsService.remove(companyId, id);
   }
 
   // Екип на локацията (бус) — заменя списъка със зачислени служители
   @Patch(':id/members')
-  @RequireEdit('warehouse', 'locations')
+  @anyLocationPerm('edit')
   setMembers(
     @Param('companyId') companyId: string,
     @Param('id') id: string,

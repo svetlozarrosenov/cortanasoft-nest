@@ -404,6 +404,14 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
+        // Превозни средства (бусове) — отделен изглед върху Location(VEHICLE).
+        // Собствено право, за да е opt-in per роля (складов клиент без монтажни
+        // екипи не бива да вижда менюто).
+        key: 'vehicles',
+        labelKey: 'modules.warehouse.vehicles',
+        actions: ['view', 'create', 'edit', 'delete'],
+      },
+      {
         key: 'suppliers',
         labelKey: 'modules.erp.suppliers',
         actions: ['view', 'create', 'edit', 'delete'],
