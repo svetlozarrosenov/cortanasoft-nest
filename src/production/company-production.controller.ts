@@ -87,6 +87,16 @@ export class CompanyProductionController {
     return this.productionService.getStartMaterialPlan(companyId, id);
   }
 
+  // Съществуващи произведени партиди на продукта — за избор при завършване
+  @Get(':id/existing-batches')
+  @RequireView('production', 'orders')
+  existingBatches(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+  ) {
+    return this.productionService.getExistingBatches(companyId, id);
+  }
+
   @Post(':id/start')
   @RequireEdit('production', 'orders')
   start(

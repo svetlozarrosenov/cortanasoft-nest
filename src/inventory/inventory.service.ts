@@ -228,6 +228,31 @@ export class InventoryService {
             },
           },
         },
+        // Паспорт: ВСИЧКИ производства, излели в партидата (вкл. доливания).
+        // batch.productionOrder по-горе остава за съвместимост — сочи първото.
+        filledByOrders: {
+          select: {
+            id: true,
+            orderNumber: true,
+            title: true,
+            status: true,
+            quantity: true,
+            actualStartDate: true,
+            actualEndDate: true,
+            bom: { select: { name: true } },
+            consumptions: {
+              select: {
+                id: true,
+                quantity: true,
+                unitCost: true,
+                sourceBatchNumber: true,
+                product: { select: { id: true, name: true, sku: true, unit: true } },
+              },
+              orderBy: { createdAt: 'asc' as const },
+            },
+          },
+          orderBy: { actualEndDate: 'asc' as const },
+        },
       },
     });
 
