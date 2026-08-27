@@ -487,6 +487,15 @@ export class ProductionService {
     if (order.status !== 'IN_PROGRESS') {
       throw new BadRequestException(ErrorMessages.production.canOnlyCompleteInProgress);
     }
+    // Рецептата (BOM) е опционална, но материалите — не: производство без
+    // нито едно изписване дава нулева себестойност и празен паспорт (случи се
+    // на прод — партиди за 250к литра без никаква проследимост на суровините).
+    // order.issuances е вече филтрирано до returned=false.
+    if (order.issuances.length === 0) {
+      throw new BadRequestException(
+        ErrorMessages.production.cannotCompleteWithoutMaterials,
+      );
+    }
 
     // Determine location for finished inventory
     let locationId = order.locationId;

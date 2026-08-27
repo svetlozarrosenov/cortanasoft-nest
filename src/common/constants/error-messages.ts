@@ -266,6 +266,8 @@ export const ErrorMessages = {
     canOnlyUpdateDraftOrPlanned: 'Може да редактирате само чернови или планирани поръчки',
     canOnlyStartDraftOrPlanned: 'Може да стартирате само чернови или планирани поръчки',
     canOnlyCompleteInProgress: 'Може да завършите само поръчки в производство',
+    cannotCompleteWithoutMaterials:
+      'Не може да завършите производство без изписани материали. Изпишете вложените материали (Изпиши материал) и опитайте отново.',
     alreadyCancelled: 'Поръчката вече е отменена',
     cannotCancelCompleted: 'Не може да отмените завършена производствена поръчка',
     canOnlyDeleteDraft: 'Може да изтриете само чернови поръчки',

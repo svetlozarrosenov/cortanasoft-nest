@@ -63,6 +63,17 @@ describe('ProductionService', () => {
       await expect(service.complete('c1', 'po1')).rejects.toThrow(BadRequestException);
     });
 
+    it('should refuse to complete with zero issued materials', async () => {
+      // Рецептата е опционална, материалите — не: без изписване няма
+      // себестойност и паспортът на партидата е празен.
+      mockPrisma.productionOrder.findFirst.mockResolvedValue(
+        makeOrder({ issuances: [] }),
+      );
+      await expect(service.complete('c1', 'po1')).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.inventoryBatch.create).not.toHaveBeenCalled();
+      expect(mockPrisma.productionOrder.update).not.toHaveBeenCalled();
+    });
+
     it('should create a new batch and link it via outputBatchId', async () => {
       mockPrisma.productionOrder.findFirst.mockResolvedValue(makeOrder());
       mockPrisma.inventoryBatch.findUnique.mockResolvedValue(null); // няма такава партида
