@@ -3721,6 +3721,10 @@ model AiSettings {
   // Anthropic API ключ — ВИНАГИ шифрован с encryptSecret()
   apiKey String?
 
+  // Избран Claude модел (per компания). null = дефолтният (Haiku).
+  // Валидира се срещу whitelist в DTO-то — свободен string не минава.
+  model String?
+
   companyId String  @unique
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 

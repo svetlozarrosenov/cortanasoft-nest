@@ -80,12 +80,14 @@ export class DocumentAIService {
     return (await this.aiSettings.getApiKeyForCompany(companyId)) !== null;
   }
 
-  private async getClient(companyId: string): Promise<Anthropic> {
-    const apiKey = await this.aiSettings.getApiKeyForCompany(companyId);
-    if (!apiKey) {
+  private async getClient(
+    companyId: string,
+  ): Promise<{ client: Anthropic; model: string }> {
+    const config = await this.aiSettings.getAiConfigForCompany(companyId);
+    if (!config) {
       throw new BadRequestException(ErrorMessages.ai.notConfigured);
     }
-    return new Anthropic({ apiKey });
+    return { client: new Anthropic({ apiKey: config.apiKey }), model: config.model };
   }
 
   /** True if an IP literal is loopback, private, link-local or CGNAT. */
@@ -137,7 +139,7 @@ export class DocumentAIService {
     companyId: string,
     imageUrl: string,
   ): Promise<ParsedInvoiceData> {
-    const client = await this.getClient(companyId);
+    const { client, model } = await this.getClient(companyId);
 
     try {
       // Guard against SSRF: imageUrl comes from the request body, so verify it
@@ -154,7 +156,7 @@ export class DocumentAIService {
       const mimeType =
         imageResponse.headers.get('content-type') || 'image/jpeg';
 
-      return await this.callClaude(client, base64Image, mimeType);
+      return await this.callClaude(client, model, base64Image, mimeType);
     } catch (error) {
       this.logger.error('Failed to parse invoice:', error);
       throw error;
@@ -169,11 +171,11 @@ export class DocumentAIService {
     base64Data: string,
     mimeType: string,
   ): Promise<ParsedInvoiceData> {
-    const client = await this.getClient(companyId);
+    const { client, model } = await this.getClient(companyId);
 
     try {
       const base64Image = base64Data.replace(/^data:image\/\w+;base64,/, '');
-      return await this.callClaude(client, base64Image, mimeType);
+      return await this.callClaude(client, model, base64Image, mimeType);
     } catch (error) {
       this.logger.error('Failed to parse invoice from base64:', error);
       throw error;
@@ -192,7 +194,7 @@ export class DocumentAIService {
     base64Data: string,
     mimeType: string,
   ): Promise<DeliveryScanResult> {
-    const client = await this.getClient(companyId);
+    const { client, model } = await this.getClient(companyId);
     const base64Image = base64Data.replace(/^data:[\w/]+;base64,/, '');
 
     const documentBlock: Anthropic.ContentBlockParam =
@@ -309,7 +311,7 @@ export class DocumentAIService {
     const MAX_TURNS = 12;
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const response = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+        model,
         max_tokens: 4096,
         tools,
         messages,
@@ -414,6 +416,7 @@ export class DocumentAIService {
 
   private async callClaude(
     client: Anthropic,
+    model: string,
     base64Image: string,
     mimeType: string,
   ): Promise<ParsedInvoiceData> {
@@ -442,7 +445,7 @@ export class DocumentAIService {
           };
 
     const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model,
       max_tokens: 4096,
       messages: [
         {

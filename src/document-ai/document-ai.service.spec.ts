@@ -14,6 +14,7 @@ jest.mock('@anthropic-ai/sdk', () => {
 
 const mockAiSettings = {
   getApiKeyForCompany: jest.fn(),
+  getAiConfigForCompany: jest.fn(),
 };
 
 const mockPrisma = {
@@ -28,6 +29,10 @@ describe('DocumentAIService', () => {
     beforeEach(async () => {
       jest.clearAllMocks();
       mockAiSettings.getApiKeyForCompany.mockResolvedValue('test-api-key');
+      mockAiSettings.getAiConfigForCompany.mockResolvedValue({
+        apiKey: 'test-api-key',
+        model: 'claude-haiku-4-5',
+      });
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
@@ -289,7 +294,7 @@ describe('DocumentAIService', () => {
         await service.parseInvoiceFromBase64('c1', 'imagedata', 'image/png');
 
         expect(mockCreate).toHaveBeenCalledWith({
-          model: 'claude-haiku-4-5-20251001',
+          model: 'claude-haiku-4-5',
           max_tokens: 4096,
           messages: [
             {
@@ -374,6 +379,10 @@ describe('DocumentAIService', () => {
     beforeEach(async () => {
       jest.clearAllMocks();
       mockAiSettings.getApiKeyForCompany.mockResolvedValue('test-api-key');
+      mockAiSettings.getAiConfigForCompany.mockResolvedValue({
+        apiKey: 'test-api-key',
+        model: 'claude-haiku-4-5',
+      });
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           DocumentAIService,
@@ -473,8 +482,33 @@ describe('DocumentAIService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it("should call Anthropic with the company's configured model", async () => {
+      mockAiSettings.getAiConfigForCompany.mockResolvedValue({
+        apiKey: 'test-api-key',
+        model: 'claude-sonnet-5',
+      });
+      mockCreate.mockResolvedValueOnce({
+        stop_reason: 'tool_use',
+        content: [
+          {
+            type: 'tool_use',
+            id: 't1',
+            name: 'submit_result',
+            input: { supplier: {}, items: [], confidence: 0.9 },
+          },
+        ],
+      });
+
+      await service.parseDeliveryInvoice('c1', 'base64data', 'image/jpeg');
+
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'claude-sonnet-5' }),
+      );
+    });
+
     it('should reject when the company has no AI key', async () => {
       mockAiSettings.getApiKeyForCompany.mockResolvedValue(null);
+      mockAiSettings.getAiConfigForCompany.mockResolvedValue(null);
       await expect(
         service.parseDeliveryInvoice('c1', 'base64data', 'image/jpeg'),
       ).rejects.toThrow(BadRequestException);
@@ -486,6 +520,7 @@ describe('DocumentAIService', () => {
     beforeEach(async () => {
       jest.clearAllMocks();
       mockAiSettings.getApiKeyForCompany.mockResolvedValue(null);
+      mockAiSettings.getAiConfigForCompany.mockResolvedValue(null);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [

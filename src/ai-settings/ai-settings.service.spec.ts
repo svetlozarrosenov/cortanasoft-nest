@@ -76,6 +76,7 @@ describe('AiSettingsService', () => {
         isActive: false,
         hasKey: false,
         keyHint: null,
+        model: 'claude-haiku-4-5',
         updatedAt: null,
       });
     });
