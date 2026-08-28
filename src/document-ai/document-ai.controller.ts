@@ -23,7 +23,9 @@ import {
   DocumentAIService,
   ParsedInvoiceData,
   DeliveryScanResult,
+  ReconcileResult,
 } from './document-ai.service';
+import { UploadsService } from '../uploads/uploads.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 
@@ -31,6 +33,10 @@ class ScanInvoiceDto {
   imageUrl?: string;
   base64Image?: string;
   mimeType?: string;
+}
+
+class ReconcileBankStatementDto {
+  bankStatementId: string;
 }
 
 interface ProductMatch {
@@ -55,6 +61,7 @@ export class DocumentAIController {
   constructor(
     private documentAIService: DocumentAIService,
     private prisma: PrismaService,
+    private uploads: UploadsService,
   ) {}
 
   /**
@@ -188,6 +195,57 @@ export class DocumentAIController {
       companyId,
       file.buffer.toString('base64'),
       file.mimetype,
+    );
+  }
+
+  /**
+   * Съгласуване на банково извлечение: Cortana чете качения PDF и мачва
+   * редовете срещу поръчки/фактури/разходи НА КОМПАНИЯТА. По-тежка операция
+   * (много tool ходове) → по-строг лимит.
+   */
+  @Post('reconcile-bank-statement')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({
+    short: { limit: 3, ttl: 60000 },
+    long: { limit: 20, ttl: 600000 },
+  })
+  @RequireView('ai', 'invoiceScanning')
+  async reconcileBankStatement(
+    @Param('companyId') companyId: string,
+    @Body() dto: ReconcileBankStatementDto,
+  ): Promise<ReconcileResult> {
+    if (!dto.bankStatementId) {
+      throw new BadRequestException('Липсва банково извлечение');
+    }
+    // Извлечението трябва да е НА ТАЗИ компания — никакъв достъп до чужди
+    const statement = await this.prisma.bankStatement.findFirst({
+      where: { id: dto.bankStatementId, companyId },
+    });
+    if (!statement) {
+      throw new BadRequestException('Банковото извлечение не е намерено');
+    }
+
+    // fileUrl пази R2 ключ; стари записи може да носят пълен URL
+    let content: Buffer;
+    if (/^https?:\/\//i.test(statement.fileUrl)) {
+      const res = await fetch(statement.fileUrl);
+      if (!res.ok) {
+        throw new BadRequestException('Файлът на извлечението не е достъпен');
+      }
+      content = Buffer.from(await res.arrayBuffer());
+    } else {
+      const { stream } = await this.uploads.getFile(statement.fileUrl);
+      const chunks: Buffer[] = [];
+      for await (const chunk of stream) {
+        chunks.push(chunk as Buffer);
+      }
+      content = Buffer.concat(chunks);
+    }
+
+    return this.documentAIService.reconcileBankStatement(
+      companyId,
+      content.toString('base64'),
     );
   }
 

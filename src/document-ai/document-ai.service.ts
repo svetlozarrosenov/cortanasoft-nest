@@ -51,6 +51,39 @@ export interface DeliveryScanResult {
   confidence: number;
 }
 
+// ==================== Съгласуване на банково извлечение ====================
+
+export interface ReconcileRowMatch {
+  type: 'order' | 'invoice' | 'expense';
+  id: string;
+  label: string;
+  amount?: number | null;
+  confidence: number;
+}
+
+export interface ReconcileRow {
+  date?: string | null;
+  counterparty?: string | null;
+  description?: string | null;
+  amount: number;
+  direction: 'in' | 'out';
+  match?: ReconcileRowMatch | null;
+}
+
+export interface ReconcileResult {
+  rows: ReconcileRow[];
+  confidence: number;
+  /** Потвърдени+ поръчки без плащане — „очаквано, но неполучено" (сървърно) */
+  awaitingOrders: {
+    id: string;
+    orderNumber: string;
+    customerName: string;
+    total: number;
+    paidAmount: number;
+    orderDate: Date;
+  }[];
+}
+
 export interface ParsedInvoiceData {
   invoiceNumber?: string;
   invoiceDate?: string;
@@ -351,6 +384,320 @@ export class DocumentAIService {
     throw new BadRequestException(
       'AI анализът не успя да завърши. Опитайте отново или въведете доставката ръчно.',
     );
+  }
+
+  /**
+   * Съгласуване на банково извлечение (tool use): Claude чете PDF-а и мачва
+   * всеки ред срещу поръчките/фактурите/разходите НА КОМПАНИЯТА. Всички
+   * tool-ове са ТВЪРДО companyId-скопирани — AI-ят физически няма достъп до
+   * данни на друга компания. „Очаквано, но неполучено" се смята сървърно.
+   */
+  async reconcileBankStatement(
+    companyId: string,
+    base64Pdf: string,
+  ): Promise<ReconcileResult> {
+    const { client, model } = await this.getClient(companyId);
+
+    const tools: Anthropic.Tool[] = [
+      {
+        name: 'search_orders',
+        description:
+          "Search the company's sales orders. Filter by approximate amount and/or a text query (order number or customer name). Returns up to 5 with payment status.",
+        input_schema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            amount: { type: 'number' },
+          },
+        },
+      },
+      {
+        name: 'search_invoices',
+        description:
+          "Search the company's issued invoices by number, customer name or approximate total. Returns up to 5 with status.",
+        input_schema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            amount: { type: 'number' },
+          },
+        },
+      },
+      {
+        name: 'search_expenses',
+        description:
+          "Search the company's expenses by description/supplier or approximate amount. Returns up to 5.",
+        input_schema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            amount: { type: 'number' },
+          },
+        },
+      },
+      {
+        name: 'submit_result',
+        description:
+          'Submit the final structured reconciliation. Call exactly once, after every statement row has been searched.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            rows: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  date: { type: ['string', 'null'], description: 'YYYY-MM-DD' },
+                  counterparty: { type: ['string', 'null'] },
+                  description: { type: ['string', 'null'] },
+                  amount: { type: 'number', description: 'positive number' },
+                  direction: { type: 'string', enum: ['in', 'out'] },
+                  match: {
+                    type: ['object', 'null'],
+                    properties: {
+                      type: { type: 'string', enum: ['order', 'invoice', 'expense'] },
+                      id: { type: 'string' },
+                      label: { type: 'string' },
+                      amount: { type: ['number', 'null'] },
+                      confidence: { type: 'number' },
+                    },
+                    required: ['type', 'id', 'label', 'confidence'],
+                  },
+                },
+                required: ['amount', 'direction'],
+              },
+            },
+            confidence: { type: 'number' },
+          },
+          required: ['rows', 'confidence'],
+        },
+      },
+    ];
+
+    const messages: Anthropic.MessageParam[] = [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'document',
+            source: { type: 'base64', media_type: 'application/pdf', data: base64Pdf },
+          },
+          {
+            type: 'text',
+            text: `This is a bank statement (likely Bulgarian, any bank format). Reconcile it against the company's records:
+
+1. Extract EVERY transaction row: date, counterparty, payment reference/description, amount (positive number) and direction ('in' = money received, 'out' = money paid out). Skip opening/closing balance lines.
+2. For every row try to find the matching record: incoming money usually matches a sales order or an issued invoice (search_orders / search_invoices — try the amount and any invoice/order number or customer name from the reference); outgoing money usually matches an expense (search_expenses). Bank fees, interest and card settlements usually have no match — leave match null.
+3. Set match only when reasonably sure (confidence 0-1). When unsure, leave match null — a human reviews everything.
+4. Finish by calling submit_result exactly once. Dates in YYYY-MM-DD, amounts as plain positive numbers.`,
+          },
+        ],
+      },
+    ];
+
+    // Извлеченията имат много редове → повече ходове от доставките
+    const MAX_TURNS = 20;
+    for (let turn = 0; turn < MAX_TURNS; turn++) {
+      const response = await client.messages.create({
+        model,
+        max_tokens: 8192,
+        tools,
+        messages,
+      });
+
+      const toolUses = response.content.filter(
+        (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
+      );
+
+      const submit = toolUses.find((block) => block.name === 'submit_result');
+      if (submit) {
+        const raw = submit.input as { rows?: ReconcileRow[]; confidence?: number };
+        return this.finalizeReconcileResult(companyId, raw);
+      }
+
+      if (toolUses.length === 0 || response.stop_reason !== 'tool_use') {
+        break;
+      }
+
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      for (const toolUse of toolUses) {
+        const result = await this.executeReconcileTool(
+          companyId,
+          toolUse.name,
+          toolUse.input as { query?: string; amount?: number },
+        );
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolUse.id,
+          content: JSON.stringify(result),
+        });
+      }
+
+      messages.push({ role: 'assistant', content: response.content });
+      messages.push({ role: 'user', content: toolResults });
+    }
+
+    throw new BadRequestException(
+      'AI съгласуването не успя да завърши. Опитайте отново.',
+    );
+  }
+
+  // Съгласувателните tool-ове — ВИНАГИ ограничени до companyId
+  private async executeReconcileTool(
+    companyId: string,
+    toolName: string,
+    input: { query?: string; amount?: number },
+  ) {
+    const query = (input.query || '').trim();
+    const amount = typeof input.amount === 'number' ? input.amount : null;
+    // ±1% толеранс за банкови такси/закръгляния при мачване по сума
+    const amountFilter = (field: string) =>
+      amount != null
+        ? { [field]: { gte: amount * 0.99 - 0.01, lte: amount * 1.01 + 0.01 } }
+        : {};
+
+    if (toolName === 'search_orders') {
+      if (!query && amount == null) return [];
+      return this.prisma.order.findMany({
+        where: {
+          companyId,
+          status: { not: 'CANCELLED' },
+          ...amountFilter('total'),
+          ...(query && {
+            OR: [
+              { orderNumber: { contains: query, mode: 'insensitive' } },
+              { customerName: { contains: query, mode: 'insensitive' } },
+            ],
+          }),
+        },
+        select: {
+          id: true,
+          orderNumber: true,
+          customerName: true,
+          total: true,
+          paidAmount: true,
+          paymentStatus: true,
+          orderDate: true,
+        },
+        orderBy: { orderDate: 'desc' },
+        take: 5,
+      });
+    }
+    if (toolName === 'search_invoices') {
+      if (!query && amount == null) return [];
+      return this.prisma.invoice.findMany({
+        where: {
+          companyId,
+          status: { not: 'CANCELLED' },
+          ...amountFilter('total'),
+          ...(query && {
+            OR: [
+              { invoiceNumber: { contains: query, mode: 'insensitive' } },
+              { customerName: { contains: query, mode: 'insensitive' } },
+            ],
+          }),
+        },
+        select: {
+          id: true,
+          invoiceNumber: true,
+          customerName: true,
+          total: true,
+          status: true,
+          invoiceDate: true,
+        },
+        orderBy: { invoiceDate: 'desc' },
+        take: 5,
+      });
+    }
+    if (toolName === 'search_expenses') {
+      if (!query && amount == null) return [];
+      return this.prisma.expense.findMany({
+        where: {
+          companyId,
+          status: { not: 'CANCELLED' },
+          ...amountFilter('totalAmount'),
+          ...(query && {
+            OR: [
+              { description: { contains: query, mode: 'insensitive' } },
+              { supplier: { name: { contains: query, mode: 'insensitive' } } },
+            ],
+          }),
+        },
+        select: {
+          id: true,
+          description: true,
+          totalAmount: true,
+          status: true,
+          expenseDate: true,
+          supplier: { select: { name: true } },
+        },
+        orderBy: { expenseDate: 'desc' },
+        take: 5,
+      });
+    }
+    return [];
+  }
+
+  // Нормализация + сървърно смятане на „очаквано, но неполучено"
+  private async finalizeReconcileResult(
+    companyId: string,
+    raw: { rows?: ReconcileRow[]; confidence?: number },
+  ): Promise<ReconcileResult> {
+    const rows: ReconcileRow[] = (raw.rows || []).map((row) => ({
+      date: row.date || null,
+      counterparty: row.counterparty || null,
+      description: row.description || null,
+      amount: Math.abs(Number(row.amount) || 0),
+      direction: row.direction === 'out' ? 'out' : 'in',
+      match: row.match?.id
+        ? {
+            type: row.match.type,
+            id: row.match.id,
+            label: row.match.label || '',
+            amount: row.match.amount ?? null,
+            confidence: row.match.confidence ?? 0,
+          }
+        : null,
+    }));
+
+    // Потвърдени+ поръчки без пълно плащане, невидени в извлечението
+    const matchedOrderIds = new Set(
+      rows
+        .filter((r) => r.match?.type === 'order')
+        .map((r) => r.match!.id),
+    );
+    const unpaid = await this.prisma.order.findMany({
+      where: {
+        companyId,
+        status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+        paymentStatus: { in: ['PENDING', 'PARTIAL'] },
+      },
+      select: {
+        id: true,
+        orderNumber: true,
+        customerName: true,
+        total: true,
+        paidAmount: true,
+        orderDate: true,
+      },
+      orderBy: { orderDate: 'asc' },
+      take: 30,
+    });
+
+    return {
+      rows,
+      confidence: raw.confidence || 0.8,
+      awaitingOrders: unpaid
+        .filter((o) => !matchedOrderIds.has(o.id))
+        .map((o) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          customerName: o.customerName,
+          total: Number(o.total),
+          paidAmount: Number(o.paidAmount ?? 0),
+          orderDate: o.orderDate,
+        })),
+    };
   }
 
   // Двата search tool-а — ВИНАГИ ограничени до companyId

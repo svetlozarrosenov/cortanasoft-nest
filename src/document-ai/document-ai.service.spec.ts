@@ -20,6 +20,9 @@ const mockAiSettings = {
 const mockPrisma = {
   product: { findMany: jest.fn() },
   supplier: { findMany: jest.fn() },
+  order: { findMany: jest.fn() },
+  invoice: { findMany: jest.fn() },
+  expense: { findMany: jest.fn() },
 };
 
 describe('DocumentAIService', () => {
@@ -511,6 +514,114 @@ describe('DocumentAIService', () => {
       mockAiSettings.getAiConfigForCompany.mockResolvedValue(null);
       await expect(
         service.parseDeliveryInvoice('c1', 'base64data', 'image/jpeg'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reconcileBankStatement (tool use)', () => {
+    beforeEach(async () => {
+      jest.clearAllMocks();
+      mockAiSettings.getApiKeyForCompany.mockResolvedValue('test-api-key');
+      mockAiSettings.getAiConfigForCompany.mockResolvedValue({
+        apiKey: 'test-api-key',
+        model: 'claude-haiku-4-5',
+      });
+      mockPrisma.order.findMany.mockResolvedValue([]);
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          DocumentAIService,
+          { provide: AiSettingsService, useValue: mockAiSettings },
+          { provide: PrismaService, useValue: mockPrisma },
+        ],
+      }).compile();
+      service = module.get<DocumentAIService>(DocumentAIService);
+    });
+
+    it('should keep ALL search tools company-scoped', async () => {
+      mockPrisma.order.findMany.mockResolvedValue([]);
+      mockPrisma.invoice.findMany.mockResolvedValue([]);
+      mockPrisma.expense.findMany.mockResolvedValue([]);
+      mockCreate
+        .mockResolvedValueOnce({
+          stop_reason: 'tool_use',
+          content: [
+            { type: 'tool_use', id: 't1', name: 'search_orders', input: { amount: 6900 } },
+            { type: 'tool_use', id: 't2', name: 'search_invoices', input: { query: 'F-001' } },
+            { type: 'tool_use', id: 't3', name: 'search_expenses', input: { amount: 850 } },
+          ],
+        })
+        .mockResolvedValueOnce({
+          stop_reason: 'tool_use',
+          content: [
+            {
+              type: 'tool_use',
+              id: 't4',
+              name: 'submit_result',
+              input: { rows: [], confidence: 0.9 },
+            },
+          ],
+        });
+
+      await service.reconcileBankStatement('c1', 'base64pdf');
+
+      // Тенант-изолацията: всяко търсене носи companyId на компанията
+      for (const mock of [
+        mockPrisma.order.findMany,
+        mockPrisma.invoice.findMany,
+        mockPrisma.expense.findMany,
+      ]) {
+        expect(mock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({ companyId: 'c1' }),
+          }),
+        );
+      }
+    });
+
+    it('should return matched rows and server-computed awaiting orders', async () => {
+      mockCreate.mockResolvedValueOnce({
+        stop_reason: 'tool_use',
+        content: [
+          {
+            type: 'tool_use',
+            id: 't1',
+            name: 'submit_result',
+            input: {
+              rows: [
+                {
+                  date: '2026-08-20',
+                  counterparty: 'АД КОМПЛЕКС',
+                  amount: 6900,
+                  direction: 'in',
+                  match: { type: 'order', id: 'o1', label: 'ORD-2026-00024', confidence: 0.95 },
+                },
+                { counterparty: 'Такса пакет', amount: 12, direction: 'out', match: null },
+              ],
+              confidence: 0.9,
+            },
+          },
+        ],
+      });
+      // Неплатени поръчки: o1 е мачната в извлечението → отпада; o2 остава
+      mockPrisma.order.findMany.mockResolvedValue([
+        { id: 'o1', orderNumber: 'ORD-24', customerName: 'АД', total: 6900, paidAmount: 0, orderDate: new Date('2026-08-10') },
+        { id: 'o2', orderNumber: 'ORD-20', customerName: 'СЕВАН', total: 3600, paidAmount: 0, orderDate: new Date('2026-07-01') },
+      ]);
+
+      const result = await service.reconcileBankStatement('c1', 'base64pdf');
+
+      expect(result.rows).toHaveLength(2);
+      expect(result.rows[0].match?.id).toBe('o1');
+      expect(result.rows[1].match).toBeNull();
+      expect(result.awaitingOrders).toHaveLength(1);
+      expect(result.awaitingOrders[0].orderNumber).toBe('ORD-20');
+    });
+
+    it('should reject when the company has no AI key', async () => {
+      mockAiSettings.getAiConfigForCompany.mockResolvedValue(null);
+      await expect(
+        service.reconcileBankStatement('c1', 'base64pdf'),
       ).rejects.toThrow(BadRequestException);
       expect(mockCreate).not.toHaveBeenCalled();
     });

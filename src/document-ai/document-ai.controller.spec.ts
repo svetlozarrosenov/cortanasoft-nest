@@ -3,6 +3,7 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 import { DocumentAIController } from './document-ai.controller';
 import { DocumentAIService } from './document-ai.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { UploadsService } from '../uploads/uploads.service';
 
 const mockDocumentAIService = {
   isEnabledForCompany: jest.fn(),
@@ -30,6 +31,7 @@ describe('DocumentAIController', () => {
       providers: [
         { provide: DocumentAIService, useValue: mockDocumentAIService },
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: UploadsService, useValue: { getFile: jest.fn() } },
       ],
     })
       // Rate limiting-ът се тества на интеграционно ниво; тук guard-ът само
