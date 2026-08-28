@@ -1,10 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { DocumentAIController } from './document-ai.controller';
 import { DocumentAIService } from './document-ai.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 const mockDocumentAIService = {
-  isEnabled: jest.fn(),
+  isEnabledForCompany: jest.fn(),
   parseInvoice: jest.fn(),
   parseInvoiceFromBase64: jest.fn(),
 };
@@ -30,16 +31,21 @@ describe('DocumentAIController', () => {
         { provide: DocumentAIService, useValue: mockDocumentAIService },
         { provide: PrismaService, useValue: mockPrisma },
       ],
-    }).compile();
+    })
+      // Rate limiting-ът се тества на интеграционно ниво; тук guard-ът само
+      // не бива да пречи на unit тестовете
+      .overrideGuard(ThrottlerGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<DocumentAIController>(DocumentAIController);
   });
 
   describe('getStatus', () => {
-    it('should return enabled status when service is configured', () => {
-      mockDocumentAIService.isEnabled.mockReturnValue(true);
+    it('should return enabled status when service is configured', async () => {
+      mockDocumentAIService.isEnabledForCompany.mockResolvedValue(true);
 
-      const result = controller.getStatus();
+      const result = await controller.getStatus('c1');
 
       expect(result).toEqual({
         enabled: true,
@@ -48,10 +54,10 @@ describe('DocumentAIController', () => {
       });
     });
 
-    it('should return disabled status when service is not configured', () => {
-      mockDocumentAIService.isEnabled.mockReturnValue(false);
+    it('should return disabled status when service is not configured', async () => {
+      mockDocumentAIService.isEnabledForCompany.mockResolvedValue(false);
 
-      const result = controller.getStatus();
+      const result = await controller.getStatus('c1');
 
       expect(result).toEqual({
         enabled: false,
@@ -144,6 +150,7 @@ describe('DocumentAIController', () => {
       });
 
       expect(mockDocumentAIService.parseInvoice).toHaveBeenCalledWith(
+        'company-1',
         'https://example.com/invoice.jpg',
       );
       expect(result.invoiceNumber).toBe('INV-001');
@@ -170,7 +177,7 @@ describe('DocumentAIController', () => {
 
       expect(
         mockDocumentAIService.parseInvoiceFromBase64,
-      ).toHaveBeenCalledWith('base64data', 'image/jpeg');
+      ).toHaveBeenCalledWith('company-1', 'base64data', 'image/jpeg');
     });
 
     it('should match supplier by VAT number', async () => {

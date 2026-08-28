@@ -17,6 +17,7 @@ import { CreditApplicationsModule } from './credit-applications/credit-applicati
 import { InvoicesModule } from './invoices/invoices.module';
 import { ProformasModule } from './proformas/proformas.module';
 import { SitesModule } from './sites/sites.module';
+import { AiSettingsModule } from './ai-settings/ai-settings.module';
 import { CurrenciesModule } from './currencies/currencies.module';
 import { CountriesModule } from './countries/countries.module';
 import { SettlementsModule } from './settlements/settlements.module';
@@ -99,6 +100,7 @@ import { SupportModule } from './support/support.module';
     InvoicesModule,
     ProformasModule,
     SitesModule,
+    AiSettingsModule,
     CurrenciesModule,
     CountriesModule,
     SettlementsModule,

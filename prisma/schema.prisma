@@ -235,6 +235,7 @@ model Company {
   apiKeys                      ApiKey[]
   stockTransfers               StockTransfer[]
   econtConfig                  EcontConfig?
+  aiSettings                   AiSettings?
   speedyConfig                 SpeedyConfig?
   shipments                    Shipment[]
   warrantyTemplates            WarrantyTemplate[]
@@ -3705,6 +3706,28 @@ model EcontConfig {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@map("econt_configs")
+}
+
+// ==================== AI (CORTANA) КОНФИГУРАЦИЯ ====================
+
+// AI настройки на компанията. Всяка компания (вкл. нашите собствени) работи
+// със СВОЙ Anthropic ключ — Anthropic таксува клиента директно, ние таксуваме
+// модула. Ключът се пази само шифрован (secret-crypto.util, enc:v1:) и никога
+// не се връща в plain text през API-то.
+model AiSettings {
+  id       String  @id @default(cuid())
+  isActive Boolean @default(true)
+
+  // Anthropic API ключ — ВИНАГИ шифрован с encryptSecret()
+  apiKey String?
+
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("ai_settings")
 }
 
 // ==================== SPEEDY КОНФИГУРАЦИЯ ====================

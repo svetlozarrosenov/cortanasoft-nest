@@ -4,17 +4,26 @@ import {
   Body,
   Get,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   Param,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import {
   PermissionsGuard,
   RequireView,
 } from '../common/guards/permissions.guard';
-import { DocumentAIService, ParsedInvoiceData } from './document-ai.service';
+import {
+  DocumentAIService,
+  ParsedInvoiceData,
+  DeliveryScanResult,
+} from './document-ai.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 
@@ -53,19 +62,27 @@ export class DocumentAIController {
    */
   @Get('status')
   @RequireView('ai', 'invoiceScanning')
-  getStatus() {
+  async getStatus(@Param('companyId') companyId: string) {
     return {
-      enabled: this.documentAIService.isEnabled(),
+      enabled: await this.documentAIService.isEnabledForCompany(companyId),
       name: 'Cortana',
       capabilities: ['invoice_scan', 'text_extraction'],
     };
   }
 
   /**
-   * Scan an invoice and extract data
+   * Scan an invoice and extract data.
+   * Rate limited: всяко сканиране е платена Anthropic заявка НА КЛИЕНТА —
+   * скриптирано bombing (Postman + валиден токен) не бива да може да му
+   * трупа сметка. 5/мин + 60/10мин са предостатъчно за ръчна работа.
    */
   @Post('scan-invoice')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({
+    short: { limit: 5, ttl: 60000 },
+    long: { limit: 60, ttl: 600000 },
+  })
   @RequireView('ai', 'invoiceScanning')
   async scanInvoice(
     @Param('companyId') companyId: string,
@@ -75,15 +92,111 @@ export class DocumentAIController {
 
     if (dto.base64Image) {
       parsedData = await this.documentAIService.parseInvoiceFromBase64(
+        companyId,
         dto.base64Image,
         dto.mimeType || 'image/jpeg',
       );
     } else if (dto.imageUrl) {
-      parsedData = await this.documentAIService.parseInvoice(dto.imageUrl);
+      parsedData = await this.documentAIService.parseInvoice(companyId, dto.imageUrl);
     } else {
       throw new Error('Either imageUrl or base64Image is required');
     }
 
+    return this.buildScanResult(companyId, parsedData);
+  }
+
+  /**
+   * Scan an uploaded invoice file (multipart). Отделен от JSON варианта, за
+   * да не вдигаме глобалния body limit — multer си има собствен (15MB).
+   */
+  @Post('scan-invoice-file')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({
+    short: { limit: 5, ttl: 60000 },
+    long: { limit: 60, ttl: 600000 },
+  })
+  @RequireView('ai', 'invoiceScanning')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }),
+  )
+  async scanInvoiceFile(
+    @Param('companyId') companyId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<ScanResult> {
+    if (!file) {
+      throw new BadRequestException('Липсва файл');
+    }
+    const allowed = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'application/pdf',
+    ];
+    if (!allowed.includes(file.mimetype)) {
+      throw new BadRequestException(
+        'Поддържат се само изображения (JPEG/PNG/WebP/GIF) и PDF файлове',
+      );
+    }
+
+    const parsedData = await this.documentAIService.parseInvoiceFromBase64(
+      companyId,
+      file.buffer.toString('base64'),
+      file.mimetype,
+    );
+    return this.buildScanResult(companyId, parsedData);
+  }
+
+  /**
+   * Сканиране на ДОСТАВНА фактура (tool use): AI-ят сам търси в продуктите и
+   * доставчиците на компанията и връща per ред мачнат продукт или
+   * предложение за нов. Същите лимити като другите сканирания.
+   */
+  @Post('scan-delivery-file')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({
+    short: { limit: 5, ttl: 60000 },
+    long: { limit: 60, ttl: 600000 },
+  })
+  @RequireView('ai', 'invoiceScanning')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }),
+  )
+  async scanDeliveryFile(
+    @Param('companyId') companyId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<DeliveryScanResult> {
+    if (!file) {
+      throw new BadRequestException('Липсва файл');
+    }
+    const allowed = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'application/pdf',
+    ];
+    if (!allowed.includes(file.mimetype)) {
+      throw new BadRequestException(
+        'Поддържат се само изображения (JPEG/PNG/WebP/GIF) и PDF файлове',
+      );
+    }
+
+    return this.documentAIService.parseDeliveryInvoice(
+      companyId,
+      file.buffer.toString('base64'),
+      file.mimetype,
+    );
+  }
+
+  // Общата втора половина на сканирането: мачване на продукти и доставчик
+  // от базата на компанията към извлечените от AI данни.
+  private async buildScanResult(
+    companyId: string,
+    parsedData: ParsedInvoiceData,
+  ): Promise<ScanResult> {
     // Try to match products from line items
     const matchedProducts: ProductMatch[] = [];
 

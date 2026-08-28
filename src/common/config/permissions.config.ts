@@ -907,6 +907,13 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         labelKey: 'modules.settings.integrations',
         actions: ['view', 'edit'],
       },
+      {
+        // Настройки > АИ (Anthropic ключ на компанията) — отделно право,
+        // за да пипат ключа само изрично посочени роли
+        key: 'ai',
+        labelKey: 'modules.settings.ai',
+        actions: ['view', 'edit'],
+      },
     ],
   },
   {

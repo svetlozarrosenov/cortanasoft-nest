@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
+import { BadRequestException } from '@nestjs/common';
 import { DocumentAIService } from './document-ai.service';
+import { AiSettingsService } from '../ai-settings/ai-settings.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 // Mock the Anthropic SDK
 const mockCreate = jest.fn();
@@ -10,8 +12,13 @@ jest.mock('@anthropic-ai/sdk', () => {
   }));
 });
 
-const mockConfigService = {
-  get: jest.fn(),
+const mockAiSettings = {
+  getApiKeyForCompany: jest.fn(),
+};
+
+const mockPrisma = {
+  product: { findMany: jest.fn() },
+  supplier: { findMany: jest.fn() },
 };
 
 describe('DocumentAIService', () => {
@@ -20,20 +27,21 @@ describe('DocumentAIService', () => {
   describe('when API key is configured', () => {
     beforeEach(async () => {
       jest.clearAllMocks();
-      mockConfigService.get.mockReturnValue('test-api-key');
+      mockAiSettings.getApiKeyForCompany.mockResolvedValue('test-api-key');
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           DocumentAIService,
-          { provide: ConfigService, useValue: mockConfigService },
+          { provide: AiSettingsService, useValue: mockAiSettings },
+          { provide: PrismaService, useValue: mockPrisma },
         ],
       }).compile();
 
       service = module.get<DocumentAIService>(DocumentAIService);
     });
 
-    it('should be enabled', () => {
-      expect(service.isEnabled()).toBe(true);
+    it('should be enabled', async () => {
+      await expect(service.isEnabledForCompany('c1')).resolves.toBe(true);
     });
 
     describe('parseInvoiceFromBase64', () => {
@@ -70,7 +78,7 @@ describe('DocumentAIService', () => {
           content: [{ type: 'text', text: JSON.stringify(claudeResponse) }],
         });
 
-        const result = await service.parseInvoiceFromBase64(
+        const result = await service.parseInvoiceFromBase64('c1', 
           'base64imagedata',
           'image/jpeg',
         );
@@ -107,7 +115,7 @@ describe('DocumentAIService', () => {
           ],
         });
 
-        await service.parseInvoiceFromBase64(
+        await service.parseInvoiceFromBase64('c1', 
           'data:image/jpeg;base64,actualbase64data',
           'image/jpeg',
         );
@@ -153,7 +161,7 @@ describe('DocumentAIService', () => {
           ],
         });
 
-        const result = await service.parseInvoiceFromBase64(
+        const result = await service.parseInvoiceFromBase64('c1', 
           'base64data',
           'image/png',
         );
@@ -176,7 +184,7 @@ describe('DocumentAIService', () => {
           ],
         });
 
-        const result = await service.parseInvoiceFromBase64(
+        const result = await service.parseInvoiceFromBase64('c1', 
           'base64data',
           'image/jpeg',
         );
@@ -200,7 +208,7 @@ describe('DocumentAIService', () => {
           ],
         });
 
-        const result = await service.parseInvoiceFromBase64(
+        const result = await service.parseInvoiceFromBase64('c1', 
           'base64data',
           'image/jpeg',
         );
@@ -229,7 +237,7 @@ describe('DocumentAIService', () => {
           ],
         });
 
-        const result = await service.parseInvoiceFromBase64(
+        const result = await service.parseInvoiceFromBase64('c1', 
           'base64data',
           'image/jpeg',
         );
@@ -257,7 +265,7 @@ describe('DocumentAIService', () => {
           ],
         });
 
-        const result = await service.parseInvoiceFromBase64(
+        const result = await service.parseInvoiceFromBase64('c1', 
           'base64data',
           'image/jpeg',
         );
@@ -278,7 +286,7 @@ describe('DocumentAIService', () => {
           ],
         });
 
-        await service.parseInvoiceFromBase64('imagedata', 'image/png');
+        await service.parseInvoiceFromBase64('c1', 'imagedata', 'image/png');
 
         expect(mockCreate).toHaveBeenCalledWith({
           model: 'claude-haiku-4-5-20251001',
@@ -311,7 +319,7 @@ describe('DocumentAIService', () => {
         mockCreate.mockRejectedValue(new Error('API rate limit exceeded'));
 
         await expect(
-          service.parseInvoiceFromBase64('base64data', 'image/jpeg'),
+          service.parseInvoiceFromBase64('c1', 'base64data', 'image/jpeg'),
         ).rejects.toThrow('API rate limit exceeded');
       });
     });
@@ -338,7 +346,7 @@ describe('DocumentAIService', () => {
           ],
         });
 
-        const result = await service.parseInvoice(
+        const result = await service.parseInvoice('c1', 
           'https://example.com/invoice.png',
         );
 
@@ -356,47 +364,155 @@ describe('DocumentAIService', () => {
         }) as any;
 
         await expect(
-          service.parseInvoice('https://example.com/missing.png'),
+          service.parseInvoice('c1', 'https://example.com/missing.png'),
         ).rejects.toThrow('Failed to fetch image: Not Found');
       });
+    });
+  });
+
+  describe('parseDeliveryInvoice (tool use)', () => {
+    beforeEach(async () => {
+      jest.clearAllMocks();
+      mockAiSettings.getApiKeyForCompany.mockResolvedValue('test-api-key');
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          DocumentAIService,
+          { provide: AiSettingsService, useValue: mockAiSettings },
+          { provide: PrismaService, useValue: mockPrisma },
+        ],
+      }).compile();
+      service = module.get<DocumentAIService>(DocumentAIService);
+    });
+
+    it('should execute search tools COMPANY-SCOPED and return the submitted result', async () => {
+      mockPrisma.product.findMany.mockResolvedValue([
+        { id: 'p1', name: 'LED лента 5050', sku: 'LED-5050', unit: 'M', purchasePrice: 2.5 },
+      ]);
+      // Turn 1: AI търси продукт; Turn 2: предава финалния резултат
+      mockCreate
+        .mockResolvedValueOnce({
+          stop_reason: 'tool_use',
+          content: [
+            { type: 'tool_use', id: 't1', name: 'search_products', input: { query: 'LED strip' } },
+          ],
+        })
+        .mockResolvedValueOnce({
+          stop_reason: 'tool_use',
+          content: [
+            {
+              type: 'tool_use',
+              id: 't2',
+              name: 'submit_result',
+              input: {
+                invoiceNumber: 'ALI-001',
+                invoiceDate: '2026-08-20',
+                supplier: { matchedSupplierId: null, name: 'Shenzhen Lights Co' },
+                items: [
+                  {
+                    description: 'LED Strip 5050 60led/m',
+                    quantity: 100,
+                    unitPrice: 2.1,
+                    matchedProductId: 'p1',
+                    matchedProductName: 'LED лента 5050',
+                    matchConfidence: 0.9,
+                  },
+                ],
+                confidence: 0.92,
+              },
+            },
+          ],
+        });
+
+      const result = await service.parseDeliveryInvoice('c1', 'base64data', 'image/jpeg');
+
+      // Tool търсенето е ограничено до компанията — гаранцията срещу изтичане
+      expect(mockPrisma.product.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ companyId: 'c1' }),
+        }),
+      );
+      expect(result.invoiceNumber).toBe('ALI-001');
+      expect(result.items[0].matchedProductId).toBe('p1');
+      expect(result.supplier.name).toBe('Shenzhen Lights Co');
+    });
+
+    it('should propose a new product when nothing matches', async () => {
+      mockCreate.mockResolvedValueOnce({
+        stop_reason: 'tool_use',
+        content: [
+          {
+            type: 'tool_use',
+            id: 't1',
+            name: 'submit_result',
+            input: {
+              supplier: { name: 'New Supplier' },
+              items: [
+                {
+                  description: 'Solar Panel 450W',
+                  quantity: 10,
+                  unitPrice: 95,
+                  matchedProductId: null,
+                  newProduct: { name: 'Соларен панел 450W', sku: 'SP-450', unit: 'PIECE', purchasePrice: 95 },
+                },
+              ],
+              confidence: 0.85,
+            },
+          },
+        ],
+      });
+
+      const result = await service.parseDeliveryInvoice('c1', 'base64data', 'application/pdf');
+      expect(result.items[0].matchedProductId).toBeNull();
+      expect(result.items[0].newProduct?.name).toBe('Соларен панел 450W');
+    });
+
+    it('should give up with a clear error when the loop never submits', async () => {
+      mockCreate.mockResolvedValue({ stop_reason: 'end_turn', content: [] });
+      await expect(
+        service.parseDeliveryInvoice('c1', 'base64data', 'image/jpeg'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject when the company has no AI key', async () => {
+      mockAiSettings.getApiKeyForCompany.mockResolvedValue(null);
+      await expect(
+        service.parseDeliveryInvoice('c1', 'base64data', 'image/jpeg'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockCreate).not.toHaveBeenCalled();
     });
   });
 
   describe('when API key is NOT configured', () => {
     beforeEach(async () => {
       jest.clearAllMocks();
-      mockConfigService.get.mockReturnValue(undefined);
+      mockAiSettings.getApiKeyForCompany.mockResolvedValue(null);
 
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           DocumentAIService,
-          { provide: ConfigService, useValue: mockConfigService },
+          { provide: AiSettingsService, useValue: mockAiSettings },
+          { provide: PrismaService, useValue: mockPrisma },
         ],
       }).compile();
 
       service = module.get<DocumentAIService>(DocumentAIService);
     });
 
-    it('should not be enabled', () => {
-      expect(service.isEnabled()).toBe(false);
+    it('should not be enabled', async () => {
+      await expect(service.isEnabledForCompany('c1')).resolves.toBe(false);
     });
 
-    it('should return empty result for parseInvoiceFromBase64', async () => {
-      const result = await service.parseInvoiceFromBase64(
-        'base64data',
-        'image/jpeg',
-      );
-
-      expect(result).toEqual({ lineItems: [], confidence: 0 });
+    it('should reject parseInvoiceFromBase64 with a clear error', async () => {
+      await expect(
+        service.parseInvoiceFromBase64('c1', 'base64data', 'image/jpeg'),
+      ).rejects.toThrow(BadRequestException);
       expect(mockCreate).not.toHaveBeenCalled();
     });
 
-    it('should return empty result for parseInvoice', async () => {
-      const result = await service.parseInvoice(
-        'https://example.com/invoice.png',
-      );
-
-      expect(result).toEqual({ lineItems: [], confidence: 0 });
+    it('should reject parseInvoice with a clear error', async () => {
+      await expect(
+        service.parseInvoice('c1', 'https://example.com/invoice.png'),
+      ).rejects.toThrow(BadRequestException);
       expect(mockCreate).not.toHaveBeenCalled();
     });
   });
