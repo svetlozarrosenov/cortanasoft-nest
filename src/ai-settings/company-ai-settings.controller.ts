@@ -20,7 +20,7 @@ import {
   RequireEdit,
 } from '../common/guards/permissions.guard';
 
-// Настройки > АИ — само роли с изричното право settings.ai виждат и пипат
+// Настройки > AI — само роли с изричното право settings.ai виждат и пипат
 // ключа (маскиран изглед; plain text никога не се връща).
 @Controller('companies/:companyId/ai-settings')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)

@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import Anthropic from '@anthropic-ai/sdk';
 import { lookup } from 'dns/promises';
+import { randomUUID } from 'crypto';
 import { isIP } from 'net';
 import { AiSettingsService } from '../ai-settings/ai-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -102,7 +103,7 @@ export interface ParsedInvoiceData {
 export class DocumentAIService {
   private readonly logger = new Logger(DocumentAIService.name);
 
-  // Всяка компания работи със СВОЯ Anthropic ключ (Настройки > АИ) —
+  // Всяка компания работи със СВОЯ Anthropic ключ (Настройки > AI) —
   // няма глобален env fallback, вкл. за нашите собствени компании.
   constructor(
     private aiSettings: AiSettingsService,
@@ -137,7 +138,7 @@ export class DocumentAIService {
       const msg = (apiError.message || '').toLowerCase();
       if (apiError.status === 401) {
         throw new BadRequestException(
-          'Невалиден Anthropic API ключ. Проверете го в Настройки > АИ.',
+          'Невалиден Anthropic API ключ. Проверете го в Настройки > AI.',
         );
       }
       if (msg.includes('credit balance')) {
@@ -161,6 +162,68 @@ export class DocumentAIService {
     }
     this.logger.error('Non-Anthropic error in AI flow', error as Error);
     throw error;
+  }
+
+  // ==================== Асинхронни съгласувания ====================
+  // Съгласуването отнема 1-2 минути — не може да живее в отворена HTTP
+  // заявка (проксита я убиват). POST стартира задача и връща веднага;
+  // frontend-ът пита за резултата. In-memory е достатъчно (един процес).
+  private reconcileJobs = new Map<
+    string,
+    {
+      companyId: string;
+      status: 'running' | 'done' | 'error';
+      result?: ReconcileResult;
+      message?: string;
+      createdAt: number;
+    }
+  >();
+
+  startReconcileJob(companyId: string, base64Pdf: string): string {
+    // Чистим задачи по-стари от 30 мин
+    const cutoff = Date.now() - 30 * 60 * 1000;
+    for (const [id, job] of this.reconcileJobs) {
+      if (job.createdAt < cutoff) this.reconcileJobs.delete(id);
+    }
+
+    const jobId = randomUUID();
+    this.reconcileJobs.set(jobId, {
+      companyId,
+      status: 'running',
+      createdAt: Date.now(),
+    });
+
+    void this.reconcileBankStatement(companyId, base64Pdf)
+      .then((result) => {
+        const job = this.reconcileJobs.get(jobId);
+        if (job) {
+          job.status = 'done';
+          job.result = result;
+        }
+      })
+      .catch((error: unknown) => {
+        const job = this.reconcileJobs.get(jobId);
+        if (job) {
+          job.status = 'error';
+          job.message =
+            error instanceof BadRequestException
+              ? (error.getResponse() as { message?: string }).message ||
+                error.message
+              : 'Съгласуването не успя. Опитайте отново.';
+        }
+        this.logger.error('Reconcile job failed', error as Error);
+      });
+
+    return jobId;
+  }
+
+  /** Резултатът се дава САМО на компанията, стартирала задачата */
+  getReconcileJob(companyId: string, jobId: string) {
+    const job = this.reconcileJobs.get(jobId);
+    if (!job || job.companyId !== companyId) {
+      throw new BadRequestException('Задачата не е намерена');
+    }
+    return { status: job.status, result: job.result, message: job.message };
   }
 
   /** True if an IP literal is loopback, private, link-local or CGNAT. */
@@ -518,6 +581,9 @@ export class DocumentAIService {
           {
             type: 'document',
             source: { type: 'base64', media_type: 'application/pdf', data: base64Pdf },
+            // PDF-ът се кешира — иначе всеки ход от цикъла го праща наново
+            // (бавно, скъпо и изяжда токен-лимита на по-ниските Anthropic tier-ове)
+            cache_control: { type: 'ephemeral' },
           },
           {
             type: 'text',

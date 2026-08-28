@@ -24,7 +24,6 @@ import {
   DocumentAIService,
   ParsedInvoiceData,
   DeliveryScanResult,
-  ReconcileResult,
 } from './document-ai.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -227,7 +226,7 @@ export class DocumentAIController {
   async reconcileBankStatement(
     @Param('companyId') companyId: string,
     @Body() dto: ReconcileBankStatementDto,
-  ): Promise<ReconcileResult> {
+  ): Promise<{ jobId: string }> {
     if (!dto.bankStatementId) {
       throw new BadRequestException('Липсва банково извлечение');
     }
@@ -256,10 +255,23 @@ export class DocumentAIController {
       content = Buffer.concat(chunks);
     }
 
-    return this.documentAIService.reconcileBankStatement(
+    // Стартираме задачата и връщаме веднага — резултатът се взима с GET
+    // по jobId (дългата AI работа не бива да държи HTTP заявка отворена)
+    const jobId = this.documentAIService.startReconcileJob(
       companyId,
       content.toString('base64'),
     );
+    return { jobId };
+  }
+
+  /** Статус/резултат на съгласуване — само за компанията, която го е пуснала */
+  @Get('reconcile-jobs/:jobId')
+  @RequireView('ai', 'invoiceScanning')
+  getReconcileJob(
+    @Param('companyId') companyId: string,
+    @Param('jobId') jobId: string,
+  ) {
+    return this.documentAIService.getReconcileJob(companyId, jobId);
   }
 
   // Общата втора половина на сканирането: мачване на продукти и доставчик
