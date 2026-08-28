@@ -12,6 +12,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -29,13 +30,25 @@ import { UploadsService } from '../uploads/uploads.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
 
+// NB: глобалният ValidationPipe е с whitelist:true — полета БЕЗ декоратор
+// се режат от тялото. Всяко DTO поле тук трябва да носи валидатор.
 class ScanInvoiceDto {
+  @IsOptional()
+  @IsString()
   imageUrl?: string;
+
+  @IsOptional()
+  @IsString()
   base64Image?: string;
+
+  @IsOptional()
+  @IsString()
   mimeType?: string;
 }
 
 class ReconcileBankStatementDto {
+  @IsString()
+  @IsNotEmpty()
   bankStatementId: string;
 }
 
