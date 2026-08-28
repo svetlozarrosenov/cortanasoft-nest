@@ -223,6 +223,11 @@ export class DocumentAIService {
     if (!job || job.companyId !== companyId) {
       throw new BadRequestException('Задачата не е намерена');
     }
+    // Краен статус се чете точно веднъж (polling-ът спира на done/error) —
+    // изтриваме записа веднага, за да не виси в паметта до следващия старт.
+    if (job.status !== 'running') {
+      this.reconcileJobs.delete(jobId);
+    }
     return { status: job.status, result: job.result, message: job.message };
   }
 

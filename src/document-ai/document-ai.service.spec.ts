@@ -625,6 +625,61 @@ describe('DocumentAIService', () => {
       ).rejects.toThrow(BadRequestException);
       expect(mockCreate).not.toHaveBeenCalled();
     });
+
+    it('should delete a finished job after its terminal status is read', async () => {
+      mockCreate.mockResolvedValue({
+        stop_reason: 'tool_use',
+        content: [
+          {
+            type: 'tool_use',
+            id: 't1',
+            name: 'submit_result',
+            input: { rows: [], confidence: 0.9 },
+          },
+        ],
+      });
+
+      const jobId = service.startReconcileJob('c1', 'base64pdf');
+      // Изчакваме фоновата задача да завърши
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const first = service.getReconcileJob('c1', jobId);
+      expect(first.status).toBe('done');
+      // Второ четене: записът вече е изтрит от паметта
+      expect(() => service.getReconcileJob('c1', jobId)).toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('should NOT delete a job that is still running', async () => {
+      let resolveCreate!: (value: unknown) => void;
+      mockCreate.mockReturnValue(
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        }),
+      );
+
+      const jobId = service.startReconcileJob('c1', 'base64pdf');
+      expect(service.getReconcileJob('c1', jobId).status).toBe('running');
+      // Повторно четене докато тече — записът трябва да е още там
+      expect(service.getReconcileJob('c1', jobId).status).toBe('running');
+
+      resolveCreate({
+        stop_reason: 'tool_use',
+        content: [
+          {
+            type: 'tool_use',
+            id: 't1',
+            name: 'submit_result',
+            input: { rows: [], confidence: 0.9 },
+          },
+        ],
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(service.getReconcileJob('c1', jobId).status).toBe('done');
+    });
   });
 
   describe('when API key is NOT configured', () => {
