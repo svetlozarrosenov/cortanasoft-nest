@@ -123,6 +123,46 @@ export class DocumentAIService {
     return { client: new Anthropic({ apiKey: config.apiKey }), model: config.model };
   }
 
+  // Превежда грешките от Anthropic в ясни съобщения (стигат до оператора в
+  // респонса като 400) и логва суровата грешка за дебъг.
+  private mapAnthropicError(error: unknown): never {
+    // Anthropic.APIError може да липсва при mock-нат SDK в тестовете
+    const ApiError = (Anthropic as unknown as { APIError?: new () => Error })
+      .APIError;
+    if (ApiError && error instanceof ApiError) {
+      const apiError = error as unknown as { status?: number; message?: string };
+      this.logger.error(
+        `Anthropic API error: status=${apiError.status} message=${apiError.message}`,
+      );
+      const msg = (apiError.message || '').toLowerCase();
+      if (apiError.status === 401) {
+        throw new BadRequestException(
+          'Невалиден Anthropic API ключ. Проверете го в Настройки > АИ.',
+        );
+      }
+      if (msg.includes('credit balance')) {
+        throw new BadRequestException(
+          'Anthropic ключът е без кредити. Заредете от console.anthropic.com → Billing и опитайте отново.',
+        );
+      }
+      if (apiError.status === 429) {
+        throw new BadRequestException(
+          'Достигнат е лимитът на Anthropic акаунта (429). Изчакайте минута и опитайте отново.',
+        );
+      }
+      if (apiError.status === 529) {
+        throw new BadRequestException(
+          'Anthropic е претоварен в момента (529). Опитайте отново след малко.',
+        );
+      }
+      throw new BadRequestException(
+        `Грешка от Anthropic (${apiError.status}): ${apiError.message}`,
+      );
+    }
+    this.logger.error('Non-Anthropic error in AI flow', error as Error);
+    throw error;
+  }
+
   /** True if an IP literal is loopback, private, link-local or CGNAT. */
   private isPrivateIp(ip: string): boolean {
     if (isIP(ip) === 4) {
@@ -343,12 +383,9 @@ export class DocumentAIService {
     // Agent loop: изпълняваме tool заявките (company-скопирани) до submit_result
     const MAX_TURNS = 12;
     for (let turn = 0; turn < MAX_TURNS; turn++) {
-      const response = await client.messages.create({
-        model,
-        max_tokens: 4096,
-        tools,
-        messages,
-      });
+      const response = await client.messages
+        .create({ model, max_tokens: 4096, tools, messages })
+        .catch((error) => this.mapAnthropicError(error));
 
       const toolUses = response.content.filter(
         (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
@@ -498,12 +535,9 @@ export class DocumentAIService {
     // Извлеченията имат много редове → повече ходове от доставките
     const MAX_TURNS = 20;
     for (let turn = 0; turn < MAX_TURNS; turn++) {
-      const response = await client.messages.create({
-        model,
-        max_tokens: 8192,
-        tools,
-        messages,
-      });
+      const response = await client.messages
+        .create({ model, max_tokens: 8192, tools, messages })
+        .catch((error) => this.mapAnthropicError(error));
 
       const toolUses = response.content.filter(
         (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
@@ -791,7 +825,8 @@ export class DocumentAIService {
             },
           };
 
-    const response = await client.messages.create({
+    const response = await client.messages
+      .create({
       model,
       max_tokens: 4096,
       messages: [
@@ -837,7 +872,8 @@ Rules:
           ],
         },
       ],
-    });
+    })
+      .catch((error) => this.mapAnthropicError(error));
 
     const text =
       response.content[0].type === 'text' ? response.content[0].text : '';
