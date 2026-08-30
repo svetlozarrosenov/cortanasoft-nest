@@ -2169,6 +2169,9 @@ model InventoryBatch {
   productionOrderId String?
   productionOrder   ProductionOrder? @relation("ProductionOutputBatches", fields: [productionOrderId], references: [id], onDelete: SetNull)
 
+  // Всички производства, излели в тази партида (вкл. доливания)
+  filledByOrders ProductionOrder[] @relation("BatchFilledByOrders")
+
   orderItems             OrderItem[]
   orderItemAllocations   OrderItemBatchAllocation[]
   stockTransferItems     StockTransferItem[]
@@ -3487,10 +3490,18 @@ model ProductionOrder {
   producedBatches InventoryBatch[]             @relation("ProductionOutputBatches")
   consumptions    ProductionConsumption[]
 
+  // В коя партида е излял резултатът (нова или долята съществуваща).
+  // Обратната посока на producedBatches: много поръчки могат да пълнят ЕДНА
+  // партида (дневни производства → обща партида), затова паспортът на
+  // партидата чете batch.filledByOrders, а не единичния batch.productionOrder.
+  outputBatchId String?
+  outputBatch   InventoryBatch? @relation("BatchFilledByOrders", fields: [outputBatchId], references: [id], onDelete: SetNull)
+
   @@unique([companyId, orderNumber])
   @@index([companyId, status])
   @@index([companyId, productId])
   @@index([companyId, customerId])
+  @@index([outputBatchId])
   @@map("production_orders")
 }
 

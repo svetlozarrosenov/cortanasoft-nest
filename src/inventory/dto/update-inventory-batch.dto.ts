@@ -1,4 +1,5 @@
 import { IsOptional, IsString, IsDateString } from 'class-validator';
+import { IsReasonableDate } from '../../common/validators/is-reasonable-date.validator';
 
 export class UpdateInventoryBatchDto {
   @IsOptional()
@@ -7,10 +8,12 @@ export class UpdateInventoryBatchDto {
 
   @IsOptional()
   @IsDateString()
+  @IsReasonableDate()
   expiryDate?: string;
 
   @IsOptional()
   @IsDateString()
+  @IsReasonableDate()
   manufacturingDate?: string;
 
   @IsOptional()

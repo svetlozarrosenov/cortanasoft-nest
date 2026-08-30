@@ -433,6 +433,37 @@ export class ProductionService {
     });
   }
 
+  // Съществуващите произведени партиди на продукта на поръчката — за
+  // избор при завършване („доливане" на ново производство в стара партида).
+  async getExistingBatches(companyId: string, id: string) {
+    const order = await this.prisma.productionOrder.findFirst({
+      where: { id, companyId },
+      select: { productId: true },
+    });
+    if (!order) {
+      throw new NotFoundException(ErrorMessages.production.notFound);
+    }
+    // Само произведени партиди (не доставни) — доливане в доставна партида
+    // би объркало проследимостта.
+    return this.prisma.inventoryBatch.findMany({
+      where: {
+        companyId,
+        productId: order.productId,
+        productionOrderId: { not: null },
+      },
+      select: {
+        id: true,
+        batchNumber: true,
+        quantity: true,
+        initialQty: true,
+        manufacturingDate: true,
+        expiryDate: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+  }
+
   async complete(
     companyId: string,
     id: string,
@@ -455,6 +486,15 @@ export class ProductionService {
     }
     if (order.status !== 'IN_PROGRESS') {
       throw new BadRequestException(ErrorMessages.production.canOnlyCompleteInProgress);
+    }
+    // Рецептата (BOM) е опционална, но материалите — не: производство без
+    // нито едно изписване дава нулева себестойност и празен паспорт (случи се
+    // на прод — партиди за 250к литра без никаква проследимост на суровините).
+    // order.issuances е вече филтрирано до returned=false.
+    if (order.issuances.length === 0) {
+      throw new BadRequestException(
+        ErrorMessages.production.cannotCompleteWithoutMaterials,
+      );
     }
 
     // Determine location for finished inventory
@@ -490,26 +530,70 @@ export class ProductionService {
     const finishedBatchNumber = dto?.batchNumber?.trim() || order.orderNumber;
 
     return this.prisma.$transaction(async (tx) => {
+      let outputBatchId: string | null = null;
       if (locationId) {
-        await tx.inventoryBatch.create({
-          data: {
-            batchNumber: finishedBatchNumber,
-            quantity: finishedQty,
-            initialQty: finishedQty,
-            unitCost: calculatedUnitCost,
-            manufacturingDate,
-            expiryDate,
-            productId: order.productId,
-            companyId,
-            locationId,
-            productionOrderId: order.id,
+        // Ако партида с този номер вече съществува — доливаме: клиенти като
+        // AdBlue производителите пълнят една партида (200-250к л) с много
+        // дневни производства. Количеството расте, себестойността се
+        // преизчислява среднопретеглено; датите на партидата остават от
+        // първото пълнене. Партидата стои на СВОЯТА локация.
+        const existingBatch = await tx.inventoryBatch.findUnique({
+          where: {
+            companyId_productId_batchNumber: {
+              companyId,
+              productId: order.productId,
+              batchNumber: finishedBatchNumber,
+            },
           },
         });
+
+        if (existingBatch) {
+          const existingInitial = Number(existingBatch.initialQty);
+          const totalInitial = existingInitial + finishedQty;
+          const blendedUnitCost =
+            totalInitial > 0
+              ? (existingInitial * Number(existingBatch.unitCost) +
+                  finishedQty * calculatedUnitCost) /
+                totalInitial
+              : 0;
+
+          // Датите остават на партидата (модалът ги предпопълва с нейните);
+          // подадени стойности ги обновяват — клиентът може да ги коригира.
+          await tx.inventoryBatch.update({
+            where: { id: existingBatch.id },
+            data: {
+              quantity: { increment: finishedQty },
+              initialQty: { increment: finishedQty },
+              unitCost: blendedUnitCost,
+              ...(dto?.manufacturingDate && {
+                manufacturingDate: new Date(dto.manufacturingDate),
+              }),
+              ...(dto?.expiryDate && { expiryDate: new Date(dto.expiryDate) }),
+            },
+          });
+          outputBatchId = existingBatch.id;
+        } else {
+          const createdBatch = await tx.inventoryBatch.create({
+            data: {
+              batchNumber: finishedBatchNumber,
+              quantity: finishedQty,
+              initialQty: finishedQty,
+              unitCost: calculatedUnitCost,
+              manufacturingDate,
+              expiryDate,
+              productId: order.productId,
+              companyId,
+              locationId,
+              productionOrderId: order.id,
+            },
+          });
+          outputBatchId = createdBatch.id;
+        }
       }
 
       return tx.productionOrder.update({
         where: { id },
-        data: { status: 'COMPLETED', actualEndDate: new Date() },
+        data: { status: 'COMPLETED', actualEndDate: new Date(), outputBatchId },
         include: defaultInclude,
       });
     });

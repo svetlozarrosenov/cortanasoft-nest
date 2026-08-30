@@ -9,6 +9,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { GoodsReceiptStatus } from '@prisma/client';
+import { IsReasonableDate } from '../../common/validators/is-reasonable-date.validator';
 
 export class ItemSerialNumbersDto {
   @IsString()
@@ -32,10 +33,12 @@ export class ItemBatchInfoDto {
 
   @IsOptional()
   @IsDateString()
+  @IsReasonableDate()
   expiryDate?: string;
 
   @IsOptional()
   @IsDateString()
+  @IsReasonableDate()
   manufacturingDate?: string;
 }
 
