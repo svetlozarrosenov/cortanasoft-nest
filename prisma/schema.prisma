@@ -562,6 +562,7 @@ model User {
   // Екипи на локации (бусове)
   locationMemberships LocationMember[] @relation("LocationMemberUser")
   orderCrewSnapshots  OrderCrewMember[] @relation("OrderCrewUser")
+  expenseCrewEntries  ExpenseCrewMember[] @relation("ExpenseCrewUser")
 
   // Гаранции
   createdWarrantyTemplates WarrantyTemplate[] @relation("WarrantyTemplateCreator")
@@ -1141,6 +1142,7 @@ model Location {
   productionIssuances ProductionMaterialIssuance[] @relation("IssuanceLocation")
   stockTransfersFrom  StockTransfer[]              @relation("StockTransferFrom")
   stockTransfersTo    StockTransfer[]              @relation("StockTransferTo")
+  expenses            Expense[]
 
   @@unique([companyId, code])
   @@map("locations")
@@ -3125,6 +3127,13 @@ model Expense {
   siteId String?
   site   Site?   @relation(fields: [siteId], references: [id], onDelete: SetNull)
 
+  // Локация/бус, чийто екип е направил разхода. Опционално.
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  // Изричен избор „кой направи разхода" (с/без бус)
+  crewMembers ExpenseCrewMember[]
+
   // Създател
   createdById String?
   createdBy   User?   @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -3145,7 +3154,30 @@ model Expense {
   @@index([companyId, status])
   @@index([companyId, expenseDate])
   @@index([siteId])
+  @@index([locationId])
   @@map("expenses")
+}
+
+// Кой направи разхода — изричен избор на хора към разход (с подразбиране от
+// екипа на буса в UI-а). Имената са дублирани, за да преживеят изтрит
+// потребител — същият патърн като OrderCrewMember.
+model ExpenseCrewMember {
+  id String @id @default(cuid())
+
+  expenseId String
+  expense   Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation("ExpenseCrewUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  firstName String
+  lastName  String
+
+  createdAt DateTime @default(now())
+
+  @@index([expenseId])
+  @@index([userId])
+  @@map("expense_crew_members")
 }
 
 // Прикачени документи (фактури, CMR, сертификати и др.)

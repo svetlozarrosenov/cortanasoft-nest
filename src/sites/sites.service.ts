@@ -139,6 +139,10 @@ export class SitesService {
           status: true,
           invoiceNumber: true,
           supplier: { select: { id: true, name: true } },
+          location: { select: { id: true, name: true, type: true } },
+          crewMembers: {
+            select: { userId: true, firstName: true, lastName: true },
+          },
         },
         orderBy: { expenseDate: 'desc' },
       }),
@@ -180,8 +184,9 @@ export class SitesService {
       .map(([month, values]) => ({ month, ...values }))
       .sort((a, b) => a.month.localeCompare(b.month));
 
-    // „Работили на обекта": бусовете от поръчките + хората по тях. Хората
-    // идват от snapshot-ите; за стари поръчки без snapshot падаме към
+    // „Работили на обекта": екипите от поръчките И разходите, групирани по
+    // бус (или „без бус" за документи само с изричен екип). Хората идват от
+    // изричния избор/snapshot-ите; за стари поръчки без snapshot падаме към
     // ТЕКУЩИЯ екип на буса (isCurrent: true — UI-ят го маркира като такъв).
     type WorkforceMember = {
       userId: string | null;
@@ -189,30 +194,51 @@ export class SitesService {
       lastName: string;
       isCurrent: boolean;
     };
+    const NO_VEHICLE = '__none__';
     const workforceMap = new Map<
       string,
-      { vehicle: { id: string; name: string }; members: Map<string, WorkforceMember> }
+      {
+        vehicle: { id: string; name: string } | null;
+        members: Map<string, WorkforceMember>;
+      }
     >();
-    const vehiclesWithoutSnapshot = new Set<string>();
-    for (const o of revenueOrders) {
-      if (!o.location || o.location.type !== 'VEHICLE') continue;
-      let entry = workforceMap.get(o.location.id);
+    const addCrew = (
+      vehicle: { id: string; name: string } | null,
+      crew: { userId: string | null; firstName: string; lastName: string }[],
+    ) => {
+      const mapKey = vehicle ? vehicle.id : NO_VEHICLE;
+      let entry = workforceMap.get(mapKey);
       if (!entry) {
-        entry = {
-          vehicle: { id: o.location.id, name: o.location.name },
-          members: new Map(),
-        };
-        workforceMap.set(o.location.id, entry);
+        entry = { vehicle, members: new Map() };
+        workforceMap.set(mapKey, entry);
       }
-      if (o.crewMembers.length === 0) {
-        vehiclesWithoutSnapshot.add(o.location.id);
-      }
-      for (const member of o.crewMembers) {
+      for (const member of crew) {
         const key = member.userId || `${member.firstName} ${member.lastName}`;
         if (!entry.members.has(key)) {
           entry.members.set(key, { ...member, isCurrent: false });
         }
       }
+    };
+    const vehiclesWithoutSnapshot = new Set<string>();
+    for (const o of revenueOrders) {
+      const vehicle =
+        o.location && o.location.type === 'VEHICLE'
+          ? { id: o.location.id, name: o.location.name }
+          : null;
+      if (!vehicle && o.crewMembers.length === 0) continue;
+      addCrew(vehicle, o.crewMembers);
+      if (vehicle && o.crewMembers.length === 0) {
+        vehiclesWithoutSnapshot.add(vehicle.id);
+      }
+    }
+    // Разходите носят само изричен екип — без fallback към текущ състав
+    for (const e of activeExpenses) {
+      const vehicle =
+        e.location && e.location.type === 'VEHICLE'
+          ? { id: e.location.id, name: e.location.name }
+          : null;
+      if (!vehicle && e.crewMembers.length === 0) continue;
+      addCrew(vehicle, e.crewMembers);
     }
     if (vehiclesWithoutSnapshot.size > 0) {
       const currentMembers = await this.prisma.locationMember.findMany({
