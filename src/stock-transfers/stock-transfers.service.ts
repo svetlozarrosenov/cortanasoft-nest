@@ -22,6 +22,18 @@ const TRANSFER_INCLUDE = {
   createdBy: {
     select: { id: true, firstName: true, lastName: true },
   },
+  handedBy: {
+    select: { id: true, firstName: true, lastName: true },
+  },
+  acceptedBy: {
+    select: { id: true, firstName: true, lastName: true },
+  },
+  shippedBy: {
+    select: { id: true, firstName: true, lastName: true },
+  },
+  receivedBy: {
+    select: { id: true, firstName: true, lastName: true },
+  },
   items: {
     include: {
       product: true,
@@ -227,6 +239,12 @@ export class StockTransfersService {
           createdBy: {
             select: { id: true, firstName: true, lastName: true },
           },
+          handedBy: {
+            select: { id: true, firstName: true, lastName: true },
+          },
+          acceptedBy: {
+            select: { id: true, firstName: true, lastName: true },
+          },
           _count: { select: { items: true } },
         },
         orderBy: { [sortBy]: sortOrder },
@@ -358,11 +376,83 @@ export class StockTransfersService {
     });
   }
 
-  async ship(companyId: string, id: string) {
+  // Себестойност за нов складов ред, когато трансферът не е по конкретна
+  // партида — цената на най-новия ред на продукта в изходната локация.
+  private async lookupSourceUnitCost(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    productId: string,
+    locationId: string,
+  ): Promise<number> {
+    const latest = await tx.inventoryBatch.findFirst({
+      where: { companyId, productId, locationId },
+      orderBy: { createdAt: 'desc' },
+      select: { unitCost: true },
+    });
+    return latest ? Number(latest.unitCost) : 0;
+  }
+
+  // Връща количество обратно в изходната локация: в конкретната партида, ако
+  // трансферът е по партида, иначе като нов складов ред (FIFO-изписаното няма
+  // как да се възстанови ред по ред без записани разпределения).
+  private async returnQtyToSource(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    transfer: { transferNumber: string; fromLocationId: string },
+    item: { id: string; productId: string; inventoryBatchId: string | null },
+    qty: number,
+    tag: 'RET' | 'CXL',
+  ) {
+    if (qty <= 0) return;
+    if (item.inventoryBatchId) {
+      await tx.inventoryBatch.update({
+        where: { id: item.inventoryBatchId },
+        data: { quantity: { increment: qty } },
+      });
+      return;
+    }
+    const unitCost = await this.lookupSourceUnitCost(
+      tx,
+      companyId,
+      item.productId,
+      transfer.fromLocationId,
+    );
+    await tx.inventoryBatch.create({
+      data: {
+        batchNumber: `ST-${tag}-${transfer.transferNumber}-${item.id.slice(-4)}`,
+        quantity: qty,
+        initialQty: qty,
+        unitCost,
+        companyId,
+        productId: item.productId,
+        locationId: transfer.fromLocationId,
+      },
+    });
+  }
+
+  async ship(
+    companyId: string,
+    id: string,
+    userId?: string,
+    handedById?: string,
+  ) {
     const transfer = await this.findOne(companyId, id);
 
     if (transfer.status !== 'DRAFT') {
       throw new BadRequestException('Само чернови трансфери могат да бъдат изпратени');
+    }
+
+    // „Предал" е избираем (за протокола), но трябва да е член на компанията;
+    // по подразбиране — човекът, който изпраща
+    const handedId = handedById || userId;
+    if (handedById) {
+      const membership = await this.prisma.userCompany.findFirst({
+        where: { companyId, userId: handedById },
+        select: { id: true },
+      });
+      if (!membership) {
+        throw new BadRequestException('Предалият не е член на компанията');
+      }
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -400,23 +490,82 @@ export class StockTransfersService {
                 quantity: { decrement: Number(item.quantity) },
               },
             });
+          } else {
+            // Без избрана партида („Всички" / обикновен продукт) — FEFO/FIFO
+            // изписване през складовите редове на продукта в изходната
+            // локация. Преди този клон трансфер без партида НЕ изписваше
+            // нищо от източника и стоката се дублираше при приемане.
+            const batches = await tx.inventoryBatch.findMany({
+              where: {
+                companyId,
+                productId: item.productId,
+                locationId: transfer.fromLocationId,
+                quantity: { gt: 0 },
+              },
+              orderBy: [
+                { expiryDate: { sort: 'asc', nulls: 'last' } },
+                { createdAt: 'asc' },
+              ],
+            });
+            const available = batches.reduce(
+              (sum, b) => sum + Number(b.quantity),
+              0,
+            );
+            let remaining = Number(item.quantity);
+            if (available < remaining) {
+              throw new BadRequestException(
+                `Недостатъчно количество от ${product.name} в изходната локация ` +
+                  `(налични: ${available}, заявени: ${remaining})`,
+              );
+            }
+            for (const batch of batches) {
+              if (remaining <= 0) break;
+              const take = Math.min(Number(batch.quantity), remaining);
+              await tx.inventoryBatch.update({
+                where: { id: batch.id },
+                data: { quantity: { decrement: take } },
+              });
+              remaining -= take;
+            }
           }
         }
       }
 
       return tx.stockTransfer.update({
         where: { id },
-        data: { status: 'SHIPPED' },
+        data: {
+          status: 'SHIPPED',
+          // Предал (избираем) + одитен запис кой е натиснал „Изпрати"
+          ...(handedId && { handedById: handedId }),
+          ...(userId && { shippedById: userId }),
+        },
         include: TRANSFER_INCLUDE,
       });
     });
   }
 
-  async receive(companyId: string, id: string, dto: ReceiveStockTransferDto) {
+  async receive(
+    companyId: string,
+    id: string,
+    dto: ReceiveStockTransferDto,
+    userId?: string,
+  ) {
     const transfer = await this.findOne(companyId, id);
 
     if (transfer.status !== 'SHIPPED') {
       throw new BadRequestException('Само изпратени трансфери могат да бъдат приети');
+    }
+
+    // „Приел" — избираем, по подразбиране човекът, който приема
+    const acceptedId = dto.acceptedById || userId;
+    if (dto.acceptedById) {
+      const membership = await this.prisma.userCompany.findFirst({
+        where: { companyId, userId: dto.acceptedById },
+        select: { id: true },
+      });
+      if (!membership) {
+        throw new BadRequestException('Приелият не е член на компанията');
+      }
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -491,7 +640,14 @@ export class StockTransfersService {
                 batchNumber,
                 quantity: receivedQty,
                 initialQty: receivedQty,
-                unitCost: sourceBatch ? Number(sourceBatch.unitCost) : 0,
+                unitCost: sourceBatch
+                  ? Number(sourceBatch.unitCost)
+                  : await this.lookupSourceUnitCost(
+                      tx,
+                      companyId,
+                      transferItem.productId,
+                      transfer.fromLocationId,
+                    ),
                 companyId,
                 productId: transferItem.productId,
                 locationId: transfer.toLocationId,
@@ -502,12 +658,14 @@ export class StockTransfersService {
           // If less quantity received than shipped, return the difference to source
           const shippedQty = Number(transferItem.quantity);
           const diff = shippedQty - receivedQty;
-          if (diff > 0 && transferItem.inventoryBatchId) {
-            await tx.inventoryBatch.update({
-              where: { id: transferItem.inventoryBatchId },
-              data: { quantity: { increment: diff } },
-            });
-          }
+          await this.returnQtyToSource(
+            tx,
+            companyId,
+            transfer,
+            transferItem,
+            diff,
+            'RET',
+          );
 
           await tx.stockTransferItem.update({
             where: { id: transferItem.id },
@@ -518,7 +676,12 @@ export class StockTransfersService {
 
       return tx.stockTransfer.update({
         where: { id },
-        data: { status: 'RECEIVED' },
+        data: {
+          status: 'RECEIVED',
+          // Приел (избираем) + одитен запис кой е натиснал „Приеми"
+          ...(acceptedId && { acceptedById: acceptedId }),
+          ...(userId && { receivedById: userId }),
+        },
         include: TRANSFER_INCLUDE,
       });
     });
@@ -548,13 +711,15 @@ export class StockTransfersService {
               });
             }
           } else {
-            // Return quantity to source batch
-            if (item.inventoryBatchId) {
-              await tx.inventoryBatch.update({
-                where: { id: item.inventoryBatchId },
-                data: { quantity: { increment: Number(item.quantity) } },
-              });
-            }
+            // Return quantity to source (конкретната партида или нов ред)
+            await this.returnQtyToSource(
+              tx,
+              companyId,
+              transfer,
+              item,
+              Number(item.quantity),
+              'CXL',
+            );
           }
         }
       }

@@ -15,6 +15,7 @@ import {
   UpdateStockTransferDto,
   QueryStockTransfersDto,
   ReceiveStockTransferDto,
+  ShipStockTransferDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -69,8 +70,18 @@ export class CompanyStockTransfersController {
 
   @Post(':id/ship')
   @RequireEdit('warehouse', 'stockTransfers')
-  ship(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.stockTransfersService.ship(companyId, id);
+  ship(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: ShipStockTransferDto,
+    @CurrentUser() user: any,
+  ) {
+    return this.stockTransfersService.ship(
+      companyId,
+      id,
+      user?.id,
+      dto?.handedById,
+    );
   }
 
   @Post(':id/receive')
@@ -79,8 +90,9 @@ export class CompanyStockTransfersController {
     @Param('companyId') companyId: string,
     @Param('id') id: string,
     @Body() dto: ReceiveStockTransferDto,
+    @CurrentUser() user: any,
   ) {
-    return this.stockTransfersService.receive(companyId, id, dto);
+    return this.stockTransfersService.receive(companyId, id, dto, user?.id);
   }
 
   @Post(':id/cancel')

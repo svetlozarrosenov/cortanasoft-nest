@@ -26,6 +26,11 @@ export class ReceiveStockTransferItemDto {
 }
 
 export class ReceiveStockTransferDto {
+  // „Приел" за протокола — по подразбиране (без стойност) е текущият потребител
+  @IsString()
+  @IsOptional()
+  acceptedById?: string;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

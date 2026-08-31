@@ -557,6 +557,10 @@ model User {
 
   // Трансфери между складове
   responsibleStockTransfers StockTransfer[] @relation("StockTransferResponsible")
+  handedStockTransfers      StockTransfer[] @relation("StockTransferHandedBy")
+  acceptedStockTransfers    StockTransfer[] @relation("StockTransferAcceptedBy")
+  shippedStockTransfers     StockTransfer[] @relation("StockTransferShippedBy")
+  receivedStockTransfers    StockTransfer[] @relation("StockTransferReceivedBy")
   createdStockTransfers     StockTransfer[] @relation("StockTransferCreator")
 
   // Екипи на локации (бусове)
@@ -3625,6 +3629,20 @@ model StockTransfer {
 
   createdById String?
   createdBy   User?   @relation("StockTransferCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // „Предал/Приел" — избираеми при изпращане/приемане (по подразбиране
+  // текущият потребител), за печатния протокол и МОЛ семантиката
+  handedById   String?
+  handedBy     User?   @relation("StockTransferHandedBy", fields: [handedById], references: [id], onDelete: SetNull)
+  acceptedById String?
+  acceptedBy   User?   @relation("StockTransferAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
+
+  // Одитна следа — КОЙ реално е натиснал „Изпрати"/„Приеми" (от сесията,
+  // не се избира и не се редактира)
+  shippedById  String?
+  shippedBy    User?   @relation("StockTransferShippedBy", fields: [shippedById], references: [id], onDelete: SetNull)
+  receivedById String?
+  receivedBy   User?   @relation("StockTransferReceivedBy", fields: [receivedById], references: [id], onDelete: SetNull)
 
   items StockTransferItem[]
 
