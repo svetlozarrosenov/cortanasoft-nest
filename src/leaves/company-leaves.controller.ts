@@ -75,6 +75,29 @@ export class CompanyLeavesController {
     return this.leavesService.getSummary(companyId);
   }
 
+  // Кой от подадените хора е в ОДОБРЕН отпуск/болничен на дадена дата — за
+  // предпопълването на екип по документ (бус). Нарочно връща САМО userId-та,
+  // без тип/период/причина, и е с право sites.sites (гейтът на екип UI-а),
+  // не hr.leaves — търговецът не получава достъп до HR данни.
+  @Get('absences')
+  @RequireView('sites', 'sites')
+  async getAbsences(
+    @Param('companyId') companyId: string,
+    @Query('date') date: string,
+    @Query('userIds') userIds: string,
+  ) {
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new BadRequestException('Невалидна дата');
+    }
+    const ids = (userIds || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return {
+      userIds: await this.leavesService.findAbsentUserIds(companyId, date, ids),
+    };
+  }
+
   @Get('export')
   @RequireView('hr', 'leaves')
   async export(

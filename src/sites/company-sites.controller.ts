@@ -32,13 +32,13 @@ export class CompanySitesController {
   constructor(private readonly sitesService: SitesService) {}
 
   @Post()
-  @RequireCreate('erp', 'sites')
+  @RequireCreate('sites', 'sites')
   create(@Param('companyId') companyId: string, @Body() dto: CreateSiteDto) {
     return this.sitesService.create(companyId, dto);
   }
 
   @Get()
-  @RequireView('erp', 'sites')
+  @RequireView('sites', 'sites')
   findAll(
     @Param('companyId') companyId: string,
     @Query() query: QuerySitesDto,
@@ -47,14 +47,14 @@ export class CompanySitesController {
   }
 
   @Get(':id')
-  @RequireView('erp', 'sites')
+  @RequireView('sites', 'sites')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.sitesService.findOne(companyId, id);
   }
 
   // Продажби + разходи + резултат на обекта за период
   @Get(':id/summary')
-  @RequireView('erp', 'sites')
+  @RequireView('sites', 'sites')
   summary(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -64,7 +64,7 @@ export class CompanySitesController {
   }
 
   @Patch(':id')
-  @RequireEdit('erp', 'sites')
+  @RequireEdit('sites', 'sites')
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -74,7 +74,7 @@ export class CompanySitesController {
   }
 
   @Delete(':id')
-  @RequireDelete('erp', 'sites')
+  @RequireDelete('sites', 'sites')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.sitesService.remove(companyId, id);
   }

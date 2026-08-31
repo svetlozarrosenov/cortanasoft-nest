@@ -30,12 +30,13 @@ import {
 } from '../common/guards/permissions.guard';
 
 // Локациите обслужват и страницата „Превозни средства" (бусове = Location с
-// type VEHICLE, собствено право warehouse.vehicles) — CRUD/екип endpoint-ите
-// приемат което и да е от двете права. Складовите зони остават само locations.
+// type VEHICLE, собствено право sites.vehicles — модул „Обекти") — CRUD/екип
+// endpoint-ите приемат което и да е от двете права. Складовите зони остават
+// само locations.
 const anyLocationPerm = (action: 'view' | 'create' | 'edit' | 'delete') =>
   RequireAnyPermission(
     { module: 'warehouse', page: 'locations', action },
-    { module: 'warehouse', page: 'vehicles', action },
+    { module: 'sites', page: 'vehicles', action },
   );
 
 @Controller('companies/:companyId/locations')

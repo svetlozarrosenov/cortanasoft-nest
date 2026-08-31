@@ -879,6 +879,25 @@ export class LeavesService {
   }
 
   // Get summary stats
+  /** userId-та с ОДОБРЕН отпуск, покриващ дадената дата — за изключване от
+   *  предпопълнения екип на бус. Връща само id-та, никакви HR детайли. */
+  async findAbsentUserIds(companyId: string, date: string, userIds: string[]) {
+    if (userIds.length === 0) return [];
+    const dayStart = new Date(date + 'T00:00:00.000Z');
+    const dayEnd = new Date(date + 'T23:59:59.999Z');
+    const leaves = await this.prisma.leave.findMany({
+      where: {
+        companyId,
+        status: 'APPROVED',
+        userId: { in: userIds },
+        startDate: { lte: dayEnd },
+        endDate: { gte: dayStart },
+      },
+      select: { userId: true },
+    });
+    return [...new Set(leaves.map((l) => l.userId))];
+  }
+
   async getSummary(companyId: string) {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);

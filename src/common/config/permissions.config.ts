@@ -315,24 +315,6 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
-        key: 'sites',
-        labelKey: 'modules.erp.sites.title',
-        actions: ['view', 'create', 'edit', 'delete'],
-        tables: [
-          {
-            key: 'sitesList',
-            labelKey: 'modules.erp.sites.listTable',
-            columns: [
-              { key: 'name', labelKey: 'common.name' },
-              { key: 'address', labelKey: 'common.address' },
-              { key: 'city', labelKey: 'common.city' },
-              { key: 'orders', labelKey: 'modules.erp.sales' },
-              { key: 'status', labelKey: 'common.status' },
-            ],
-          },
-        ],
-      },
-      {
         key: 'protocols',
         labelKey: 'modules.erp.protocols',
         actions: ['view', 'create', 'edit', 'delete'],
@@ -381,6 +363,43 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
     ],
   },
   {
+    // „Обекти" — теренният домейн (обекти на клиенти + бусове с екипи),
+    // собствен модул, огледален на секцията в сайдбара. Ключовете бяха
+    // erp.sites / warehouse.vehicles; старите записи в ролите се игнорират
+    // от normalizePermissions — правата се дават наново през редактора.
+    key: 'sites',
+    labelKey: 'modules.erp.sites.title',
+    icon: 'MapPin',
+    pages: [
+      {
+        key: 'sites',
+        labelKey: 'modules.erp.sites.title',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'sitesList',
+            labelKey: 'modules.erp.sites.listTable',
+            columns: [
+              { key: 'name', labelKey: 'common.name' },
+              { key: 'address', labelKey: 'common.address' },
+              { key: 'city', labelKey: 'common.city' },
+              { key: 'orders', labelKey: 'modules.erp.sales' },
+              { key: 'status', labelKey: 'common.status' },
+            ],
+          },
+        ],
+      },
+      {
+        // Превозни средства (бусове) — отделен изглед върху Location(VEHICLE).
+        // Собствено право, за да е opt-in per роля (складов клиент без монтажни
+        // екипи не бива да вижда менюто).
+        key: 'vehicles',
+        labelKey: 'modules.warehouse.vehicles',
+        actions: ['view', 'create', 'edit', 'delete'],
+      },
+    ],
+  },
+  {
     key: 'warehouse',
     labelKey: 'modules.warehouse.title',
     icon: 'Warehouse',
@@ -402,14 +421,6 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
             ],
           },
         ],
-      },
-      {
-        // Превозни средства (бусове) — отделен изглед върху Location(VEHICLE).
-        // Собствено право, за да е opt-in per роля (складов клиент без монтажни
-        // екипи не бива да вижда менюто).
-        key: 'vehicles',
-        labelKey: 'modules.warehouse.vehicles',
-        actions: ['view', 'create', 'edit', 'delete'],
       },
       {
         key: 'suppliers',
