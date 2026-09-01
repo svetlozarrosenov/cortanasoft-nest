@@ -264,12 +264,46 @@ export class SitesService {
       members: [...entry.members.values()],
     }));
 
+    // Присъствия на обекта за периода (HR > Присъствия е източникът) —
+    // групирани по служител: колко дни е бил тук
+    const attendanceRecords = await this.prisma.attendance.findMany({
+      where: {
+        companyId,
+        siteId: id,
+        ...(dateFrom || dateTo
+          ? { date: { ...(dateFrom && { gte: dateFrom }), ...(dateTo && { lte: dateTo }) } }
+          : {}),
+      },
+      select: { userId: true, date: true },
+      orderBy: { date: 'asc' },
+    });
+    const attendanceByUser = new Map<string, Set<string>>();
+    for (const rec of attendanceRecords) {
+      const days = attendanceByUser.get(rec.userId) || new Set<string>();
+      days.add(rec.date.toISOString().slice(0, 10));
+      attendanceByUser.set(rec.userId, days);
+    }
+    const attendanceUsers = await this.prisma.user.findMany({
+      where: { id: { in: [...attendanceByUser.keys()] } },
+      select: { id: true, firstName: true, lastName: true },
+    });
+    const attendance = attendanceUsers
+      .map((u) => ({
+        userId: u.id,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        days: attendanceByUser.get(u.id)?.size || 0,
+        dates: [...(attendanceByUser.get(u.id) || [])].sort(),
+      }))
+      .sort((a, b) => b.days - a.days);
+
     return {
       site,
       orders,
       expenses,
       monthly,
       workforce,
+      attendance,
       totals: {
         revenue,
         paid,

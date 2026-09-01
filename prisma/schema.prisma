@@ -771,6 +771,11 @@ model Attendance {
   // Служител (user в контекста на компанията)
   userId String
 
+  // Обект, на който е било присъствието — етикет за справките по обект и
+  // заплатите. Опционално: ръчните HR записи може да са без обект.
+  siteId String?
+  site   Site?   @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
   // Одобрен от (мениджър)
   approvedById String?
   approvedAt   DateTime?
@@ -779,11 +784,14 @@ model Attendance {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([companyId, userId, date])
+  // НЯМА unique по (companyId, userId, date) — човек може да е на два обекта
+  // в един ден (вход А сутрин, вход Б следобед = два записа с интервали)
+  @@index([companyId, userId, date])
   @@index([companyId])
   @@index([companyId, userId])
   @@index([companyId, date])
   @@index([companyId, status])
+  @@index([siteId])
   @@map("attendances")
 }
 
@@ -1676,8 +1684,9 @@ model Site {
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
-  orders   Order[]
-  expenses Expense[]
+  orders      Order[]
+  expenses    Expense[]
+  attendances Attendance[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

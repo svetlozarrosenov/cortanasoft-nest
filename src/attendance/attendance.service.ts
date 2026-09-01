@@ -10,7 +10,8 @@ import {
   UpdateAttendanceDto,
   QueryAttendanceDto,
 } from './dto';
-import { AttendanceStatus } from '@prisma/client';
+import { AttendanceStatus, Prisma } from '@prisma/client';
+import { isWorkingDay } from '../leaves/working-days.util';
 
 @Injectable()
 export class AttendanceService {
@@ -32,16 +33,33 @@ export class AttendanceService {
       throw new BadRequestException('User is not an employee of this company');
     }
 
-    // Check if attendance already exists for this user and date
+    // Обектът (ако е подаден) трябва да е на компанията
+    if (dto.siteId) {
+      const site = await this.prisma.site.findFirst({
+        where: { id: dto.siteId, companyId },
+        select: { id: true },
+      });
+      if (!site) {
+        throw new BadRequestException('Обектът не е намерен');
+      }
+    }
+
+    // Изрично избрани дни (чиповете в UI-а) — създаваме точно тях
+    if (dto.dates && dto.dates.length > 0) {
+      return this.createFromDates(companyId, userId, dto);
+    }
+
+    // Период „от–до": разгъва се в дневни записи (само работни дни по КТ,
+    // прескачат се одобрени отпуски и вече съществуващи записи за обекта)
+    if (dto.dateTo) {
+      return this.createRange(companyId, userId, dto);
+    }
+
+    // Дубликат = същият човек, ден И обект (различен обект в същия ден е
+    // валиден — човек може да е на два обекта в един ден)
     const date = new Date(dto.date);
-    const existing = await this.prisma.attendance.findUnique({
-      where: {
-        companyId_userId_date: {
-          companyId,
-          userId,
-          date,
-        },
-      },
+    const existing = await this.prisma.attendance.findFirst({
+      where: { companyId, userId, date, siteId: dto.siteId ?? null },
     });
 
     if (existing) {
@@ -73,6 +91,7 @@ export class AttendanceService {
         notes: dto.notes,
         companyId,
         userId,
+        siteId: dto.siteId || undefined,
       },
     });
 
@@ -88,6 +107,165 @@ export class AttendanceService {
     });
 
     return { ...attendance, user };
+  }
+
+  /** Изрично избрани дни: записът се създава за всеки подаден ден — вкл.
+   *  почивни/празнични (изборът е човешки, напр. извънреден труд). Прескачат
+   *  се само точните дубликати (същия ден + обект). */
+  private async createFromDates(
+    companyId: string,
+    userId: string,
+    dto: CreateAttendanceDto,
+  ) {
+    const dates = [...new Set(dto.dates!)];
+    if (dates.length > 92) {
+      throw new BadRequestException('Твърде много дни наведнъж (макс. 92)');
+    }
+    const dateObjects = dates.map((d) => new Date(d));
+
+    const existing = await this.prisma.attendance.findMany({
+      where: {
+        companyId,
+        userId,
+        date: { in: dateObjects },
+        siteId: dto.siteId ?? null,
+      },
+      select: { date: true },
+    });
+    const existingDays = new Set(
+      existing.map((a) => a.date.toISOString().slice(0, 10)),
+    );
+
+    const data: Prisma.AttendanceCreateManyInput[] = dateObjects
+      .filter((d) => !existingDays.has(d.toISOString().slice(0, 10)))
+      .map((d) => ({
+        date: d,
+        type: dto.type,
+        status: dto.status,
+        notes: dto.notes,
+        companyId,
+        userId,
+        siteId: dto.siteId || undefined,
+      }));
+
+    await this.prisma.attendance.createMany({ data });
+    return { count: data.length };
+  }
+
+  /** Календарна информация за периода — за чиповете във формата: кой ден е
+   *  работен и кой е с одобрен отпуск на служителя */
+  async getDayInfo(
+    companyId: string,
+    userId: string,
+    dateFrom: string,
+    dateTo: string,
+  ) {
+    const from = new Date(dateFrom);
+    const to = new Date(dateTo);
+    if (isNaN(from.getTime()) || isNaN(to.getTime()) || to < from) {
+      throw new BadRequestException('Невалиден период');
+    }
+    if ((to.getTime() - from.getTime()) / 86400000 > 92) {
+      throw new BadRequestException('Периодът е твърде дълъг (макс. 3 месеца)');
+    }
+
+    const leaves = await this.prisma.leave.findMany({
+      where: {
+        companyId,
+        userId,
+        status: 'APPROVED',
+        startDate: { lte: to },
+        endDate: { gte: from },
+      },
+      select: { startDate: true, endDate: true },
+    });
+    const onLeave = (d: Date) =>
+      leaves.some((l) => l.startDate <= d && l.endDate >= d);
+
+    const days: { date: string; isWorkingDay: boolean; onLeave: boolean }[] = [];
+    for (
+      let d = new Date(from);
+      d <= to;
+      d = new Date(d.getTime() + 86400000)
+    ) {
+      days.push({
+        date: d.toISOString().slice(0, 10),
+        isWorkingDay: isWorkingDay(d),
+        onLeave: onLeave(d),
+      });
+    }
+    return { days };
+  }
+
+  /** „От–до" вписване: по един запис на РАБОТЕН ден (КТ календара), без
+   *  дните с одобрен отпуск/болничен и без вече отбелязаните за същия обект */
+  private async createRange(
+    companyId: string,
+    userId: string,
+    dto: CreateAttendanceDto,
+  ) {
+    const from = new Date(dto.date);
+    const to = new Date(dto.dateTo!);
+    if (to < from) {
+      throw new BadRequestException('Крайната дата е преди началната');
+    }
+    // Предпазител срещу случайно въведена година напред
+    const MAX_DAYS = 92;
+    if ((to.getTime() - from.getTime()) / 86400000 > MAX_DAYS) {
+      throw new BadRequestException('Периодът е твърде дълъг (макс. 3 месеца)');
+    }
+
+    const [leaves, existing] = await Promise.all([
+      this.prisma.leave.findMany({
+        where: {
+          companyId,
+          userId,
+          status: 'APPROVED',
+          startDate: { lte: to },
+          endDate: { gte: from },
+        },
+        select: { startDate: true, endDate: true },
+      }),
+      this.prisma.attendance.findMany({
+        where: {
+          companyId,
+          userId,
+          date: { gte: from, lte: to },
+          siteId: dto.siteId ?? null,
+        },
+        select: { date: true },
+      }),
+    ]);
+    const existingDays = new Set(
+      existing.map((a) => a.date.toISOString().slice(0, 10)),
+    );
+    const onLeave = (d: Date) =>
+      leaves.some((l) => l.startDate <= d && l.endDate >= d);
+
+    const data: Prisma.AttendanceCreateManyInput[] = [];
+    for (
+      let d = new Date(from);
+      d <= to;
+      d = new Date(d.getTime() + 86400000)
+    ) {
+      // Неработните дни се прескачат, освен при изричен избор
+      // (извънреден труд в събота/празник)
+      if (!dto.includeNonWorkingDays && !isWorkingDay(d)) continue;
+      if (onLeave(d)) continue;
+      if (existingDays.has(d.toISOString().slice(0, 10))) continue;
+      data.push({
+        date: new Date(d),
+        type: dto.type,
+        status: dto.status,
+        notes: dto.notes,
+        companyId,
+        userId,
+        siteId: dto.siteId || undefined,
+      });
+    }
+
+    await this.prisma.attendance.createMany({ data });
+    return { count: data.length };
   }
 
   async findAll(companyId: string, query: QueryAttendanceDto) {
@@ -117,6 +295,10 @@ export class AttendanceService {
       where.status = status;
     }
 
+    if (query.siteId) {
+      where.siteId = query.siteId;
+    }
+
     if (dateFrom || dateTo) {
       where.date = {};
       if (dateFrom) {
@@ -134,6 +316,7 @@ export class AttendanceService {
         orderBy: { [sortBy]: sortOrder },
         skip: (page - 1) * limit,
         take: limit,
+        include: { site: { select: { id: true, name: true } } },
       }),
     ]);
 
@@ -220,6 +403,16 @@ export class AttendanceService {
       throw new NotFoundException('Attendance record not found');
     }
 
+    if (dto.siteId) {
+      const site = await this.prisma.site.findFirst({
+        where: { id: dto.siteId, companyId },
+        select: { id: true },
+      });
+      if (!site) {
+        throw new BadRequestException('Обектът не е намерен');
+      }
+    }
+
     // Calculate worked minutes if checkIn and checkOut are provided
     let workedMinutes = attendance.workedMinutes;
     const checkIn = dto.checkIn ? new Date(dto.checkIn) : attendance.checkIn;
@@ -245,6 +438,8 @@ export class AttendanceService {
         workedMinutes,
         overtimeMinutes: dto.overtimeMinutes,
         notes: dto.notes,
+        // Празен string = изчистване; undefined = не се пипа
+        ...(dto.siteId !== undefined && { siteId: dto.siteId || null }),
       },
     });
 
@@ -394,75 +589,96 @@ export class AttendanceService {
   }
 
   // Check in for current user
-  async checkIn(companyId: string, userId: string) {
+  // Вход — по избор към обект. Няколко входа в един ден са позволени
+  // (обект А сутрин, обект Б следобед), но само един отворен интервал.
+  async checkIn(companyId: string, userId: string, siteId?: string) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Check if already checked in today
-    let attendance = await this.prisma.attendance.findUnique({
+    if (siteId) {
+      const site = await this.prisma.site.findFirst({
+        where: { id: siteId, companyId },
+        select: { id: true },
+      });
+      if (!site) {
+        throw new BadRequestException('Обектът не е намерен');
+      }
+    }
+
+    // Отворен интервал = вход без изход
+    const open = await this.prisma.attendance.findFirst({
       where: {
-        companyId_userId_date: {
-          companyId,
-          userId,
-          date: today,
-        },
+        companyId,
+        userId,
+        date: today,
+        checkIn: { not: null },
+        checkOut: null,
       },
     });
-
-    if (attendance?.checkIn) {
+    if (open) {
       throw new ConflictException('Already checked in today');
     }
 
-    if (attendance) {
-      // Update existing record
-      attendance = await this.prisma.attendance.update({
-        where: { id: attendance.id },
+    // Ръчно създаден запис за деня без часове (за същия обект) — пълним него
+    const blank = await this.prisma.attendance.findFirst({
+      where: {
+        companyId,
+        userId,
+        date: today,
+        checkIn: null,
+        siteId: siteId ?? null,
+      },
+    });
+
+    if (blank) {
+      return this.prisma.attendance.update({
+        where: { id: blank.id },
         data: { checkIn: new Date() },
-      });
-    } else {
-      // Create new record
-      attendance = await this.prisma.attendance.create({
-        data: {
-          date: today,
-          checkIn: new Date(),
-          companyId,
-          userId,
-        },
       });
     }
 
-    return attendance;
+    return this.prisma.attendance.create({
+      data: {
+        date: today,
+        checkIn: new Date(),
+        companyId,
+        userId,
+        siteId: siteId || undefined,
+      },
+    });
   }
 
-  // Check out for current user
+  // Check out for current user — затваря отворения интервал за деня
   async checkOut(companyId: string, userId: string) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const attendance = await this.prisma.attendance.findUnique({
+    const attendance = await this.prisma.attendance.findFirst({
       where: {
-        companyId_userId_date: {
-          companyId,
-          userId,
-          date: today,
-        },
+        companyId,
+        userId,
+        date: today,
+        checkIn: { not: null },
+        checkOut: null,
       },
+      orderBy: { checkIn: 'desc' },
     });
 
     if (!attendance) {
-      throw new NotFoundException('No attendance record for today');
-    }
-
-    if (!attendance.checkIn) {
-      throw new BadRequestException('Must check in before checking out');
-    }
-
-    if (attendance.checkOut) {
+      const anyToday = await this.prisma.attendance.findFirst({
+        where: { companyId, userId, date: today },
+      });
+      if (!anyToday) {
+        throw new NotFoundException('No attendance record for today');
+      }
+      if (!anyToday.checkIn) {
+        throw new BadRequestException('Must check in before checking out');
+      }
       throw new ConflictException('Already checked out today');
     }
 
     const checkOut = new Date();
-    const diffMs = checkOut.getTime() - attendance.checkIn.getTime();
+    const diffMs = checkOut.getTime() - attendance.checkIn!.getTime();
     const workedMinutes = Math.floor(diffMs / 60000) - attendance.breakMinutes;
 
     const updated = await this.prisma.attendance.update({
@@ -476,30 +692,34 @@ export class AttendanceService {
     return updated;
   }
 
-  // Get today's status for current user
+  // Get today's status for current user. При няколко записа в деня (два
+  // обекта) статусът гледа последния интервал, а минутите са сумарни.
   async getTodayStatus(companyId: string, userId: string) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const attendance = await this.prisma.attendance.findUnique({
-      where: {
-        companyId_userId_date: {
-          companyId,
-          userId,
-          date: today,
-        },
-      },
+    const records = await this.prisma.attendance.findMany({
+      where: { companyId, userId, date: today },
+      orderBy: { checkIn: 'asc' },
+      include: { site: { select: { id: true, name: true } } },
     });
+    const latest = records[records.length - 1] || null;
+    const hasOpen = records.some((r) => r.checkIn && !r.checkOut);
+    const totalMinutes = records.reduce(
+      (sum, r) => sum + (r.workedMinutes || 0),
+      0,
+    );
 
     return {
       date: today,
-      hasRecord: !!attendance,
-      isCheckedIn: !!attendance?.checkIn,
-      isCheckedOut: !!attendance?.checkOut,
-      checkIn: attendance?.checkIn || null,
-      checkOut: attendance?.checkOut || null,
-      workedMinutes: attendance?.workedMinutes || null,
-      type: attendance?.type || null,
+      hasRecord: records.length > 0,
+      isCheckedIn: hasOpen || (!!latest?.checkIn && !latest?.checkOut),
+      isCheckedOut: records.length > 0 && !hasOpen && !!latest?.checkOut,
+      checkIn: latest?.checkIn || null,
+      checkOut: latest?.checkOut || null,
+      workedMinutes: totalMinutes || null,
+      type: latest?.type || null,
+      site: latest?.site || null,
     };
   }
 }

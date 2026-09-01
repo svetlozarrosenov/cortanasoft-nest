@@ -14,6 +14,11 @@ export class UpdateAttendanceDto {
   @IsOptional()
   type?: AttendanceType;
 
+  // Обект; празен string изчиства връзката
+  @IsString()
+  @IsOptional()
+  siteId?: string;
+
   @IsEnum(AttendanceStatus)
   @IsOptional()
   status?: AttendanceStatus;

@@ -30,6 +30,11 @@ export class QueryAttendanceDto {
   @IsOptional()
   dateTo?: string;
 
+  // Филтър по обект (за изгледа „кой е бил на обекта")
+  @IsString()
+  @IsOptional()
+  siteId?: string;
+
   @IsInt()
   @Min(1)
   @Type(() => Number)

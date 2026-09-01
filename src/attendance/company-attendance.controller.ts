@@ -18,6 +18,7 @@ import {
   CreateAttendanceDto,
   UpdateAttendanceDto,
   QueryAttendanceDto,
+  CheckInDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -64,6 +65,25 @@ export class CompanyAttendanceController {
   @RequireView('hr', 'attendance')
   getTodayStatus(@Param('companyId') companyId: string, @Request() req: any) {
     return this.attendanceService.getTodayStatus(companyId, req.user.id);
+  }
+
+  // Календарна информация за чиповете в „от–до" формата: работен ден /
+  // одобрен отпуск per дата. Преди :id, за да не го прихване.
+  @Get('day-info')
+  @RequireView('hr', 'attendance')
+  getDayInfo(
+    @Param('companyId') companyId: string,
+    @Query('userId') userId: string,
+    @Query('dateFrom') dateFrom: string,
+    @Query('dateTo') dateTo: string,
+    @Request() req: any,
+  ) {
+    return this.attendanceService.getDayInfo(
+      companyId,
+      userId || req.user.id,
+      dateFrom,
+      dateTo,
+    );
   }
 
   @Get('summary')
@@ -137,8 +157,12 @@ export class CompanyAttendanceController {
 
   @Post('check-in')
   @RequireCreate('hr', 'attendance')
-  checkIn(@Param('companyId') companyId: string, @Request() req: any) {
-    return this.attendanceService.checkIn(companyId, req.user.id);
+  checkIn(
+    @Param('companyId') companyId: string,
+    @Request() req: any,
+    @Body() dto: CheckInDto,
+  ) {
+    return this.attendanceService.checkIn(companyId, req.user.id, dto?.siteId);
   }
 
   @Post('check-out')

@@ -20,6 +20,12 @@ const mockPrisma = {
   userCompany: {
     findFirst: jest.fn(),
   },
+  site: {
+    findFirst: jest.fn(),
+  },
+  leave: {
+    findMany: jest.fn(),
+  },
   user: {
     findUnique: jest.fn(),
     findMany: jest.fn(),
@@ -49,11 +55,11 @@ describe('AttendanceService', () => {
 
     it('should create attendance record successfully', async () => {
       mockPrisma.userCompany.findFirst.mockResolvedValue({ userId: 'u1', companyId: 'c1' });
-      mockPrisma.attendance.findUnique.mockResolvedValue(null);
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
       mockPrisma.attendance.create.mockResolvedValue({ id: 'a1', ...baseDto });
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1', firstName: 'John', lastName: 'Doe', email: 'j@d.com' });
 
-      const result = await service.create('c1', 'u1', baseDto as any);
+      const result = (await service.create('c1', 'u1', baseDto as any)) as any;
       expect(result.id).toBe('a1');
       expect(result.user).toBeDefined();
     });
@@ -65,9 +71,9 @@ describe('AttendanceService', () => {
         .rejects.toThrow(BadRequestException);
     });
 
-    it('should throw ConflictException for duplicate date', async () => {
+    it('should throw ConflictException for duplicate date+site', async () => {
       mockPrisma.userCompany.findFirst.mockResolvedValue({ userId: 'u1' });
-      mockPrisma.attendance.findUnique.mockResolvedValue({ id: 'existing' });
+      mockPrisma.attendance.findFirst.mockResolvedValue({ id: 'existing' });
 
       await expect(service.create('c1', 'u1', baseDto as any))
         .rejects.toThrow(ConflictException);
@@ -81,7 +87,7 @@ describe('AttendanceService', () => {
         breakMinutes: 30,
       };
       mockPrisma.userCompany.findFirst.mockResolvedValue({ userId: 'u1' });
-      mockPrisma.attendance.findUnique.mockResolvedValue(null);
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
       mockPrisma.attendance.create.mockImplementation(({ data }) => Promise.resolve({ id: 'a1', ...data }));
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1' });
 
@@ -100,7 +106,7 @@ describe('AttendanceService', () => {
         breakMinutes: 60,
       };
       mockPrisma.userCompany.findFirst.mockResolvedValue({ userId: 'u1' });
-      mockPrisma.attendance.findUnique.mockResolvedValue(null);
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
       mockPrisma.attendance.create.mockImplementation(({ data }) => Promise.resolve({ id: 'a1', ...data }));
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1' });
 
@@ -112,7 +118,7 @@ describe('AttendanceService', () => {
 
     it('should use currentUserId when dto.userId is not provided', async () => {
       mockPrisma.userCompany.findFirst.mockResolvedValue({ userId: 'current-user' });
-      mockPrisma.attendance.findUnique.mockResolvedValue(null);
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
       mockPrisma.attendance.create.mockImplementation(({ data }) => Promise.resolve({ id: 'a1', ...data }));
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'current-user' });
 
@@ -285,7 +291,8 @@ describe('AttendanceService', () => {
 
   describe('checkIn', () => {
     it('should create new record when no record exists for today', async () => {
-      mockPrisma.attendance.findUnique.mockResolvedValue(null);
+      // 1) няма отворен интервал; 2) няма празен запис за деня
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
       mockPrisma.attendance.create.mockResolvedValue({ id: 'a1', checkIn: new Date() });
 
       const result = await service.checkIn('c1', 'u1');
@@ -294,42 +301,60 @@ describe('AttendanceService', () => {
     });
 
     it('should update existing record without checkIn', async () => {
-      mockPrisma.attendance.findUnique.mockResolvedValue({ id: 'a1', checkIn: null });
+      mockPrisma.attendance.findFirst
+        .mockResolvedValueOnce(null) // няма отворен интервал
+        .mockResolvedValueOnce({ id: 'a1', checkIn: null }); // празен запис
       mockPrisma.attendance.update.mockResolvedValue({ id: 'a1', checkIn: new Date() });
 
-      const result = await service.checkIn('c1', 'u1');
+      await service.checkIn('c1', 'u1');
       expect(mockPrisma.attendance.update).toHaveBeenCalled();
     });
 
-    it('should throw ConflictException when already checked in', async () => {
-      mockPrisma.attendance.findUnique.mockResolvedValue({ id: 'a1', checkIn: new Date() });
+    it('should throw ConflictException when already checked in (отворен интервал)', async () => {
+      mockPrisma.attendance.findFirst.mockResolvedValueOnce({ id: 'a1', checkIn: new Date(), checkOut: null });
 
       await expect(service.checkIn('c1', 'u1')).rejects.toThrow(ConflictException);
+    });
+
+    it('should tag the new record with the site on check-in', async () => {
+      mockPrisma.site.findFirst.mockResolvedValue({ id: 's1' });
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
+      mockPrisma.attendance.create.mockImplementation(({ data }: any) =>
+        Promise.resolve({ id: 'a1', ...data }),
+      );
+
+      await service.checkIn('c1', 'u1', 's1');
+      const createCall = mockPrisma.attendance.create.mock.calls[0][0];
+      expect(createCall.data.siteId).toBe('s1');
     });
   });
 
   describe('checkOut', () => {
     it('should throw NotFoundException when no record for today', async () => {
-      mockPrisma.attendance.findUnique.mockResolvedValue(null);
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
 
       await expect(service.checkOut('c1', 'u1')).rejects.toThrow(NotFoundException);
     });
 
     it('should throw BadRequestException when not checked in', async () => {
-      mockPrisma.attendance.findUnique.mockResolvedValue({ id: 'a1', checkIn: null, checkOut: null });
+      mockPrisma.attendance.findFirst
+        .mockResolvedValueOnce(null) // няма отворен интервал
+        .mockResolvedValueOnce({ id: 'a1', checkIn: null, checkOut: null });
 
       await expect(service.checkOut('c1', 'u1')).rejects.toThrow(BadRequestException);
     });
 
     it('should throw ConflictException when already checked out', async () => {
-      mockPrisma.attendance.findUnique.mockResolvedValue({ id: 'a1', checkIn: new Date(), checkOut: new Date() });
+      mockPrisma.attendance.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'a1', checkIn: new Date(), checkOut: new Date() });
 
       await expect(service.checkOut('c1', 'u1')).rejects.toThrow(ConflictException);
     });
 
     it('should calculate workedMinutes on checkout', async () => {
       const checkInTime = new Date('2025-06-15T09:00:00Z');
-      mockPrisma.attendance.findUnique.mockResolvedValue({
+      mockPrisma.attendance.findFirst.mockResolvedValueOnce({
         id: 'a1',
         checkIn: checkInTime,
         checkOut: null,
@@ -349,7 +374,7 @@ describe('AttendanceService', () => {
 
   describe('getTodayStatus', () => {
     it('should return not checked in when no record', async () => {
-      mockPrisma.attendance.findUnique.mockResolvedValue(null);
+      mockPrisma.attendance.findMany.mockResolvedValue([]);
 
       const result = await service.getTodayStatus('c1', 'u1');
       expect(result.hasRecord).toBe(false);
@@ -359,17 +384,26 @@ describe('AttendanceService', () => {
 
     it('should return checked in status', async () => {
       const now = new Date();
-      mockPrisma.attendance.findUnique.mockResolvedValue({
-        checkIn: now,
-        checkOut: null,
-        workedMinutes: null,
-        type: 'REGULAR',
-      });
+      mockPrisma.attendance.findMany.mockResolvedValue([
+        { checkIn: now, checkOut: null, workedMinutes: null, type: 'REGULAR', site: null },
+      ]);
 
       const result = await service.getTodayStatus('c1', 'u1');
       expect(result.hasRecord).toBe(true);
       expect(result.isCheckedIn).toBe(true);
       expect(result.isCheckedOut).toBe(false);
+    });
+
+    it('should report checked out only when no open interval remains', async () => {
+      const now = new Date();
+      mockPrisma.attendance.findMany.mockResolvedValue([
+        { checkIn: now, checkOut: now, workedMinutes: 180, type: 'REGULAR', site: { id: 's1', name: 'Обект А' } },
+        { checkIn: now, checkOut: now, workedMinutes: 240, type: 'REGULAR', site: { id: 's2', name: 'Обект Б' } },
+      ]);
+
+      const result = await service.getTodayStatus('c1', 'u1');
+      expect(result.isCheckedOut).toBe(true);
+      expect(result.workedMinutes).toBe(420);
     });
   });
 
