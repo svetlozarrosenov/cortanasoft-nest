@@ -26,6 +26,7 @@ const mockPrisma = {
   },
   leave: {
     findMany: jest.fn(),
+    findFirst: jest.fn(),
   },
   user: {
     findUnique: jest.fn(),
@@ -38,6 +39,8 @@ describe('AttendanceService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockPrisma.leave.findFirst.mockResolvedValue(null);
+    mockPrisma.leave.findMany.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AttendanceService,
@@ -78,6 +81,16 @@ describe('AttendanceService', () => {
 
       await expect(service.create('c1', 'u1', baseDto as any))
         .rejects.toThrow(ConflictException);
+    });
+
+    it('refuses a single-day record on a day with an approved leave', async () => {
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
+      mockPrisma.leave.findFirst.mockResolvedValue({ id: 'leave1' });
+
+      await expect(service.create('c1', 'u1', baseDto as any))
+        .rejects.toThrow(ConflictException);
+      expect(mockPrisma.attendance.create).not.toHaveBeenCalled();
     });
 
     it('should calculate workedMinutes when checkIn and checkOut provided', async () => {
@@ -451,7 +464,7 @@ describe('AttendanceService', () => {
     it('should return paginated results with enriched user data', async () => {
       mockPrisma.attendance.count.mockResolvedValue(1);
       mockPrisma.attendance.findMany.mockResolvedValue([
-        { id: 'a1', userId: 'u1' },
+        { id: 'a1', userId: 'u1', date: new Date('2025-06-16T00:00:00Z') },
       ]);
       mockPrisma.user.findMany.mockResolvedValue([
         { id: 'u1', firstName: 'John', lastName: 'Doe', email: 'j@d.com', isActive: true },
@@ -460,7 +473,45 @@ describe('AttendanceService', () => {
       const result = await service.findAll('c1', { page: 1, limit: 10 } as any);
       expect(result.data).toHaveLength(1);
       expect(result.data[0].user?.firstName).toBe('John');
+      expect(result.data[0].isNonWorkingDay).toBe(false);
       expect(result.meta.total).toBe(1);
+    });
+
+    it('flags records on weekends/holidays as non-working days', async () => {
+      mockPrisma.attendance.count.mockResolvedValue(2);
+      mockPrisma.attendance.findMany.mockResolvedValue([
+        { id: 'sat', userId: 'u1', date: new Date('2025-06-14T00:00:00Z') },
+        { id: 'xmas', userId: 'u1', date: new Date('2025-12-25T00:00:00Z') },
+      ]);
+      mockPrisma.user.findMany.mockResolvedValue([]);
+      const result = await service.findAll('c1', { page: 1, limit: 10 } as any);
+      expect(result.data.map((r) => r.isNonWorkingDay)).toEqual([true, true]);
+    });
+
+    it('returns approved leaves alongside (read-only), scoped to the filter window', async () => {
+      mockPrisma.attendance.count.mockResolvedValue(0);
+      mockPrisma.attendance.findMany.mockResolvedValue([]);
+      mockPrisma.user.findMany.mockResolvedValue([]);
+      mockPrisma.leave.findMany.mockResolvedValue([{ id: 'l1', type: 'ANNUAL' }]);
+
+      const result = await service.findAll('c1', {
+        userId: 'u1', dateFrom: '2025-06-01', dateTo: '2025-06-30', page: 1, limit: 10,
+      } as any);
+      expect(result.leaves).toEqual([{ id: 'l1', type: 'ANNUAL' }]);
+      const where = mockPrisma.leave.findMany.mock.calls[0][0].where;
+      expect(where).toMatchObject({
+        companyId: 'c1', userId: 'u1', status: 'APPROVED',
+        endDate: { gte: new Date('2025-06-01') }, startDate: { lte: new Date('2025-06-30') },
+      });
+    });
+
+    it('does not mix leaves in when filtering by status/type/site', async () => {
+      mockPrisma.attendance.count.mockResolvedValue(0);
+      mockPrisma.attendance.findMany.mockResolvedValue([]);
+      mockPrisma.user.findMany.mockResolvedValue([]);
+      const result = await service.findAll('c1', { status: 'PENDING', page: 1, limit: 10 } as any);
+      expect(result.leaves).toEqual([]);
+      expect(mockPrisma.leave.findMany).not.toHaveBeenCalled();
     });
 
     it('should filter by date range', async () => {

@@ -110,6 +110,24 @@ export class AttendanceService {
       );
     }
 
+    // Отсъствията живеят в Отпуски; ден с одобрен отпуск не може да е и
+    // присъствие (при бригада/период такива дни просто се прескачат)
+    const onLeave = await this.prisma.leave.findFirst({
+      where: {
+        companyId,
+        userId,
+        status: 'APPROVED',
+        startDate: { lte: date },
+        endDate: { gte: date },
+      },
+      select: { id: true },
+    });
+    if (onLeave) {
+      throw new ConflictException(
+        'За този ден има одобрен отпуск. Присъствие не може да се добави — редактирай отпуска в Отпуски.',
+      );
+    }
+
     // Calculate worked minutes if checkIn and checkOut are provided
     let workedMinutes: number | null = null;
     if (dto.checkIn && dto.checkOut) {
@@ -149,6 +167,36 @@ export class AttendanceService {
     });
 
     return { ...attendance, user };
+  }
+
+  /** Одобрени отпуски за прозорец [lower, upper] (null = без граница), най-новите първи */
+  private async findApprovedLeaves(
+    companyId: string,
+    userId: string | undefined,
+    lower: Date | null,
+    upper: Date | null,
+  ) {
+    return this.prisma.leave.findMany({
+      where: {
+        companyId,
+        status: 'APPROVED',
+        ...(userId ? { userId } : {}),
+        ...(lower ? { endDate: { gte: lower } } : {}),
+        ...(upper ? { startDate: { lte: upper } } : {}),
+      },
+      select: {
+        id: true,
+        type: true,
+        startDate: true,
+        endDate: true,
+        days: true,
+        halfDay: true,
+        userId: true,
+        user: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+      orderBy: { startDate: 'desc' },
+      take: 200,
+    });
   }
 
   /** Изрично избрани дни: записът се създава за всеки подаден ден — вкл.
@@ -394,13 +442,36 @@ export class AttendanceService {
 
     const usersMap = new Map(users.map((u) => [u.id, u]));
 
+    // Работа в почивен/празничен ден се извежда от календара, не се избира
     const enrichedAttendances = attendances.map((a) => ({
       ...a,
       user: usersMap.get(a.userId) || null,
+      isNonWorkingDay: !isWorkingDay(a.date),
     }));
+
+    // Одобрените отпуски се показват до присъствията само за четене (те са
+    // от модул Отпуски). Прозорецът е филтърът от–до, а без такъв — обхватът
+    // на текущата страница (първата гледа и напред — „кой е в отпуск сега").
+    // Филтри по тип/статус/обект се отнасят само за присъствия.
+    let leaves: Awaited<ReturnType<typeof this.findApprovedLeaves>> = [];
+    if (!type && !status && !query.siteId) {
+      const pageDates = attendances.map((a) => a.date.getTime());
+      const lower = dateFrom
+        ? new Date(dateFrom)
+        : page < Math.ceil(total / limit) && pageDates.length
+          ? new Date(Math.min(...pageDates))
+          : null;
+      const upper = dateTo
+        ? new Date(dateTo)
+        : page > 1 && pageDates.length
+          ? new Date(Math.max(...pageDates))
+          : null;
+      leaves = await this.findApprovedLeaves(companyId, userId, lower, upper);
+    }
 
     return {
       data: enrichedAttendances,
+      leaves,
       meta: {
         total,
         page,
