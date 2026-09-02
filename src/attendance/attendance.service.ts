@@ -17,20 +17,34 @@ import { isWorkingDay } from '../leaves/working-days.util';
 export class AttendanceService {
   constructor(private prisma: PrismaService) {}
 
+  /**
+   * Денят на присъствието се пази като UTC полунощ навсякъде (ръчно
+   * създаване, период, вход/изход), за да не зависи от зоната на сървъра.
+   * Клиентът подава своя локален ден (YYYY-MM-DD); без такъв — UTC днес.
+   */
+  static dayKey(date?: string): Date {
+    const key = date || new Date().toISOString().slice(0, 10);
+    return new Date(key.slice(0, 10) + 'T00:00:00.000Z');
+  }
+
   async create(
     companyId: string,
     currentUserId: string,
     dto: CreateAttendanceDto,
   ) {
-    const userId = dto.userId || currentUserId;
+    // Няколко служители наведнъж (бригада на един обект) или един
+    const targetUserIds =
+      dto.userIds && dto.userIds.length > 0
+        ? [...new Set(dto.userIds)]
+        : [dto.userId || currentUserId];
 
-    // Verify user is employee of company
-    const userCompany = await this.prisma.userCompany.findFirst({
-      where: { userId, companyId },
+    // Verify users are employees of company
+    const memberships = await this.prisma.userCompany.findMany({
+      where: { userId: { in: targetUserIds }, companyId },
+      select: { userId: true },
     });
-
-    if (!userCompany) {
-      throw new BadRequestException('User is not an employee of this company');
+    if (memberships.length !== targetUserIds.length) {
+      throw new BadRequestException('Служителят не е част от компанията');
     }
 
     // Обектът (ако е подаден) трябва да е на компанията
@@ -44,9 +58,30 @@ export class AttendanceService {
       }
     }
 
-    // Изрично избрани дни (чиповете в UI-а) — създаваме точно тях
+    if (targetUserIds.length === 1) {
+      return this.createForUser(companyId, targetUserIds[0], dto);
+    }
+    // Бригада: дните са избрани общо, затова за всеки човек прескачаме
+    // неговите одобрени отпуски (календарът в UI-а не може да ги покаже за всички)
+    let count = 0;
+    for (const userId of targetUserIds) {
+      const res = await this.createForUser(companyId, userId, dto, {
+        skipLeaves: true,
+      });
+      count += 'count' in res ? res.count : 1;
+    }
+    return { count, users: targetUserIds.length };
+  }
+
+  private async createForUser(
+    companyId: string,
+    userId: string,
+    dto: CreateAttendanceDto,
+    opts: { skipLeaves?: boolean } = {},
+  ) {
+    // Изрично избрани дни (календара в UI-а) — създаваме точно тях
     if (dto.dates && dto.dates.length > 0) {
-      return this.createFromDates(companyId, userId, dto);
+      return this.createFromDates(companyId, userId, dto, opts);
     }
 
     // Период „от–до": разгъва се в дневни записи (само работни дни по КТ,
@@ -55,16 +90,23 @@ export class AttendanceService {
       return this.createRange(companyId, userId, dto);
     }
 
-    // Дубликат = същият човек, ден И обект (различен обект в същия ден е
-    // валиден — човек може да е на два обекта в един ден)
-    const date = new Date(dto.date);
+    // Дубликат = същият човек, ден и обект, при положение че поне единият от
+    // двата записа е „цял ден" (без часове). Няколко интервала с часове на
+    // същия обект са позволени (както при вход/изход) — сутрин и следобед.
+    const date = AttendanceService.dayKey(dto.date);
     const existing = await this.prisma.attendance.findFirst({
-      where: { companyId, userId, date, siteId: dto.siteId ?? null },
+      where: {
+        companyId,
+        userId,
+        date,
+        siteId: dto.siteId ?? null,
+        ...(dto.checkIn ? { checkIn: null } : {}),
+      },
     });
 
     if (existing) {
       throw new ConflictException(
-        'Attendance record already exists for this date',
+        'Вече има присъствие за този ден и обект. Редактирай съществуващия запис.',
       );
     }
 
@@ -116,12 +158,29 @@ export class AttendanceService {
     companyId: string,
     userId: string,
     dto: CreateAttendanceDto,
+    opts: { skipLeaves?: boolean } = {},
   ) {
-    const dates = [...new Set(dto.dates!)];
+    const dates = [...new Set(dto.dates!)].sort();
     if (dates.length > 92) {
       throw new BadRequestException('Твърде много дни наведнъж (макс. 92)');
     }
-    const dateObjects = dates.map((d) => new Date(d));
+    let dateObjects = dates.map((d) => AttendanceService.dayKey(d));
+
+    if (opts.skipLeaves && dateObjects.length > 0) {
+      const leaves = await this.prisma.leave.findMany({
+        where: {
+          companyId,
+          userId,
+          status: 'APPROVED',
+          startDate: { lte: dateObjects[dateObjects.length - 1] },
+          endDate: { gte: dateObjects[0] },
+        },
+        select: { startDate: true, endDate: true },
+      });
+      dateObjects = dateObjects.filter(
+        (d) => !leaves.some((l) => l.startDate <= d && l.endDate >= d),
+      );
+    }
 
     const existing = await this.prisma.attendance.findMany({
       where: {
@@ -591,9 +650,13 @@ export class AttendanceService {
   // Check in for current user
   // Вход — по избор към обект. Няколко входа в един ден са позволени
   // (обект А сутрин, обект Б следобед), но само един отворен интервал.
-  async checkIn(companyId: string, userId: string, siteId?: string) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  async checkIn(
+    companyId: string,
+    userId: string,
+    siteId?: string,
+    date?: string,
+  ) {
+    const today = AttendanceService.dayKey(date);
 
     if (siteId) {
       const site = await this.prisma.site.findFirst({
@@ -616,7 +679,7 @@ export class AttendanceService {
       },
     });
     if (open) {
-      throw new ConflictException('Already checked in today');
+      throw new ConflictException('Вече има отворен вход за днес — първо отбележи изход');
     }
 
     // Ръчно създаден запис за деня без часове (за същия обект) — пълним него
@@ -649,9 +712,8 @@ export class AttendanceService {
   }
 
   // Check out for current user — затваря отворения интервал за деня
-  async checkOut(companyId: string, userId: string) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  async checkOut(companyId: string, userId: string, date?: string) {
+    const today = AttendanceService.dayKey(date);
 
     const attendance = await this.prisma.attendance.findFirst({
       where: {
@@ -669,12 +731,12 @@ export class AttendanceService {
         where: { companyId, userId, date: today },
       });
       if (!anyToday) {
-        throw new NotFoundException('No attendance record for today');
+        throw new NotFoundException('Няма присъствие за днес');
       }
       if (!anyToday.checkIn) {
-        throw new BadRequestException('Must check in before checking out');
+        throw new BadRequestException('Първо отбележи вход');
       }
-      throw new ConflictException('Already checked out today');
+      throw new ConflictException('Изходът за днес вече е отбелязан');
     }
 
     const checkOut = new Date();
@@ -694,9 +756,8 @@ export class AttendanceService {
 
   // Get today's status for current user. При няколко записа в деня (два
   // обекта) статусът гледа последния интервал, а минутите са сумарни.
-  async getTodayStatus(companyId: string, userId: string) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  async getTodayStatus(companyId: string, userId: string, date?: string) {
+    const today = AttendanceService.dayKey(date);
 
     const records = await this.prisma.attendance.findMany({
       where: { companyId, userId, date: today },
@@ -720,6 +781,54 @@ export class AttendanceService {
       workedMinutes: totalMinutes || null,
       type: latest?.type || null,
       site: latest?.site || null,
+      // Всички интервали за деня (обект А сутрин, обект Б следобед)
+      records: records.map((r) => ({
+        id: r.id,
+        site: r.site,
+        checkIn: r.checkIn,
+        checkOut: r.checkOut,
+        workedMinutes: r.workedMinutes,
+      })),
     };
+  }
+
+  /**
+   * Кой е „вътре" в момента: отворени интервали (вход без изход) за деня,
+   * групирани по обект — за дъската „Сега на обектите".
+   */
+  // Активни обекти (id + име) за селекта при Вход / ръчен запис
+  findSiteOptions(companyId: string) {
+    return this.prisma.site.findMany({
+      where: { companyId, isActive: true },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async findOpenIntervals(companyId: string, date?: string) {
+    const today = AttendanceService.dayKey(date);
+    const open = await this.prisma.attendance.findMany({
+      where: {
+        companyId,
+        date: today,
+        checkIn: { not: null },
+        checkOut: null,
+      },
+      include: { site: { select: { id: true, name: true } } },
+      orderBy: { checkIn: 'asc' },
+    });
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: [...new Set(open.map((r) => r.userId))] } },
+      select: { id: true, firstName: true, lastName: true },
+    });
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    return open.map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      firstName: userMap.get(r.userId)?.firstName ?? '',
+      lastName: userMap.get(r.userId)?.lastName ?? '',
+      site: r.site,
+      checkIn: r.checkIn,
+    }));
   }
 }

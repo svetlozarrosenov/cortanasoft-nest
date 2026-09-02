@@ -28,6 +28,7 @@ import {
   RequireCreate,
   RequireEdit,
   RequireDelete,
+  RequireAnyPermission,
 } from '../common/guards/permissions.guard';
 import { ExportService } from '../common/export/export.service';
 import type { ExportFormat } from '../common/export/export.service';
@@ -61,10 +62,59 @@ export class CompanyAttendanceController {
     return this.attendanceService.findAll(companyId, query);
   }
 
+  // ==================== „Моите присъствия" ====================
+  // Работник с право само hr.myAttendance: собствените записи + Вход/Изход.
+  // Общите ендпойнти (today, check-in/out) приемат и двете права.
+
+  @Get('my')
+  @RequireAnyPermission(
+    { module: 'hr', page: 'attendance', action: 'view' },
+    { module: 'hr', page: 'myAttendance', action: 'view' },
+  )
+  findMine(
+    @Param('companyId') companyId: string,
+    @Request() req: any,
+    @Query() query: QueryAttendanceDto,
+  ) {
+    return this.attendanceService.findAll(companyId, {
+      ...query,
+      userId: req.user.id,
+    });
+  }
+
+  // Активни обекти за избор при Вход / ръчен запис — без да се изисква
+  // право за модул Обекти
+  @Get('site-options')
+  @RequireAnyPermission(
+    { module: 'hr', page: 'attendance', action: 'view' },
+    { module: 'hr', page: 'myAttendance', action: 'view' },
+  )
+  siteOptions(@Param('companyId') companyId: string) {
+    return this.attendanceService.findSiteOptions(companyId);
+  }
+
   @Get('today')
-  @RequireView('hr', 'attendance')
-  getTodayStatus(@Param('companyId') companyId: string, @Request() req: any) {
-    return this.attendanceService.getTodayStatus(companyId, req.user.id);
+  @RequireAnyPermission(
+    { module: 'hr', page: 'attendance', action: 'view' },
+    { module: 'hr', page: 'myAttendance', action: 'view' },
+  )
+  getTodayStatus(
+    @Param('companyId') companyId: string,
+    @Request() req: any,
+    @Query('date') date?: string,
+  ) {
+    return this.attendanceService.getTodayStatus(companyId, req.user.id, date);
+  }
+
+  // Отворени интервали (кой е „вътре" в момента), групирани по обект в UI-а.
+  // Гейтнато и с права за Обекти — дъската живее в Обекти > списък.
+  @Get('live')
+  @RequireAnyPermission(
+    { module: 'hr', page: 'attendance', action: 'view' },
+    { module: 'sites', page: 'sites', action: 'view' },
+  )
+  live(@Param('companyId') companyId: string, @Query('date') date?: string) {
+    return this.attendanceService.findOpenIntervals(companyId, date);
   }
 
   // Календарна информация за чиповете в „от–до" формата: работен ден /
@@ -115,6 +165,7 @@ export class CompanyAttendanceController {
       { header: 'First Name', key: 'user.firstName', width: 20 },
       { header: 'Last Name', key: 'user.lastName', width: 20 },
       { header: 'Date', key: 'date', width: 15 },
+      { header: 'Site', key: 'site.name', width: 24 },
       { header: 'Type', key: 'type', width: 12 },
       { header: 'Check In', key: 'checkIn', width: 20 },
       { header: 'Check Out', key: 'checkOut', width: 20 },
@@ -156,19 +207,34 @@ export class CompanyAttendanceController {
   // ==================== Check In/Out ====================
 
   @Post('check-in')
-  @RequireCreate('hr', 'attendance')
+  @RequireAnyPermission(
+    { module: 'hr', page: 'attendance', action: 'create' },
+    { module: 'hr', page: 'myAttendance', action: 'view' },
+  )
   checkIn(
     @Param('companyId') companyId: string,
     @Request() req: any,
     @Body() dto: CheckInDto,
   ) {
-    return this.attendanceService.checkIn(companyId, req.user.id, dto?.siteId);
+    return this.attendanceService.checkIn(
+      companyId,
+      req.user.id,
+      dto?.siteId,
+      dto?.date,
+    );
   }
 
   @Post('check-out')
-  @RequireEdit('hr', 'attendance')
-  checkOut(@Param('companyId') companyId: string, @Request() req: any) {
-    return this.attendanceService.checkOut(companyId, req.user.id);
+  @RequireAnyPermission(
+    { module: 'hr', page: 'attendance', action: 'edit' },
+    { module: 'hr', page: 'myAttendance', action: 'view' },
+  )
+  checkOut(
+    @Param('companyId') companyId: string,
+    @Request() req: any,
+    @Body() dto: CheckInDto,
+  ) {
+    return this.attendanceService.checkOut(companyId, req.user.id, dto?.date);
   }
 
   // ==================== Approval ====================

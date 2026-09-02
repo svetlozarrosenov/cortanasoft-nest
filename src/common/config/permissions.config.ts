@@ -583,6 +583,13 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
           },
         ],
       },
+      // „Моите присъствия" (само view) — за работниците: Вход/Изход от
+      // телефона и собствените дни, без достъп до чуждите записи
+      {
+        key: 'myAttendance',
+        labelKey: 'modules.hr.myAttendance',
+        actions: ['view'],
+      },
       {
         key: 'attendance',
         labelKey: 'modules.hr.attendance',

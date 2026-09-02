@@ -51,6 +51,12 @@ export class CreateAttendanceDto {
   @IsOptional()
   userId?: string; // If not provided, defaults to current user
 
+  // Няколко служители наведнъж (бригада на един обект) — има превес над userId
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  userIds?: string[];
+
   @IsDateString()
   @IsOptional()
   checkIn?: string;

@@ -19,6 +19,7 @@ const mockPrisma = {
   },
   userCompany: {
     findFirst: jest.fn(),
+    findMany: jest.fn(),
   },
   site: {
     findFirst: jest.fn(),
@@ -54,7 +55,7 @@ describe('AttendanceService', () => {
     };
 
     it('should create attendance record successfully', async () => {
-      mockPrisma.userCompany.findFirst.mockResolvedValue({ userId: 'u1', companyId: 'c1' });
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1', companyId: 'c1' }]);
       mockPrisma.attendance.findFirst.mockResolvedValue(null);
       mockPrisma.attendance.create.mockResolvedValue({ id: 'a1', ...baseDto });
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1', firstName: 'John', lastName: 'Doe', email: 'j@d.com' });
@@ -65,14 +66,14 @@ describe('AttendanceService', () => {
     });
 
     it('should throw BadRequestException when user is not an employee', async () => {
-      mockPrisma.userCompany.findFirst.mockResolvedValue(null);
+      mockPrisma.userCompany.findMany.mockResolvedValue([]);
 
       await expect(service.create('c1', 'u1', baseDto as any))
         .rejects.toThrow(BadRequestException);
     });
 
     it('should throw ConflictException for duplicate date+site', async () => {
-      mockPrisma.userCompany.findFirst.mockResolvedValue({ userId: 'u1' });
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
       mockPrisma.attendance.findFirst.mockResolvedValue({ id: 'existing' });
 
       await expect(service.create('c1', 'u1', baseDto as any))
@@ -86,7 +87,7 @@ describe('AttendanceService', () => {
         checkOut: '2025-06-15T17:00:00Z',
         breakMinutes: 30,
       };
-      mockPrisma.userCompany.findFirst.mockResolvedValue({ userId: 'u1' });
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
       mockPrisma.attendance.findFirst.mockResolvedValue(null);
       mockPrisma.attendance.create.mockImplementation(({ data }) => Promise.resolve({ id: 'a1', ...data }));
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1' });
@@ -105,7 +106,7 @@ describe('AttendanceService', () => {
         checkOut: '2025-06-15T09:05:00Z',
         breakMinutes: 60,
       };
-      mockPrisma.userCompany.findFirst.mockResolvedValue({ userId: 'u1' });
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
       mockPrisma.attendance.findFirst.mockResolvedValue(null);
       mockPrisma.attendance.create.mockImplementation(({ data }) => Promise.resolve({ id: 'a1', ...data }));
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1' });
@@ -117,7 +118,7 @@ describe('AttendanceService', () => {
     });
 
     it('should use currentUserId when dto.userId is not provided', async () => {
-      mockPrisma.userCompany.findFirst.mockResolvedValue({ userId: 'current-user' });
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'current-user' }]);
       mockPrisma.attendance.findFirst.mockResolvedValue(null);
       mockPrisma.attendance.create.mockImplementation(({ data }) => Promise.resolve({ id: 'a1', ...data }));
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'current-user' });
@@ -126,6 +127,45 @@ describe('AttendanceService', () => {
 
       const createCall = mockPrisma.attendance.create.mock.calls[0][0];
       expect(createCall.data.userId).toBe('current-user');
+    });
+
+    it('should allow a second timed interval on the same day+site', async () => {
+      const dto = { ...baseDto, checkIn: '2025-06-15T13:00:00Z', checkOut: '2025-06-15T17:00:00Z' };
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
+      mockPrisma.attendance.create.mockImplementation(({ data }) => Promise.resolve({ id: 'a2', ...data }));
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1' });
+
+      await service.create('c1', 'u1', dto as any);
+
+      // Дубликат се търси само сред записите БЕЗ часове („цял ден")
+      const where = mockPrisma.attendance.findFirst.mock.calls[0][0].where;
+      expect(where.checkIn).toBeNull();
+      expect(mockPrisma.attendance.create).toHaveBeenCalled();
+    });
+
+    it('should create for several employees at once (userIds)', async () => {
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }, { userId: 'u2' }]);
+      mockPrisma.attendance.findFirst.mockResolvedValue(null);
+      mockPrisma.attendance.create.mockImplementation(({ data }) => Promise.resolve({ id: 'x', ...data }));
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'u' });
+
+      const result = (await service.create('c1', 'me', { ...baseDto, userIds: ['u1', 'u2'] } as any)) as any;
+
+      expect(result).toEqual({ count: 2, users: 2 });
+      const created = mockPrisma.attendance.create.mock.calls.map((c) => c[0].data.userId);
+      expect(created).toEqual(['u1', 'u2']);
+    });
+
+    it('should reject when one of userIds is not an employee', async () => {
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
+
+      await expect(service.create('c1', 'me', { ...baseDto, userIds: ['u1', 'ghost'] } as any))
+        .rejects.toThrow(BadRequestException);
+    });
+
+    it('should store the day as UTC midnight regardless of server timezone', () => {
+      expect(AttendanceService.dayKey('2025-06-15').toISOString()).toBe('2025-06-15T00:00:00.000Z');
     });
   });
 
