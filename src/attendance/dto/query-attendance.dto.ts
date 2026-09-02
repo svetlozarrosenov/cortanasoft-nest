@@ -26,7 +26,7 @@ export class QueryAttendanceDto {
   @IsOptional()
   dateTo?: string;
 
-  // Филтър по обект (за изгледа „кой е бил на обекта"); 'none' = без обект
+  // Филтър по обект (за изгледа „кой е бил на обекта")
   @IsString()
   @IsOptional()
   siteId?: string;

@@ -395,10 +395,7 @@ export class AttendanceService {
       where.type = type;
     }
 
-    // 'none' = записи без обект (за да се намерят и оправят масово)
-    if (query.siteId === 'none') {
-      where.siteId = null;
-    } else if (query.siteId) {
+    if (query.siteId) {
       where.siteId = query.siteId;
     }
 
