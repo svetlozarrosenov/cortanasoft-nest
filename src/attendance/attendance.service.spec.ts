@@ -14,6 +14,7 @@ const mockPrisma = {
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     delete: jest.fn(),
     count: jest.fn(),
   },
@@ -244,6 +245,45 @@ describe('AttendanceService', () => {
       const updateCall = mockPrisma.attendance.update.mock.calls[0][0];
       // 480 - 60 = 420
       expect(updateCall.data.workedMinutes).toBe(420);
+    });
+  });
+
+  describe('bulkUpdate', () => {
+    it('should reject when no fields are given', async () => {
+      await expect(service.bulkUpdate('c1', { ids: ['a1'] } as any)).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject a site from another company', async () => {
+      mockPrisma.site.findFirst.mockResolvedValue(null);
+      await expect(
+        service.bulkUpdate('c1', { ids: ['a1'], siteId: 'foreign' } as any),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.attendance.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('should scope updateMany to the company and only touch given fields', async () => {
+      mockPrisma.site.findFirst.mockResolvedValue({ id: 's1' });
+      mockPrisma.attendance.updateMany.mockResolvedValue({ count: 2 });
+
+      const result = await service.bulkUpdate('c1', { ids: ['a1', 'a2'], siteId: 's1' } as any);
+
+      expect(result).toEqual({ updated: 2 });
+      expect(mockPrisma.attendance.updateMany).toHaveBeenCalledWith({
+        where: { companyId: 'c1', id: { in: ['a1', 'a2'] } },
+        data: { siteId: 's1' },
+      });
+    });
+
+    it('should clear the site when siteId is an empty string', async () => {
+      mockPrisma.attendance.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.bulkUpdate('c1', { ids: ['a1'], siteId: '', status: 'APPROVED' } as any);
+
+      expect(mockPrisma.site.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.attendance.updateMany.mock.calls[0][0].data).toEqual({
+        status: 'APPROVED',
+        siteId: null,
+      });
     });
   });
 

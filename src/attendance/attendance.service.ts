@@ -9,6 +9,7 @@ import {
   CreateAttendanceDto,
   UpdateAttendanceDto,
   QueryAttendanceDto,
+  BulkUpdateAttendanceDto,
 } from './dto';
 import { AttendanceStatus, Prisma } from '@prisma/client';
 import { isWorkingDay } from '../leaves/working-days.util';
@@ -585,6 +586,33 @@ export class AttendanceService {
     });
 
     return { ...updated, user };
+  }
+
+  // Масова редакция — id-та от друга компания просто не се засягат
+  async bulkUpdate(companyId: string, dto: BulkUpdateAttendanceDto) {
+    if (dto.siteId === undefined && dto.status === undefined) {
+      throw new BadRequestException('Няма подадени полета за промяна');
+    }
+
+    if (dto.siteId) {
+      const site = await this.prisma.site.findFirst({
+        where: { id: dto.siteId, companyId },
+        select: { id: true },
+      });
+      if (!site) {
+        throw new BadRequestException('Обектът не е намерен');
+      }
+    }
+
+    const result = await this.prisma.attendance.updateMany({
+      where: { companyId, id: { in: dto.ids } },
+      data: {
+        ...(dto.status !== undefined && { status: dto.status }),
+        ...(dto.siteId !== undefined && { siteId: dto.siteId || null }),
+      },
+    });
+
+    return { updated: result.count };
   }
 
   async approve(companyId: string, id: string, approverId: string) {

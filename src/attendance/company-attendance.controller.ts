@@ -19,6 +19,7 @@ import {
   UpdateAttendanceDto,
   QueryAttendanceDto,
   CheckInDto,
+  BulkUpdateAttendanceDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -180,6 +181,16 @@ export class CompanyAttendanceController {
       'Content-Disposition': `attachment; filename="attendance-${new Date().toISOString().slice(0, 10)}.${ext}"`,
     });
     return new StreamableFile(buffer);
+  }
+
+  // Масова редакция (обект / статус) — преди ':id', за да не го засенчи
+  @Patch('bulk')
+  @RequireEdit('hr', 'attendance')
+  bulkUpdate(
+    @Param('companyId') companyId: string,
+    @Body() dto: BulkUpdateAttendanceDto,
+  ) {
+    return this.attendanceService.bulkUpdate(companyId, dto);
   }
 
   @Get(':id')
