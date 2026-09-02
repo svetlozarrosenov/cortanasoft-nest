@@ -483,6 +483,31 @@ describe('AttendanceService', () => {
       expect(mockPrisma.leave.findMany).not.toHaveBeenCalled();
     });
 
+    it("filters records without a site when siteId is 'none'", async () => {
+      mockPrisma.attendance.count.mockResolvedValue(0);
+      mockPrisma.attendance.findMany.mockResolvedValue([]);
+      mockPrisma.user.findMany.mockResolvedValue([]);
+      await service.findAll('c1', { siteId: 'none', page: 1, limit: 10 } as any);
+      expect(mockPrisma.attendance.findMany.mock.calls[0][0].where.siteId).toBeNull();
+      expect(mockPrisma.leave.findMany).not.toHaveBeenCalled();
+    });
+
+    it('summarises working/non-working records over the whole filter, not the page', async () => {
+      mockPrisma.attendance.count.mockResolvedValue(3);
+      // първата заявка = страницата, втората = всички дати за обобщението
+      mockPrisma.attendance.findMany
+        .mockResolvedValueOnce([{ id: 'a1', userId: 'u1', date: new Date('2025-06-16T00:00:00Z') }])
+        .mockResolvedValueOnce([
+          { date: new Date('2025-06-16T00:00:00Z') },
+          { date: new Date('2025-06-14T00:00:00Z') },
+          { date: new Date('2025-12-25T00:00:00Z') },
+        ]);
+      mockPrisma.user.findMany.mockResolvedValue([]);
+      const result = await service.findAll('c1', { page: 1, limit: 1 } as any);
+      expect(result.meta.workingDayRecords).toBe(1);
+      expect(result.meta.nonWorkingDayRecords).toBe(2);
+    });
+
     it('should filter by date range', async () => {
       mockPrisma.attendance.count.mockResolvedValue(0);
       mockPrisma.attendance.findMany.mockResolvedValue([]);

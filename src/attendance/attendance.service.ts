@@ -395,7 +395,10 @@ export class AttendanceService {
       where.type = type;
     }
 
-    if (query.siteId) {
+    // 'none' = записи без обект (за да се намерят и оправят масово)
+    if (query.siteId === 'none') {
+      where.siteId = null;
+    } else if (query.siteId) {
       where.siteId = query.siteId;
     }
 
@@ -409,7 +412,8 @@ export class AttendanceService {
       }
     }
 
-    const [total, attendances] = await Promise.all([
+    // Обобщението (работни/почивни дни) е за целия филтър, не за страницата
+    const [total, attendances, allDates] = await Promise.all([
       this.prisma.attendance.count({ where }),
       this.prisma.attendance.findMany({
         where,
@@ -418,7 +422,9 @@ export class AttendanceService {
         take: limit,
         include: { site: { select: { id: true, name: true } } },
       }),
+      this.prisma.attendance.findMany({ where, select: { date: true } }),
     ]);
+    const nonWorkingDayRecords = allDates.filter((a) => !isWorkingDay(a.date)).length;
 
     // Enrich with user data
     const userIds = [...new Set(attendances.map((a) => a.userId))];
@@ -470,6 +476,8 @@ export class AttendanceService {
         page,
         limit,
         totalPages: Math.ceil(total / limit),
+        workingDayRecords: total - nonWorkingDayRecords,
+        nonWorkingDayRecords,
       },
     };
   }
