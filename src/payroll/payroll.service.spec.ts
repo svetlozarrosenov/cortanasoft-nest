@@ -2,8 +2,14 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { PayrollService } from './payroll.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { HrSettingsService } from '../hr-settings/hr-settings.service';
+
+const mockHrSettings = { getWorkDayHours: jest.fn().mockResolvedValue(8) };
 
 const mockPrisma = {
+  attendance: { findMany: jest.fn() },
+  leave: { findMany: jest.fn() },
+  employmentContract: { findFirst: jest.fn() },
   payroll: {
     findFirst: jest.fn(),
     findMany: jest.fn(),
@@ -36,6 +42,7 @@ describe('PayrollService', () => {
       providers: [
         PayrollService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: HrSettingsService, useValue: mockHrSettings },
       ],
     }).compile();
     service = module.get<PayrollService>(PayrollService);
@@ -240,6 +247,74 @@ describe('PayrollService', () => {
       const result = await service.getSummary('c1', 2026);
       expect(result.totalRecords).toBe(0);
       expect(result.totalGrossSalary).toBe(0);
+    });
+  });
+
+  describe('suggest', () => {
+    const d = (day: number) => new Date(Date.UTC(2026, 8, day));
+
+    beforeEach(() => {
+      mockHrSettings.getWorkDayHours.mockResolvedValue(8);
+      mockPrisma.payroll.findFirst.mockResolvedValue(null);
+      mockPrisma.employmentContract.findFirst.mockResolvedValue(null);
+      mockPrisma.leave.findMany.mockResolvedValue([]);
+      mockPrisma.attendance.findMany.mockResolvedValue([]);
+    });
+
+    it('rejects a non-member', async () => {
+      mockPrisma.userCompany.findFirst.mockResolvedValue(null);
+      await expect(service.suggest('c1', 'u1', 2026, 9)).rejects.toThrow(BadRequestException);
+    });
+
+    it('counts a day once even with records on two sites and prices it by daily rate', async () => {
+      mockPrisma.userCompany.findFirst.mockResolvedValue({ hourlyRate: 12.5, position: { hourlyRate: 10 } });
+      mockPrisma.attendance.findMany.mockResolvedValue([
+        { date: d(1) }, { date: d(1) }, { date: d(2) }, { date: d(3) },
+      ]);
+      const r = await service.suggest('c1', 'u1', 2026, 9);
+      // Септември 2026: 22 делника − 7.09 (пренесен от неделя 6.09) − 22.09 = 20
+      expect(r.workingDays).toBe(20);
+      expect(r.workedDays).toBe(3);
+      expect(r.dailyRate).toBe(100);
+      expect(r.baseSalary).toBe(300);
+      expect(r.source).toBe('attendance');
+    });
+
+    it('falls back to position rate, then to the contract (latest annex wins)', async () => {
+      mockPrisma.userCompany.findFirst.mockResolvedValue({ hourlyRate: null, position: { hourlyRate: 10 } });
+      mockPrisma.attendance.findMany.mockResolvedValue([{ date: d(1) }]);
+      let r = await service.suggest('c1', 'u1', 2026, 9);
+      expect(r.dailyRate).toBe(80);
+      expect(r.baseSalary).toBe(80);
+
+      mockPrisma.userCompany.findFirst.mockResolvedValue({ hourlyRate: null, position: null });
+      mockPrisma.employmentContract.findFirst.mockResolvedValue({ salary: 2000, annexes: [{ newSalary: 2400 }] });
+      r = await service.suggest('c1', 'u1', 2026, 9);
+      expect(r.dailyRate).toBeNull();
+      expect(r.contractSalary).toBe(2400);
+      expect(r.baseSalary).toBe(2400);
+      expect(r.source).toBe('contract');
+    });
+
+    it('splits approved leaves by type over working days only', async () => {
+      mockPrisma.userCompany.findFirst.mockResolvedValue({ hourlyRate: null, position: null });
+      mockPrisma.leave.findMany.mockResolvedValue([
+        // пт 4.09 → пн 7.09 (7.09 е почивен заради пренесения 6.09): само 4.09 се брои
+        { type: 'ANNUAL', startDate: d(4), endDate: d(7), halfDay: false },
+        { type: 'SICK', startDate: d(10), endDate: d(10), halfDay: true },
+        { type: 'UNPAID', startDate: d(14), endDate: d(15), halfDay: false },
+      ]);
+      const r = await service.suggest('c1', 'u1', 2026, 9);
+      expect(r.leaveDays).toEqual({ vacation: 1, sick: 0.5, unpaid: 2, other: 0 });
+      expect(r.baseSalary).toBeNull();
+      expect(r.source).toBeNull();
+    });
+
+    it('reports an existing non-cancelled payroll for the period', async () => {
+      mockPrisma.userCompany.findFirst.mockResolvedValue({ hourlyRate: null, position: null });
+      mockPrisma.payroll.findFirst.mockResolvedValue({ id: 'p1', status: 'DRAFT' });
+      const r = await service.suggest('c1', 'u1', 2026, 9);
+      expect(r.existing).toEqual({ id: 'p1', status: 'DRAFT' });
     });
   });
 });

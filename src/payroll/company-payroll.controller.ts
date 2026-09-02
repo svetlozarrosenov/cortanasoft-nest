@@ -66,6 +66,23 @@ export class CompanyPayrollController {
     );
   }
 
+  // Предложение за формата (дни от присъствия/отсъствия, ставка, основна) — не записва
+  @Get('suggest')
+  @RequireCreate('hr', 'payroll')
+  suggest(
+    @Param('companyId') companyId: string,
+    @Query('userId') userId: string,
+    @Query('year') year: string,
+    @Query('month') month: string,
+  ) {
+    return this.payrollService.suggest(
+      companyId,
+      userId,
+      parseInt(year),
+      parseInt(month),
+    );
+  }
+
   @Get('export')
   @RequireView('hr', 'payroll')
   async export(

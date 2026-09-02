@@ -5,12 +5,131 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { HrSettingsService } from '../hr-settings/hr-settings.service';
+import { isWorkingDay } from '../leaves/working-days.util';
 import { CreatePayrollDto, UpdatePayrollDto, QueryPayrollDto } from './dto';
 import { PayrollStatus } from '@prisma/client';
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 @Injectable()
 export class PayrollService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private hrSettings: HrSettingsService,
+  ) {}
+
+  /**
+   * Предложение за ведомост от вече въведените данни — същата логика като
+   * попъпа „За плащане" в HR › Присъствие: отработени дни (дни със запис,
+   * без значение на колко обекта) × дневна ставка (лична ?? позиция × часове
+   * в работен ден). Без ставка → основната от активния трудов договор.
+   * Нищо не се записва; формата го показва като предложение за редакция.
+   */
+  async suggest(companyId: string, userId: string, year: number, month: number) {
+    if (!year || !month || month < 1 || month > 12) {
+      throw new BadRequestException('Невалиден период');
+    }
+    const from = new Date(Date.UTC(year, month - 1, 1));
+    const to = new Date(Date.UTC(year, month, 0));
+
+    const [member, attendances, leaves, contract, existing, workDayHours] =
+      await Promise.all([
+        this.prisma.userCompany.findFirst({
+          where: { userId, companyId },
+          select: { hourlyRate: true, position: { select: { hourlyRate: true } } },
+        }),
+        this.prisma.attendance.findMany({
+          where: { companyId, userId, date: { gte: from, lte: to } },
+          select: { date: true },
+        }),
+        this.prisma.leave.findMany({
+          where: {
+            companyId,
+            userId,
+            status: 'APPROVED',
+            startDate: { lte: to },
+            endDate: { gte: from },
+          },
+          select: { type: true, startDate: true, endDate: true, halfDay: true },
+        }),
+        // Действащ (или изменен с анекс) договор — последният анекс със заплата печели
+        this.prisma.employmentContract.findFirst({
+          where: { companyId, userId, status: { in: ['ACTIVE', 'AMENDED'] } },
+          orderBy: { startDate: 'desc' },
+          select: {
+            salary: true,
+            annexes: {
+              where: { newSalary: { not: null }, effectiveDate: { lte: to } },
+              orderBy: { effectiveDate: 'desc' },
+              take: 1,
+              select: { newSalary: true },
+            },
+          },
+        }),
+        this.prisma.payroll.findFirst({
+          where: { companyId, userId, year, month, status: { not: 'CANCELLED' } },
+          select: { id: true, status: true },
+        }),
+        this.hrSettings.getWorkDayHours(companyId),
+      ]);
+
+    if (!member) {
+      throw new BadRequestException('User is not an employee of this company');
+    }
+
+    let workingDays = 0;
+    const days: Date[] = [];
+    for (let d = new Date(from); d <= to; d = new Date(d.getTime() + 86400000)) {
+      days.push(d);
+      if (isWorkingDay(d)) workingDays++;
+    }
+
+    const workedDays = new Set(
+      attendances.map((a) => a.date.toISOString().slice(0, 10)),
+    ).size;
+
+    // Отсъствия само в работни дни на месеца (отпуските могат да минават границата)
+    const leaveDays = { vacation: 0, sick: 0, unpaid: 0, other: 0 };
+    for (const d of days) {
+      if (!isWorkingDay(d)) continue;
+      const l = leaves.find((x) => x.startDate <= d && x.endDate >= d);
+      if (!l) continue;
+      const w = l.halfDay ? 0.5 : 1;
+      if (l.type === 'ANNUAL') leaveDays.vacation += w;
+      else if (l.type === 'SICK') leaveDays.sick += w;
+      else if (l.type === 'UNPAID') leaveDays.unpaid += w;
+      else leaveDays.other += w;
+    }
+
+    const hourlyRate = member.hourlyRate ?? member.position?.hourlyRate ?? null;
+    const dailyRate = hourlyRate != null ? round2(Number(hourlyRate) * workDayHours) : null;
+    const contractAmount = contract?.annexes[0]?.newSalary ?? contract?.salary ?? null;
+    const contractSalary = contractAmount != null ? Number(contractAmount) : null;
+
+    let baseSalary: number | null = null;
+    let source: 'attendance' | 'contract' | null = null;
+    if (dailyRate != null) {
+      baseSalary = round2(workedDays * dailyRate);
+      source = 'attendance';
+    } else if (contractSalary != null) {
+      baseSalary = contractSalary;
+      source = 'contract';
+    }
+
+    return {
+      workingDays,
+      workedDays,
+      leaveDays,
+      workDayHours,
+      hourlyRate: hourlyRate != null ? Number(hourlyRate) : null,
+      dailyRate,
+      contractSalary,
+      baseSalary,
+      source,
+      existing,
+    };
+  }
 
   private calculateSalaries(data: {
     baseSalary: number;
