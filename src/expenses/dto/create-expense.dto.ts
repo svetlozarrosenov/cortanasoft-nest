@@ -7,7 +7,6 @@ import {
   IsNotEmpty,
   IsEnum,
   IsBoolean,
-  IsArray,
 } from 'class-validator';
 import { ExpenseCategory, ExpenseStatus } from '@prisma/client';
 
@@ -72,13 +71,4 @@ export class CreateExpenseDto {
   @IsOptional()
   siteId?: string;
 
-  @IsString()
-  @IsOptional()
-  locationId?: string;
-
-  // Кой направи разхода — user id-та; имената се snapshot-ват в сървиса
-  @IsArray()
-  @IsString({ each: true })
-  @IsOptional()
-  crewMemberIds?: string[];
 }

@@ -22,34 +22,6 @@ export class ExpensesService {
     }
   }
 
-  // Локацията/бусът трябва да е на същата компания
-  private async assertLocationInCompany(companyId: string, locationId: string) {
-    const location = await this.prisma.location.findFirst({
-      where: { id: locationId, companyId },
-      select: { id: true },
-    });
-    if (!location) {
-      throw new NotFoundException('Локацията не е намерена');
-    }
-  }
-
-  // Разрешава подадените user id-та до snapshot-и с имена. Пропуска id-та,
-  // които не са членове на компанията — екипът не може да сочи навън.
-  private async resolveCrewMembers(companyId: string, userIds: string[]) {
-    if (userIds.length === 0) return [];
-    const memberships = await this.prisma.userCompany.findMany({
-      where: { companyId, userId: { in: userIds } },
-      select: {
-        user: { select: { id: true, firstName: true, lastName: true } },
-      },
-    });
-    return memberships.map((m) => ({
-      userId: m.user.id,
-      firstName: m.user.firstName,
-      lastName: m.user.lastName,
-    }));
-  }
-
   async create(companyId: string, userId: string, dto: CreateExpenseDto) {
     const amount = dto.amount;
     const vatAmount = dto.vatAmount || 0;
@@ -58,12 +30,6 @@ export class ExpensesService {
     if (dto.siteId) {
       await this.assertSiteInCompany(companyId, dto.siteId);
     }
-    if (dto.locationId) {
-      await this.assertLocationInCompany(companyId, dto.locationId);
-    }
-    const crewData = dto.crewMemberIds
-      ? await this.resolveCrewMembers(companyId, dto.crewMemberIds)
-      : [];
 
     return this.prisma.expense.create({
       data: {
@@ -84,17 +50,11 @@ export class ExpensesService {
         companyId,
         supplierId: dto.supplierId,
         siteId: dto.siteId || undefined,
-        locationId: dto.locationId || undefined,
-        ...(crewData.length > 0 && { crewMembers: { create: crewData } }),
         createdById: userId,
       },
       include: {
         supplier: true,
         site: { select: { id: true, name: true } },
-        location: { select: { id: true, name: true, type: true } },
-        crewMembers: {
-          select: { userId: true, firstName: true, lastName: true },
-        },
         createdBy: {
           select: {
             id: true,
@@ -174,10 +134,6 @@ export class ExpensesService {
         include: {
           supplier: true,
           site: { select: { id: true, name: true } },
-          location: { select: { id: true, name: true, type: true } },
-          crewMembers: {
-            select: { userId: true, firstName: true, lastName: true },
-          },
           createdBy: {
             select: {
               id: true,
@@ -225,10 +181,6 @@ export class ExpensesService {
       include: {
         supplier: true,
         site: { select: { id: true, name: true } },
-        location: { select: { id: true, name: true, type: true } },
-        crewMembers: {
-          select: { userId: true, firstName: true, lastName: true },
-        },
         createdBy: {
           select: {
             id: true,
@@ -310,27 +262,6 @@ export class ExpensesService {
       }
     }
 
-    if (dto.locationId !== undefined) {
-      if (dto.locationId) {
-        await this.assertLocationInCompany(companyId, dto.locationId);
-        updateData.location = { connect: { id: dto.locationId } };
-      } else {
-        updateData.location = { disconnect: true };
-      }
-    }
-
-    // Изричен списък = замяна на екипа; празен масив изчиства избора
-    if (dto.crewMemberIds !== undefined) {
-      const crewData = await this.resolveCrewMembers(
-        companyId,
-        dto.crewMemberIds,
-      );
-      updateData.crewMembers = {
-        deleteMany: {},
-        ...(crewData.length > 0 && { create: crewData }),
-      };
-    }
-
     if (dto.approvedById !== undefined) {
       if (dto.approvedById) {
         updateData.approvedBy = { connect: { id: dto.approvedById } };
@@ -344,10 +275,6 @@ export class ExpensesService {
       include: {
         supplier: true,
         site: { select: { id: true, name: true } },
-        location: { select: { id: true, name: true, type: true } },
-        crewMembers: {
-          select: { userId: true, firstName: true, lastName: true },
-        },
         createdBy: {
           select: {
             id: true,

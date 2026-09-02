@@ -45,12 +45,6 @@ export class UpdateOrderDto {
   @IsOptional()
   siteId?: string;
 
-  // Изричен екип по поръчката; подаден масив = замяна, празен = изчистване
-  @IsArray()
-  @IsString({ each: true })
-  @IsOptional()
-  crewMemberIds?: string[];
-
   @IsString()
   @IsOptional()
   customerName?: string;

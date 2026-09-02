@@ -16,7 +16,6 @@ import {
   QueryLocationsDto,
   CreateStorageZoneDto,
   UpdateStorageZoneDto,
-  SetLocationMembersDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -26,18 +25,7 @@ import {
   RequireCreate,
   RequireEdit,
   RequireDelete,
-  RequireAnyPermission,
 } from '../common/guards/permissions.guard';
-
-// Локациите обслужват и страницата „Превозни средства" (бусове = Location с
-// type VEHICLE, собствено право sites.vehicles — модул „Обекти") — CRUD/екип
-// endpoint-ите приемат което и да е от двете права. Складовите зони остават
-// само locations.
-const anyLocationPerm = (action: 'view' | 'create' | 'edit' | 'delete') =>
-  RequireAnyPermission(
-    { module: 'warehouse', page: 'locations', action },
-    { module: 'sites', page: 'vehicles', action },
-  );
 
 @Controller('companies/:companyId/locations')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)
@@ -47,7 +35,7 @@ export class CompanyLocationsController {
   // ==================== LOCATION ENDPOINTS ====================
 
   @Post()
-  @anyLocationPerm('create')
+  @RequireCreate('warehouse', 'locations')
   create(
     @Param('companyId') companyId: string,
     @Body() dto: CreateLocationDto,
@@ -56,7 +44,7 @@ export class CompanyLocationsController {
   }
 
   @Get()
-  @anyLocationPerm('view')
+  @RequireView('warehouse', 'locations')
   findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryLocationsDto,
@@ -65,13 +53,13 @@ export class CompanyLocationsController {
   }
 
   @Get(':id')
-  @anyLocationPerm('view')
+  @RequireView('warehouse', 'locations')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.locationsService.findOne(companyId, id);
   }
 
   @Patch(':id')
-  @anyLocationPerm('edit')
+  @RequireEdit('warehouse', 'locations')
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -81,20 +69,9 @@ export class CompanyLocationsController {
   }
 
   @Delete(':id')
-  @anyLocationPerm('delete')
+  @RequireDelete('warehouse', 'locations')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.locationsService.remove(companyId, id);
-  }
-
-  // Екип на локацията (бус) — заменя списъка със зачислени служители
-  @Patch(':id/members')
-  @anyLocationPerm('edit')
-  setMembers(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-    @Body() dto: SetLocationMembersDto,
-  ) {
-    return this.locationsService.setMembers(companyId, id, dto.userIds);
   }
 
   // ==================== STORAGE ZONE ENDPOINTS ====================

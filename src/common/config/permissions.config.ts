@@ -363,10 +363,10 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
     ],
   },
   {
-    // „Обекти" — теренният домейн (обекти на клиенти + бусове с екипи),
-    // собствен модул, огледален на секцията в сайдбара. Ключовете бяха
-    // erp.sites / warehouse.vehicles; старите записи в ролите се игнорират
-    // от normalizePermissions — правата се дават наново през редактора.
+    // „Обекти" — обекти на клиенти (ферми/площадки) с P&L по обект,
+    // собствен модул, огледален на секцията в сайдбара. Ключът беше
+    // erp.sites; старите записи в ролите се игнорират от
+    // normalizePermissions — правата се дават наново през редактора.
     key: 'sites',
     labelKey: 'modules.erp.sites.title',
     icon: 'MapPin',
@@ -388,14 +388,6 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
             ],
           },
         ],
-      },
-      {
-        // Превозни средства (бусове) — отделен изглед върху Location(VEHICLE).
-        // Собствено право, за да е opt-in per роля (складов клиент без монтажни
-        // екипи не бива да вижда менюто).
-        key: 'vehicles',
-        labelKey: 'modules.warehouse.vehicles',
-        actions: ['view', 'create', 'edit', 'delete'],
       },
     ],
   },

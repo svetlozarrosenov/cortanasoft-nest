@@ -24,10 +24,6 @@ function round2(n: number): number {
 
 const ORDER_INCLUDE = {
   location: true,
-  // Изричен екип по поръчката (или snapshot от буса при SHIPPED/DELIVERED)
-  crewMembers: {
-    select: { userId: true, firstName: true, lastName: true },
-  },
   // referredBy — за бързия преглед на поръчка (партньорска атрибуция)
   customer: {
     include: {
@@ -270,11 +266,6 @@ export class OrdersService {
       }
     }
 
-    // Изричен екип по поръчката (имената се snapshot-ват веднага)
-    const crewData = dto.crewMemberIds
-      ? await this.resolveCrewMembers(companyId, dto.crewMemberIds)
-      : [];
-
     // Use company currency as default
     const currencyId = dto.currencyId || company.currencyId;
 
@@ -334,7 +325,6 @@ export class OrdersService {
           items: {
             create: itemsData,
           },
-          ...(crewData.length > 0 && { crewMembers: { create: crewData } }),
         },
         include: ORDER_INCLUDE,
       });
@@ -684,20 +674,6 @@ export class OrdersService {
       }
     }
 
-    // Изричен екип: подаден масив = замяна на състава, празен = изчистване,
-    // undefined = не се пипа (и snapshot fallback-ът при SHIPPED си остава)
-    let crewUpdate: Prisma.OrderUpdateInput['crewMembers'];
-    if (dto.crewMemberIds !== undefined) {
-      const crewData = await this.resolveCrewMembers(
-        companyId,
-        dto.crewMemberIds,
-      );
-      crewUpdate = {
-        deleteMany: {},
-        ...(crewData.length > 0 && { create: crewData }),
-      };
-    }
-
     // Status change
     if (dto.status && dto.status !== order.status) {
       // Анулирана поръчка е терминална за директни смени: cancel() е върнал
@@ -746,16 +722,6 @@ export class OrdersService {
         },
         include: ORDER_INCLUDE,
       });
-
-      // Snapshot на екипа при първия преход към SHIPPED/DELIVERED — съставът
-      // на буса се записва такъв, какъвто е в момента на изпълнението.
-      if (dto.status === 'SHIPPED' || dto.status === 'DELIVERED') {
-        try {
-          await this.snapshotOrderCrew(id, order.locationId);
-        } catch {
-          // Non-blocking: snapshot failure should not block the status flip.
-        }
-      }
 
       // Issue warranties on DELIVERED — this is when the customer actually
       // takes possession of the goods, so it's the correct moment to start
@@ -933,7 +899,6 @@ export class OrdersService {
             ...(dto.paymentStatus === 'REFUNDED' && { paymentStatus: 'REFUNDED' as const }),
             ...(dto.locationId && { locationId: dto.locationId }),
             ...(dto.notes !== undefined && { notes: dto.notes }),
-            ...(crewUpdate && { crewMembers: crewUpdate }),
             shippingCost,
             discount: orderDiscount,
             subtotal,
@@ -1088,7 +1053,6 @@ export class OrdersService {
         ...(dto.shippingCost !== undefined && { shippingCost: dto.shippingCost }),
         ...(dto.discount !== undefined && { discount: dto.discount }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
-        ...(crewUpdate && { crewMembers: crewUpdate }),
       },
       include: ORDER_INCLUDE,
     });
@@ -1137,58 +1101,6 @@ export class OrdersService {
         inventoryBatchId: a.batchId,
         batchNumber: a.batchNumber,
         quantity: a.quantity,
-      })),
-    });
-  }
-
-  // Разрешава подадените user id-та до snapshot-и с имена. Пропуска id-та,
-  // които не са членове на компанията — екипът не може да сочи навън.
-  private async resolveCrewMembers(companyId: string, userIds: string[]) {
-    if (userIds.length === 0) return [];
-    const memberships = await this.prisma.userCompany.findMany({
-      where: { companyId, userId: { in: userIds } },
-      select: {
-        user: { select: { id: true, firstName: true, lastName: true } },
-      },
-    });
-    return memberships.map((m) => ({
-      userId: m.user.id,
-      firstName: m.user.firstName,
-      lastName: m.user.lastName,
-    }));
-  }
-
-  // Snapshot на екипа на буса към момента на изпълнение. Идемпотентно:
-  // веднъж записан, съставът не се презаписва при повторни преходи.
-  private async snapshotOrderCrew(orderId: string, locationId: string | null) {
-    if (!locationId) return;
-
-    const existing = await this.prisma.orderCrewMember.count({
-      where: { orderId },
-    });
-    if (existing > 0) return;
-
-    const location = await this.prisma.location.findUnique({
-      where: { id: locationId },
-      select: {
-        type: true,
-        members: {
-          include: {
-            user: { select: { id: true, firstName: true, lastName: true } },
-          },
-        },
-      },
-    });
-    if (!location || location.type !== 'VEHICLE' || location.members.length === 0) {
-      return;
-    }
-
-    await this.prisma.orderCrewMember.createMany({
-      data: location.members.map((member) => ({
-        orderId,
-        userId: member.user.id,
-        firstName: member.user.firstName,
-        lastName: member.user.lastName,
       })),
     });
   }

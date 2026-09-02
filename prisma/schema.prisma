@@ -565,11 +565,6 @@ model User {
   receivedStockTransfers    StockTransfer[] @relation("StockTransferReceivedBy")
   createdStockTransfers     StockTransfer[] @relation("StockTransferCreator")
 
-  // Екипи на локации (бусове)
-  locationMemberships LocationMember[]    @relation("LocationMemberUser")
-  orderCrewSnapshots  OrderCrewMember[]   @relation("OrderCrewUser")
-  expenseCrewEntries  ExpenseCrewMember[] @relation("ExpenseCrewUser")
-
   // Гаранции
   createdWarrantyTemplates WarrantyTemplate[] @relation("WarrantyTemplateCreator")
 
@@ -789,9 +784,9 @@ enum AttendanceType {
 // Статус на присъствие
 // Присъствие на служител
 model Attendance {
-  id     String           @id @default(cuid())
-  date   DateTime         @db.Date // Дата на присъствието
-  type   AttendanceType   @default(REGULAR)
+  id   String         @id @default(cuid())
+  date DateTime       @db.Date // Дата на присъствието
+  type AttendanceType @default(REGULAR)
 
   // Време на работа
   checkIn      DateTime? // Час на влизане
@@ -992,7 +987,6 @@ enum StockTransferStatus {
 enum LocationType {
   WAREHOUSE // Склад
   STORE // Магазин
-  VEHICLE // Превозно средство (бус на монтажен екип — мобилен склад)
 }
 
 // Категория продукти
@@ -1180,7 +1174,6 @@ model Location {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   storageZones        StorageZone[]
-  members             LocationMember[]
   goodsReceipts       GoodsReceipt[]
   inventoryBatches    InventoryBatch[]
   inventorySerials    InventorySerial[]
@@ -1190,7 +1183,6 @@ model Location {
   productionIssuances ProductionMaterialIssuance[] @relation("IssuanceLocation")
   stockTransfersFrom  StockTransfer[]              @relation("StockTransferFrom")
   stockTransfersTo    StockTransfer[]              @relation("StockTransferTo")
-  expenses            Expense[]
 
   @@unique([companyId, code])
   @@map("locations")
@@ -1214,25 +1206,6 @@ model StorageZone {
 
   @@unique([locationId, code])
   @@map("storage_zones")
-}
-
-// Екип на локация — кой служител е зачислен към коя локация. Използва се
-// основно за бусове (VEHICLE): кой монтажник с кой бус се движи. Many-to-many,
-// защото хората се местят между бусове.
-model LocationMember {
-  id String @id @default(cuid())
-
-  locationId String
-  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation("LocationMemberUser", fields: [userId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-
-  @@unique([locationId, userId])
-  @@index([userId])
-  @@map("location_members")
 }
 
 // ==================== ПРИЕМАНЕ НА СТОКА ====================
@@ -1840,7 +1813,6 @@ model Order {
   issuedWarranties    IssuedWarranty[]
   payments            Payment[]
   creditApplication   CreditApplication?
-  crewMembers         OrderCrewMember[]
 
   @@unique([companyId, orderNumber])
   @@unique([companyId, externalId])
@@ -1849,30 +1821,6 @@ model Order {
   @@index([companyId, partnerCustomerId])
   @@index([siteId])
   @@map("orders")
-}
-
-// Snapshot на екипа, изпълнил поръчката. Пълни се при първия преход към
-// SHIPPED/DELIVERED от екипа (LocationMember) на буса на поръчката към ТОЗИ
-// момент — съставите на бусовете се менят, а отчетът „кой е работил на
-// обекта" трябва да остане исторически верен. Имената са дублирани, за да
-// преживее записът изтриване на потребителя.
-model OrderCrewMember {
-  id String @id @default(cuid())
-
-  orderId String
-  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
-
-  userId String?
-  user   User?   @relation("OrderCrewUser", fields: [userId], references: [id], onDelete: SetNull)
-
-  firstName String
-  lastName  String
-
-  createdAt DateTime @default(now())
-
-  @@index([orderId])
-  @@index([userId])
-  @@map("order_crew_members")
 }
 
 // Ред от клиентска поръчка
@@ -3176,13 +3124,6 @@ model Expense {
   siteId String?
   site   Site?   @relation(fields: [siteId], references: [id], onDelete: SetNull)
 
-  // Локация/бус, чийто екип е направил разхода. Опционално.
-  locationId String?
-  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
-
-  // Изричен избор „кой направи разхода" (с/без бус)
-  crewMembers ExpenseCrewMember[]
-
   // Създател
   createdById String?
   createdBy   User?   @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -3203,30 +3144,7 @@ model Expense {
   @@index([companyId, status])
   @@index([companyId, expenseDate])
   @@index([siteId])
-  @@index([locationId])
   @@map("expenses")
-}
-
-// Кой направи разхода — изричен избор на хора към разход (с подразбиране от
-// екипа на буса в UI-а). Имената са дублирани, за да преживеят изтрит
-// потребител — същият патърн като OrderCrewMember.
-model ExpenseCrewMember {
-  id String @id @default(cuid())
-
-  expenseId String
-  expense   Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
-
-  userId String?
-  user   User?   @relation("ExpenseCrewUser", fields: [userId], references: [id], onDelete: SetNull)
-
-  firstName String
-  lastName  String
-
-  createdAt DateTime @default(now())
-
-  @@index([expenseId])
-  @@index([userId])
-  @@map("expense_crew_members")
 }
 
 // Прикачени документи (фактури, CMR, сертификати и др.)

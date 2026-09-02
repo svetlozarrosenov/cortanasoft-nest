@@ -76,13 +76,6 @@ export class CreateOrderDto {
   @IsOptional()
   siteId?: string;
 
-  // Изричен екип по поръчката (user id-та); подразбирането в UI-а е
-  // текущият състав на избрания бус, но списъкът е свободно редактируем
-  @IsArray()
-  @IsString({ each: true })
-  @IsOptional()
-  crewMemberIds?: string[];
-
   @IsString()
   customerName: string;
 
