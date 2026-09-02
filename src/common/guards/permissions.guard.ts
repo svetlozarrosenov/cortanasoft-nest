@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PrismaService } from '../../prisma/prisma.service';
-import { RolePermissions } from '../config/permissions.config';
+import { PERMISSIONS_CONFIG, RolePermissions } from '../config/permissions.config';
 import { ErrorMessages } from '../constants/error-messages';
 
 // Metadata key for permissions
@@ -104,11 +104,7 @@ export class PermissionsGuard implements CanActivate {
     if (requiredPermissions) {
       for (const required of requiredPermissions) {
         if (!this.hasPermission(permissions, required)) {
-          throw new ForbiddenException(
-            ErrorMessages.common.missingPermission(
-              `${required.module}.${required.page}.${required.action}`,
-            ),
-          );
+          throw PermissionsGuard.missingPermission([required]);
         }
       }
     }
@@ -119,17 +115,35 @@ export class PermissionsGuard implements CanActivate {
         this.hasPermission(permissions, req),
       );
       if (!hasAny) {
-        throw new ForbiddenException(
-          ErrorMessages.common.missingPermission(
-            anyPermissions
-              .map((r) => `${r.module}.${r.page}.${r.action}`)
-              .join(' | '),
-          ),
-        );
+        throw PermissionsGuard.missingPermission(anyPermissions);
       }
     }
 
     return true;
+  }
+
+  // 403 с човешко съобщение + структурирани детайли, за да може клиентът да
+  // го преведе („Нямате право да изтривате Присъствие") и да насочи към
+  // Администрация → Роли. labelKey-овете са i18n ключовете от конфигурацията.
+  static missingPermission(required: PermissionRequirement[]) {
+    const details = required.map((r) => {
+      const mod = PERMISSIONS_CONFIG.find((m) => m.key === r.module);
+      const page = mod?.pages.find((p) => p.key === r.page);
+      return {
+        module: r.module,
+        page: r.page,
+        action: r.action,
+        moduleLabelKey: mod?.labelKey ?? null,
+        pageLabelKey: page?.labelKey ?? null,
+      };
+    });
+    return new ForbiddenException({
+      message: ErrorMessages.common.missingPermission(
+        required.map((r) => `${r.module}.${r.page}.${r.action}`).join(' | '),
+      ),
+      code: 'MISSING_PERMISSION',
+      details: { required: details },
+    });
   }
 
   private hasPermission(

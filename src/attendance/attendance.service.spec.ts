@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { HrSettingsService } from '../hr-settings/hr-settings.service';
 
 const mockPrisma = {
   attendance: {
@@ -33,6 +34,9 @@ const mockPrisma = {
     findUnique: jest.fn(),
     findMany: jest.fn(),
   },
+  payroll: {
+    findMany: jest.fn(),
+  },
 };
 
 describe('AttendanceService', () => {
@@ -42,10 +46,12 @@ describe('AttendanceService', () => {
     jest.clearAllMocks();
     mockPrisma.leave.findFirst.mockResolvedValue(null);
     mockPrisma.leave.findMany.mockResolvedValue([]);
+    mockPrisma.payroll.findMany.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AttendanceService,
         { provide: PrismaService, useValue: mockPrisma },
+        { provide: HrSettingsService, useValue: { getWorkDayHours: jest.fn().mockResolvedValue(8) } },
       ],
     }).compile();
     service = module.get<AttendanceService>(AttendanceService);
@@ -418,6 +424,84 @@ describe('AttendanceService', () => {
       const result = await service.getTodayStatus('c1', 'u1');
       expect(result.isCheckedOut).toBe(true);
       expect(result.workedMinutes).toBe(420);
+    });
+  });
+
+  describe('getMonthOverview', () => {
+    it('rejects a malformed month', async () => {
+      await expect(service.getMonthOverview('c1', '2025-13')).rejects.toThrow(BadRequestException);
+      await expect(service.getMonthOverview('c1', 'junk')).rejects.toThrow(BadRequestException);
+    });
+
+    it('builds employee × day cells with worked minutes, leaves and totals', async () => {
+      mockPrisma.userCompany.findMany.mockResolvedValue([
+        // u1: лична ставка бие тази на позицията; u2: наследява от позицията
+        { hourlyRate: 15, position: { name: 'Монтажник', hourlyRate: 12 }, user: { id: 'u1', firstName: 'Иван', lastName: 'Иванов', isActive: true } },
+        { hourlyRate: null, position: { name: 'Монтажник', hourlyRate: 12 }, user: { id: 'u2', firstName: 'Мария', lastName: 'Петрова', isActive: true } },
+      ]);
+      mockPrisma.attendance.findMany.mockResolvedValue([
+        // u1: два записа в един ден (два обекта) + отворен интервал на 3-ти
+        { id: 'a1', userId: 'u1', date: new Date('2025-06-02T00:00:00Z'), checkIn: new Date('2025-06-02T06:00:00Z'), checkOut: new Date('2025-06-02T10:00:00Z'), workedMinutes: 240, siteId: 's1', site: { name: 'Варна' } },
+        { id: 'a2', userId: 'u1', date: new Date('2025-06-02T00:00:00Z'), checkIn: new Date('2025-06-02T11:00:00Z'), checkOut: new Date('2025-06-02T15:00:00Z'), workedMinutes: 240, siteId: 's2', site: { name: 'София' } },
+        { id: 'a3', userId: 'u1', date: new Date('2025-06-03T00:00:00Z'), checkIn: new Date('2025-06-03T06:00:00Z'), checkOut: null, workedMinutes: null, siteId: null, site: null },
+      ]);
+      mockPrisma.leave.findMany.mockResolvedValue([
+        { userId: 'u2', type: 'ANNUAL', startDate: new Date('2025-06-02T00:00:00Z'), endDate: new Date('2025-06-04T00:00:00Z'), halfDay: false },
+      ]);
+      mockPrisma.payroll.findMany.mockResolvedValue([
+        { id: 'p1', userId: 'u1', status: 'PAID', netSalary: 900, paidAt: new Date('2025-07-05T00:00:00Z') },
+      ]);
+
+      const r = await service.getMonthOverview('c1', '2025-06');
+      expect(r.today).toBe(new Date().toISOString().slice(0, 10));
+      expect(r.days).toHaveLength(30);
+      expect(r.days[0]).toEqual({ date: '2025-06-01', isWorkingDay: false }); // неделя
+      expect(r.workingDays).toBe(21);
+      expect(r.workDayHours).toBe(8);
+
+      const u1 = r.employees.find((e) => e.id === 'u1')!;
+      expect(u1.cells['2025-06-02'].minutes).toBe(480);
+      expect(u1.cells['2025-06-02'].records.map((x) => x.siteName)).toEqual(['Варна', 'София']);
+      expect(u1.cells['2025-06-03'].open).toBe(true);
+      expect(u1.totals).toEqual({ presentDays: 2, minutes: 480, leaveDays: 0, missingDays: 19 });
+      expect(u1.position).toBe('Монтажник');
+      expect(u1.hourlyRate).toBe(15);
+      expect(u1.payroll).toEqual({ id: 'p1', status: 'PAID', netSalary: 900, paidAt: new Date('2025-07-05T00:00:00Z') });
+      expect(mockPrisma.payroll.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ year: 2025, month: 6 }) }),
+      );
+
+      const u2 = r.employees.find((e) => e.id === 'u2')!;
+      expect(u2.hourlyRate).toBe(12);
+      expect(u2.payroll).toBeNull();
+      expect(u2.cells['2025-06-03'].leave).toBe('ANNUAL');
+      expect(u2.totals).toEqual({ presentDays: 0, minutes: 0, leaveDays: 3, missingDays: 18 });
+    });
+
+    it('counts missing days only up to the client-local today', async () => {
+      mockPrisma.userCompany.findMany.mockResolvedValue([
+        { user: { id: 'u1', firstName: 'A', lastName: 'A', isActive: true } },
+      ]);
+      mockPrisma.attendance.findMany.mockResolvedValue([]);
+      mockPrisma.leave.findMany.mockResolvedValue([]);
+      // Юни 2025: 2-ри (пон.) .. 6-ти (пет.) = 5 работни дни до „днес"
+      const r = await service.getMonthOverview('c1', '2025-06', undefined, undefined, '2025-06-06');
+      expect(r.today).toBe('2025-06-06');
+      expect(r.employees[0].totals.missingDays).toBe(5);
+    });
+
+    it('with a site filter lists only employees present at that site', async () => {
+      mockPrisma.userCompany.findMany.mockResolvedValue([
+        { user: { id: 'u1', firstName: 'A', lastName: 'B', isActive: true } },
+        { user: { id: 'u2', firstName: 'C', lastName: 'D', isActive: true } },
+      ]);
+      mockPrisma.attendance.findMany.mockResolvedValue([
+        { id: 'a1', userId: 'u1', date: new Date('2025-06-02T00:00:00Z'), checkIn: null, checkOut: null, workedMinutes: 480, siteId: 's1', site: { name: 'Варна' } },
+      ]);
+      mockPrisma.leave.findMany.mockResolvedValue([]);
+      const r = await service.getMonthOverview('c1', '2025-06', undefined, 's1');
+      expect(mockPrisma.attendance.findMany.mock.calls[0][0].where.siteId).toBe('s1');
+      expect(r.employees.map((e) => e.id)).toEqual(['u1']);
     });
   });
 

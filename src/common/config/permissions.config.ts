@@ -605,7 +605,7 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
       {
         key: 'attendance',
         labelKey: 'modules.hr.attendance',
-        actions: ['view', 'create', 'edit'],
+        actions: ['view', 'create', 'edit', 'delete'],
         tables: [
           {
             key: 'attendanceList',
@@ -616,7 +616,6 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
               { key: 'checkIn', labelKey: 'modules.hr.checkIn' },
               { key: 'checkOut', labelKey: 'modules.hr.checkOut' },
               { key: 'totalHours', labelKey: 'modules.hr.totalHours' },
-              { key: 'status', labelKey: 'common.status' },
             ],
           },
         ],
@@ -643,7 +642,7 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
       {
         key: 'payroll',
         labelKey: 'modules.hr.payroll',
-        actions: ['view', 'create', 'edit'],
+        actions: ['view', 'create', 'edit', 'delete'],
         tables: [
           {
             key: 'payrollList',
@@ -663,7 +662,7 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
       {
         key: 'performance',
         labelKey: 'modules.hr.performance',
-        actions: ['view', 'create', 'edit'],
+        actions: ['view', 'create', 'edit', 'delete'],
         tables: [
           {
             key: 'performanceList',

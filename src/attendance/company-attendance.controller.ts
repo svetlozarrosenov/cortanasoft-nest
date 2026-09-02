@@ -94,6 +94,25 @@ export class CompanyAttendanceController {
     return this.attendanceService.findSiteOptions(companyId);
   }
 
+  // Месечна матрица „служители × дни" — основният изглед на страницата
+  @Get('month')
+  @RequireView('hr', 'attendance')
+  getMonthOverview(
+    @Param('companyId') companyId: string,
+    @Query('month') month: string,
+    @Query('userId') userId?: string,
+    @Query('siteId') siteId?: string,
+    @Query('today') today?: string,
+  ) {
+    return this.attendanceService.getMonthOverview(
+      companyId,
+      month,
+      userId || undefined,
+      siteId || undefined,
+      today || undefined,
+    );
+  }
+
   @Get('today')
   @RequireAnyPermission(
     { module: 'hr', page: 'attendance', action: 'view' },

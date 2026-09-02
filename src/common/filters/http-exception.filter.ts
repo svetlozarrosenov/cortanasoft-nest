@@ -21,6 +21,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = ErrorMessages.common.internalError;
+    // Машинно-четими детайли (напр. липсващо право) — клиентът ги превежда
+    let code: string | undefined;
+    let details: unknown;
 
     // Handle Prisma errors
     if (exception instanceof Prisma.PrismaClientKnownRequestError) {
@@ -61,6 +64,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
         typeof exceptionResponse === 'string'
           ? exceptionResponse
           : (exceptionResponse as any).message || exception.message;
+      if (typeof exceptionResponse === 'object') {
+        code = (exceptionResponse as any).code;
+        details = (exceptionResponse as any).details;
+      }
     } else if (exception instanceof Error) {
       // Check if it's a Prisma error that wasn't caught above
       if (exception.message.includes('Invalid `this.prisma')) {
@@ -96,6 +103,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       success: false,
       statusCode: status,
       message,
+      ...(code ? { code, details } : {}),
       timestamp: new Date().toISOString(),
       path: request.url,
     });

@@ -12,7 +12,9 @@ export const ErrorMessages = {
     badRequest: 'Невалидна заявка',
     internalError: 'Възникна грешка. Моля, опитайте отново.',
     validationFailed: 'Невалидни данни',
-    missingPermission: (permission: string) => `Достъпът е отказан. Нямате право за: ${permission}`,
+    // Резервен текст — клиентът показва преведено съобщение по code/details
+    missingPermission: (permission: string) =>
+      `Нямате право за това действие (${permission}). Правото се дава от администратор в Администрация → Роли.`,
     userNotAuthenticated: 'Потребителят не е удостоверен',
     noRoleAssigned: 'Няма зададена роля за тази компания',
   },

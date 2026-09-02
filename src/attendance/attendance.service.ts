@@ -13,10 +13,14 @@ import {
 } from './dto';
 import { Prisma } from '@prisma/client';
 import { isWorkingDay } from '../leaves/working-days.util';
+import { HrSettingsService } from '../hr-settings/hr-settings.service';
 
 @Injectable()
 export class AttendanceService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private hrSettings: HrSettingsService,
+  ) {}
 
   /**
    * Денят на присъствието се пази като UTC полунощ навсякъде (ръчно
@@ -828,6 +832,186 @@ export class AttendanceService {
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     });
+  }
+
+  /**
+   * Месечна матрица „служители × дни": за всеки служител на фирмата —
+   * клетка на ден с отработени минути, обект(и) и одобрен отпуск, плюс
+   * суми. Това е основният изглед на Присъствие; таблицата със записи е
+   * за корекции.
+   */
+  async getMonthOverview(
+    companyId: string,
+    month: string,
+    userId?: string,
+    siteId?: string,
+    // Локалният ден на клиента (YYYY-MM-DD); „липсва" се брои само до него
+    today?: string,
+  ) {
+    const m = /^(\d{4})-(\d{2})$/.exec(month || '');
+    if (!m) {
+      throw new BadRequestException('Невалиден месец (очаква се YYYY-MM)');
+    }
+    const year = Number(m[1]);
+    const mon = Number(m[2]);
+    if (mon < 1 || mon > 12) {
+      throw new BadRequestException('Невалиден месец (очаква се YYYY-MM)');
+    }
+    const from = new Date(Date.UTC(year, mon - 1, 1));
+    const to = new Date(Date.UTC(year, mon, 0));
+
+    const [members, attendances, leaves, workDayHours, payrolls] = await Promise.all([
+      this.prisma.userCompany.findMany({
+        where: { companyId, ...(userId ? { userId } : {}) },
+        select: {
+          hourlyRate: true,
+          position: { select: { name: true, hourlyRate: true } },
+          user: {
+            select: { id: true, firstName: true, lastName: true, isActive: true },
+          },
+        },
+        orderBy: { user: { firstName: 'asc' } },
+      }),
+      this.prisma.attendance.findMany({
+        where: {
+          companyId,
+          date: { gte: from, lte: to },
+          ...(userId ? { userId } : {}),
+          ...(siteId ? { siteId } : {}),
+        },
+        select: {
+          id: true,
+          userId: true,
+          date: true,
+          checkIn: true,
+          checkOut: true,
+          workedMinutes: true,
+          siteId: true,
+          site: { select: { name: true } },
+        },
+        orderBy: { checkIn: 'asc' },
+      }),
+      this.prisma.leave.findMany({
+        where: {
+          companyId,
+          status: 'APPROVED',
+          ...(userId ? { userId } : {}),
+          startDate: { lte: to },
+          endDate: { gte: from },
+        },
+        select: { userId: true, type: true, startDate: true, endDate: true, halfDay: true },
+      }),
+      // Часове в работен ден — дневната ставка е ставка/час × тези часове
+      this.hrSettings.getWorkDayHours(companyId),
+      // Ведомост за месеца (една на човек) — за маркера „платено" пред името
+      this.prisma.payroll.findMany({
+        where: {
+          companyId,
+          year,
+          month: mon,
+          status: { not: 'CANCELLED' },
+          ...(userId ? { userId } : {}),
+        },
+        select: { id: true, userId: true, status: true, netSalary: true, paidAt: true },
+      }),
+    ]);
+    const payrollByUser = new Map(payrolls.map((p) => [p.userId, p]));
+
+    const days: { date: string; isWorkingDay: boolean }[] = [];
+    for (let d = new Date(from); d <= to; d = new Date(d.getTime() + 86400000)) {
+      days.push({ date: d.toISOString().slice(0, 10), isWorkingDay: isWorkingDay(d) });
+    }
+    const workingDays = days.filter((d) => d.isWorkingDay).length;
+    const todayKey = AttendanceService.dayKey(today).toISOString().slice(0, 10);
+
+    type Cell = {
+      minutes: number;
+      // Има вход без изход — денят още тече
+      open: boolean;
+      records: {
+        id: string;
+        siteId: string | null;
+        siteName: string | null;
+        checkIn: Date | null;
+        checkOut: Date | null;
+        workedMinutes: number | null;
+      }[];
+      leave: string | null;
+      halfDay: boolean;
+    };
+    const emptyCell = (): Cell => ({ minutes: 0, open: false, records: [], leave: null, halfDay: false });
+
+    const byUser = new Map<string, Record<string, Cell>>();
+    const cellFor = (uid: string, date: string) => {
+      let cells = byUser.get(uid);
+      if (!cells) {
+        cells = {};
+        byUser.set(uid, cells);
+      }
+      return (cells[date] ??= emptyCell());
+    };
+
+    for (const a of attendances) {
+      const cell = cellFor(a.userId, a.date.toISOString().slice(0, 10));
+      cell.records.push({
+        id: a.id,
+        siteId: a.siteId,
+        siteName: a.site?.name ?? null,
+        checkIn: a.checkIn,
+        checkOut: a.checkOut,
+        workedMinutes: a.workedMinutes,
+      });
+      cell.minutes += a.workedMinutes ?? 0;
+      if (a.checkIn && !a.checkOut) cell.open = true;
+    }
+    for (const l of leaves) {
+      for (const d of days) {
+        const dd = new Date(d.date);
+        if (l.startDate <= dd && l.endDate >= dd) {
+          const cell = cellFor(l.userId, d.date);
+          cell.leave = l.type;
+          cell.halfDay = l.halfDay;
+        }
+      }
+    }
+
+    // Служители на фирмата + (при филтър по обект) само тези с присъствие там
+    const employees = members
+      .map((mem) => {
+        const cells = byUser.get(mem.user.id) ?? {};
+        const presentDays = Object.values(cells).filter((c) => c.records.length > 0).length;
+        const minutes = Object.values(cells).reduce((sum, c) => sum + c.minutes, 0);
+        const leaveDays = Object.values(cells).reduce(
+          (sum, c) => sum + (c.leave ? (c.halfDay ? 0.5 : 1) : 0),
+          0,
+        );
+        // Работни дни (до днес) без запис и без отпуск — „липсва"
+        const missingDays = days.filter(
+          (d) =>
+            d.isWorkingDay &&
+            d.date <= todayKey &&
+            !(cells[d.date]?.records.length || cells[d.date]?.leave),
+        ).length;
+        // Ефективна ставка на час: личната, иначе тази на позицията
+        const rate = mem.hourlyRate ?? mem.position?.hourlyRate ?? null;
+        const payroll = payrollByUser.get(mem.user.id);
+        return {
+          id: mem.user.id,
+          firstName: mem.user.firstName,
+          lastName: mem.user.lastName,
+          isActive: mem.user.isActive,
+          position: mem.position?.name ?? null,
+          hourlyRate: rate != null ? Number(rate) : null,
+          payroll: payroll
+            ? { id: payroll.id, status: payroll.status, netSalary: Number(payroll.netSalary), paidAt: payroll.paidAt }
+            : null,
+          cells,
+          totals: { presentDays, minutes, leaveDays, missingDays },
+        };
+      })
+      .filter((e) => !siteId || e.totals.presentDays > 0);
+
+    return { month, today: todayKey, days, workingDays, workDayHours, employees };
   }
 
   async findOpenIntervals(companyId: string, date?: string) {
