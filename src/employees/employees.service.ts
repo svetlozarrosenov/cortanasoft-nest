@@ -1,5 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { UpdateEmployeeDto } from './dto';
 
 const USER_COMPANY_INCLUDE = {
   user: {
@@ -20,6 +21,9 @@ const USER_COMPANY_INCLUDE = {
       description: true,
     },
   },
+  position: {
+    select: { id: true, name: true, hourlyRate: true },
+  },
 };
 
 function mapUserCompany(uc: any) {
@@ -32,6 +36,15 @@ function mapUserCompany(uc: any) {
     role: uc.role,
     isDefault: uc.isDefault,
     maxVacationDays: uc.maxVacationDays,
+    position: uc.position ? { id: uc.position.id, name: uc.position.name } : null,
+    // Лична ставка (override) и ефективната: личната, иначе тази на позицията
+    hourlyRate: uc.hourlyRate != null ? Number(uc.hourlyRate) : null,
+    effectiveHourlyRate:
+      uc.hourlyRate != null
+        ? Number(uc.hourlyRate)
+        : uc.position?.hourlyRate != null
+          ? Number(uc.position.hourlyRate)
+          : null,
     createdAt: uc.user.createdAt,
     updatedAt: uc.user.updatedAt,
   };
@@ -81,7 +94,7 @@ export class EmployeesService {
     return mapUserCompany(userCompany);
   }
 
-  async update(companyId: string, userId: string, data: { maxVacationDays?: number | null }) {
+  async update(companyId: string, userId: string, data: UpdateEmployeeDto) {
     const userCompany = await this.prisma.userCompany.findFirst({
       where: { companyId, userId },
     });
@@ -90,10 +103,20 @@ export class EmployeesService {
       throw new NotFoundException('Employee not found in this company');
     }
 
+    if (data.positionId) {
+      const position = await this.prisma.position.findFirst({
+        where: { id: data.positionId, companyId },
+        select: { id: true },
+      });
+      if (!position) throw new BadRequestException('Позицията не е от тази компания');
+    }
+
     const updated = await this.prisma.userCompany.update({
       where: { id: userCompany.id },
       data: {
         maxVacationDays: data.maxVacationDays ?? undefined,
+        ...(data.positionId !== undefined ? { positionId: data.positionId } : {}),
+        ...(data.hourlyRate !== undefined ? { hourlyRate: data.hourlyRate } : {}),
       },
       include: USER_COMPANY_INCLUDE,
     });

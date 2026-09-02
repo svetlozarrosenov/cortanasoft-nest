@@ -583,6 +583,18 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
           },
         ],
       },
+      // Длъжности с типово заплащане на час (HR > Позиции)
+      {
+        key: 'positions',
+        labelKey: 'modules.hr.positions',
+        actions: ['view', 'create', 'edit', 'delete'],
+      },
+      // Стандартен работен ден (начало/край/почивка) — HR > Настройки
+      {
+        key: 'settings',
+        labelKey: 'modules.hr.settings',
+        actions: ['view', 'edit'],
+      },
       // „Моите присъствия" (само view) — за работниците: Вход/Изход от
       // телефона и собствените дни, без достъп до чуждите записи
       {

@@ -18,6 +18,8 @@ import { InvoicesModule } from './invoices/invoices.module';
 import { ProformasModule } from './proformas/proformas.module';
 import { SitesModule } from './sites/sites.module';
 import { AiSettingsModule } from './ai-settings/ai-settings.module';
+import { HrSettingsModule } from './hr-settings/hr-settings.module';
+import { PositionsModule } from './positions/positions.module';
 import { CurrenciesModule } from './currencies/currencies.module';
 import { CountriesModule } from './countries/countries.module';
 import { SettlementsModule } from './settlements/settlements.module';
@@ -101,6 +103,8 @@ import { SupportModule } from './support/support.module';
     ProformasModule,
     SitesModule,
     AiSettingsModule,
+    HrSettingsModule,
+    PositionsModule,
     CurrenciesModule,
     CountriesModule,
     SettlementsModule,

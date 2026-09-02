@@ -1,6 +1,7 @@
 import { Controller, Get, Patch, Param, Body, Query, Res, StreamableFile, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { EmployeesService } from './employees.service';
+import { UpdateEmployeeDto } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import { PermissionsGuard, RequireEdit } from '../common/guards/permissions.guard';
@@ -55,7 +56,7 @@ export class CompanyEmployeesController {
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
-    @Body() body: { maxVacationDays?: number | null },
+    @Body() body: UpdateEmployeeDto,
   ) {
     return this.employeesService.update(companyId, id, body);
   }
