@@ -16,18 +16,28 @@ const toMinutes = (hhmm: string) => {
 /**
  * Стандартен работен ден на компанията. Записът се създава лениво с
  * дефолтите при първо четене, за да няма нужда от seed.
+ *
+ * Дните платен отпуск по подразбиране живеят в Company.defaultAnnualLeaveDays
+ * (там ги чете LeavesService), но се редактират оттук — HR > Настройки е
+ * единственото място за фирмени HR дефолти.
  */
 @Injectable()
 export class HrSettingsService {
   constructor(private prisma: PrismaService) {}
 
   async get(companyId: string) {
-    const settings = await this.prisma.hrSettings.upsert({
-      where: { companyId },
-      create: { companyId },
-      update: {},
-    });
-    return this.withDerived(settings);
+    const [settings, company] = await Promise.all([
+      this.prisma.hrSettings.upsert({
+        where: { companyId },
+        create: { companyId },
+        update: {},
+      }),
+      this.prisma.company.findUnique({
+        where: { id: companyId },
+        select: { defaultAnnualLeaveDays: true },
+      }),
+    ]);
+    return this.withDerived(settings, company?.defaultAnnualLeaveDays ?? 20);
   }
 
   async update(companyId: string, dto: UpdateHrSettingsDto) {
@@ -52,7 +62,19 @@ export class HrSettingsService {
       where: { companyId },
       data: next,
     });
-    return this.withDerived(updated);
+    if (dto.annualLeaveDays !== undefined) {
+      const company = await this.prisma.company.update({
+        where: { id: companyId },
+        data: { defaultAnnualLeaveDays: dto.annualLeaveDays },
+        select: { defaultAnnualLeaveDays: true },
+      });
+      return this.withDerived(updated, company.defaultAnnualLeaveDays);
+    }
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { defaultAnnualLeaveDays: true },
+    });
+    return this.withDerived(updated, company?.defaultAnnualLeaveDays ?? 20);
   }
 
   /** Часове в стандартен работен ден (напр. 8) — за „цял ден" и за дневно заплащане */
@@ -61,8 +83,16 @@ export class HrSettingsService {
     return s.workDayHours;
   }
 
-  private withDerived<T extends { workDayStart: string; workDayEnd: string; breakMinutes: number }>(s: T) {
+  private withDerived<T extends { workDayStart: string; workDayEnd: string; breakMinutes: number }>(
+    s: T,
+    annualLeaveDays: number,
+  ) {
     const minutes = toMinutes(s.workDayEnd) - toMinutes(s.workDayStart) - s.breakMinutes;
-    return { ...s, workDayMinutes: minutes, workDayHours: Math.round((minutes / 60) * 100) / 100 };
+    return {
+      ...s,
+      annualLeaveDays,
+      workDayMinutes: minutes,
+      workDayHours: Math.round((minutes / 60) * 100) / 100,
+    };
   }
 }

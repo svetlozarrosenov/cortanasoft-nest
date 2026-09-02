@@ -13,6 +13,7 @@ const base = {
 
 const mockPrisma = {
   hrSettings: { upsert: jest.fn(), update: jest.fn() },
+  company: { findUnique: jest.fn(), update: jest.fn() },
 };
 
 describe('HrSettingsService', () => {
@@ -20,6 +21,8 @@ describe('HrSettingsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockPrisma.company.findUnique.mockResolvedValue({ defaultAnnualLeaveDays: 20 });
+    mockPrisma.company.update.mockImplementation(({ data }) => ({ defaultAnnualLeaveDays: data.defaultAnnualLeaveDays }));
     const module = await Test.createTestingModule({
       providers: [HrSettingsService, { provide: PrismaService, useValue: mockPrisma }],
     }).compile();
@@ -36,6 +39,26 @@ describe('HrSettingsService', () => {
     });
     expect(res.workDayMinutes).toBe(480);
     expect(res.workDayHours).toBe(8);
+    expect(res.annualLeaveDays).toBe(20);
+  });
+
+  it('update: annualLeaveDays is written to Company.defaultAnnualLeaveDays', async () => {
+    mockPrisma.hrSettings.upsert.mockResolvedValue(base);
+    mockPrisma.hrSettings.update.mockImplementation(({ data }) => ({ ...base, ...data }));
+    const res = await service.update('c1', { annualLeaveDays: 25 });
+    expect(mockPrisma.company.update).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: { defaultAnnualLeaveDays: 25 },
+      select: { defaultAnnualLeaveDays: true },
+    });
+    expect(res.annualLeaveDays).toBe(25);
+  });
+
+  it('update: without annualLeaveDays the company default is left alone', async () => {
+    mockPrisma.hrSettings.upsert.mockResolvedValue(base);
+    mockPrisma.hrSettings.update.mockImplementation(({ data }) => ({ ...base, ...data }));
+    await service.update('c1', { breakMinutes: 30 });
+    expect(mockPrisma.company.update).not.toHaveBeenCalled();
   });
 
   it('update: merges partial dto and recalculates hours', async () => {

@@ -16,4 +16,11 @@ export class UpdateHrSettingsDto {
   @Max(480)
   @IsOptional()
   breakMinutes?: number;
+
+  /** Дни платен отпуск по подразбиране за служител без индивидуална стойност */
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  @IsOptional()
+  annualLeaveDays?: number;
 }
