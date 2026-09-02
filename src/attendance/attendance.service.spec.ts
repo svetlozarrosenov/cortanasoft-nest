@@ -250,14 +250,6 @@ describe('AttendanceService', () => {
       });
     });
 
-    it('should clear the site when siteId is an empty string', async () => {
-      mockPrisma.attendance.updateMany.mockResolvedValue({ count: 1 });
-
-      await service.bulkUpdate('c1', { ids: ['a1'], siteId: '' } as any);
-
-      expect(mockPrisma.site.findFirst).not.toHaveBeenCalled();
-      expect(mockPrisma.attendance.updateMany.mock.calls[0][0].data).toEqual({ siteId: null });
-    });
   });
 
   describe('remove', () => {

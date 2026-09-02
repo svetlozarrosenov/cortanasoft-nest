@@ -3,6 +3,7 @@ import {
   ArrayNotEmpty,
   ArrayMaxSize,
   IsString,
+  IsNotEmpty,
 } from 'class-validator';
 
 // Масова редакция на записи присъствие — засега само обектът (напр. 20
@@ -14,7 +15,9 @@ export class BulkUpdateAttendanceDto {
   @IsString({ each: true })
   ids: string[];
 
-  // Обект; празен string изчиства връзката
+  // Обект, който се задава на всички избрани записи (само задаване — не
+  // и изчистване; за отделен запис обектът се маха от формата за редакция)
   @IsString()
+  @IsNotEmpty()
   siteId: string;
 }
