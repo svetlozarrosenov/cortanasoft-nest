@@ -55,7 +55,6 @@ describe('AttendanceService', () => {
     const baseDto = {
       date: '2025-06-15',
       type: 'REGULAR',
-      status: 'PENDING',
     };
 
     it('should create attendance record successfully', async () => {
@@ -190,31 +189,12 @@ describe('AttendanceService', () => {
       await expect(service.findOne('c1', 'bad')).rejects.toThrow(NotFoundException);
     });
 
-    it('should return attendance with user and approver info', async () => {
-      mockPrisma.attendance.findFirst.mockResolvedValue({
-        id: 'a1',
-        userId: 'u1',
-        approvedById: 'u2',
-      });
-      mockPrisma.user.findUnique
-        .mockResolvedValueOnce({ id: 'u1', firstName: 'John' }) // user
-        .mockResolvedValueOnce({ id: 'u2', firstName: 'Admin' }); // approver
+    it('should return attendance with user info', async () => {
+      mockPrisma.attendance.findFirst.mockResolvedValue({ id: 'a1', userId: 'u1' });
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1', firstName: 'John' });
 
       const result = await service.findOne('c1', 'a1');
       expect(result.user?.firstName).toBe('John');
-      expect(result.approvedBy?.firstName).toBe('Admin');
-    });
-
-    it('should return null approvedBy when no approver', async () => {
-      mockPrisma.attendance.findFirst.mockResolvedValue({
-        id: 'a1',
-        userId: 'u1',
-        approvedById: null,
-      });
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1' });
-
-      const result = await service.findOne('c1', 'a1');
-      expect(result.approvedBy).toBeNull();
     });
   });
 
@@ -249,10 +229,6 @@ describe('AttendanceService', () => {
   });
 
   describe('bulkUpdate', () => {
-    it('should reject when no fields are given', async () => {
-      await expect(service.bulkUpdate('c1', { ids: ['a1'] } as any)).rejects.toThrow(BadRequestException);
-    });
-
     it('should reject a site from another company', async () => {
       mockPrisma.site.findFirst.mockResolvedValue(null);
       await expect(
@@ -277,57 +253,10 @@ describe('AttendanceService', () => {
     it('should clear the site when siteId is an empty string', async () => {
       mockPrisma.attendance.updateMany.mockResolvedValue({ count: 1 });
 
-      await service.bulkUpdate('c1', { ids: ['a1'], siteId: '', status: 'APPROVED' } as any);
+      await service.bulkUpdate('c1', { ids: ['a1'], siteId: '' } as any);
 
       expect(mockPrisma.site.findFirst).not.toHaveBeenCalled();
-      expect(mockPrisma.attendance.updateMany.mock.calls[0][0].data).toEqual({
-        status: 'APPROVED',
-        siteId: null,
-      });
-    });
-  });
-
-  describe('approve', () => {
-    it('should set status to APPROVED with approver info', async () => {
-      mockPrisma.attendance.findFirst.mockResolvedValue({ id: 'a1' });
-      mockPrisma.attendance.update.mockResolvedValue({ id: 'a1', status: 'APPROVED', approvedById: 'admin1' });
-
-      const result = await service.approve('c1', 'a1', 'admin1');
-      expect(mockPrisma.attendance.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            status: 'APPROVED',
-            approvedById: 'admin1',
-          }),
-        }),
-      );
-      expect(result.status).toBe('APPROVED');
-    });
-
-    it('should throw NotFoundException when record not found', async () => {
-      mockPrisma.attendance.findFirst.mockResolvedValue(null);
-
-      await expect(service.approve('c1', 'bad', 'admin1')).rejects.toThrow(NotFoundException);
-    });
-  });
-
-  describe('reject', () => {
-    it('should set status to REJECTED', async () => {
-      mockPrisma.attendance.findFirst.mockResolvedValue({ id: 'a1' });
-      mockPrisma.attendance.update.mockResolvedValue({ id: 'a1', status: 'REJECTED' });
-
-      const result = await service.reject('c1', 'a1', 'admin1');
-      expect(mockPrisma.attendance.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ status: 'REJECTED' }),
-        }),
-      );
-    });
-
-    it('should throw NotFoundException when record not found', async () => {
-      mockPrisma.attendance.findFirst.mockResolvedValue(null);
-
-      await expect(service.reject('c1', 'bad', 'admin1')).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.attendance.updateMany.mock.calls[0][0].data).toEqual({ siteId: null });
     });
   });
 
@@ -545,11 +474,11 @@ describe('AttendanceService', () => {
       });
     });
 
-    it('does not mix leaves in when filtering by status/type/site', async () => {
+    it('does not mix leaves in when filtering by type/site', async () => {
       mockPrisma.attendance.count.mockResolvedValue(0);
       mockPrisma.attendance.findMany.mockResolvedValue([]);
       mockPrisma.user.findMany.mockResolvedValue([]);
-      const result = await service.findAll('c1', { status: 'PENDING', page: 1, limit: 10 } as any);
+      const result = await service.findAll('c1', { siteId: 's1', page: 1, limit: 10 } as any);
       expect(result.leaves).toEqual([]);
       expect(mockPrisma.leave.findMany).not.toHaveBeenCalled();
     });

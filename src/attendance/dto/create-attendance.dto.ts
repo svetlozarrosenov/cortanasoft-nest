@@ -9,7 +9,7 @@ import {
   Min,
   Max,
 } from 'class-validator';
-import { AttendanceType, AttendanceStatus } from '@prisma/client';
+import { AttendanceType } from '@prisma/client';
 
 export class CreateAttendanceDto {
   @IsDateString()
@@ -42,10 +42,6 @@ export class CreateAttendanceDto {
   @IsEnum(AttendanceType)
   @IsOptional()
   type?: AttendanceType;
-
-  @IsEnum(AttendanceStatus)
-  @IsOptional()
-  status?: AttendanceStatus;
 
   @IsString()
   @IsOptional()

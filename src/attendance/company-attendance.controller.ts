@@ -172,7 +172,6 @@ export class CompanyAttendanceController {
       { header: 'Check Out', key: 'checkOut', width: 20 },
       { header: 'Worked Minutes', key: 'workedMinutes', width: 15 },
       { header: 'Overtime Minutes', key: 'overtimeMinutes', width: 15 },
-      { header: 'Status', key: 'status', width: 12 },
     ];
     const buffer = await this.exportService.generateFile(columns, data, format, 'Attendance');
     const ext = format === 'csv' ? 'csv' : 'xlsx';
@@ -183,7 +182,7 @@ export class CompanyAttendanceController {
     return new StreamableFile(buffer);
   }
 
-  // Масова редакция (обект / статус) — преди ':id', за да не го засенчи
+  // Масова редакция (обект) — преди ':id', за да не го засенчи
   @Patch('bulk')
   @RequireEdit('hr', 'attendance')
   bulkUpdate(
@@ -246,27 +245,5 @@ export class CompanyAttendanceController {
     @Body() dto: CheckInDto,
   ) {
     return this.attendanceService.checkOut(companyId, req.user.id, dto?.date);
-  }
-
-  // ==================== Approval ====================
-
-  @Post(':id/approve')
-  @RequireEdit('hr', 'attendance')
-  approve(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-    @Request() req: any,
-  ) {
-    return this.attendanceService.approve(companyId, id, req.user.id);
-  }
-
-  @Post(':id/reject')
-  @RequireEdit('hr', 'attendance')
-  reject(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-    @Request() req: any,
-  ) {
-    return this.attendanceService.reject(companyId, id, req.user.id);
   }
 }

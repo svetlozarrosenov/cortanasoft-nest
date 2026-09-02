@@ -265,13 +265,11 @@ export class SitesService {
     }));
 
     // Присъствия на обекта за периода (HR > Присъствия е източникът) —
-    // групирани по служител: колко дни е бил тук. Само одобрени: отхвърлените
-    // не са „бил е там" и не трябва да стигат до заплатите.
+    // групирани по служител: колко дни е бил тук.
     const attendanceRecords = await this.prisma.attendance.findMany({
       where: {
         companyId,
         siteId: id,
-        status: 'APPROVED',
         ...(dateFrom || dateTo
           ? { date: { ...(dateFrom && { gte: dateFrom }), ...(dateTo && { lte: dateTo }) } }
           : {}),

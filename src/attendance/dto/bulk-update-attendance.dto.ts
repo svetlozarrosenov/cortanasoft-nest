@@ -3,13 +3,10 @@ import {
   ArrayNotEmpty,
   ArrayMaxSize,
   IsString,
-  IsOptional,
-  IsEnum,
 } from 'class-validator';
-import { AttendanceStatus } from '@prisma/client';
 
-// Масова редакция на записи присъствие — само полетата, които има смисъл
-// да се задават еднакво на много записи наведнъж
+// Масова редакция на записи присъствие — засега само обектът (напр. 20
+// записа, въведени без обект)
 export class BulkUpdateAttendanceDto {
   @IsArray()
   @ArrayNotEmpty()
@@ -17,12 +14,7 @@ export class BulkUpdateAttendanceDto {
   @IsString({ each: true })
   ids: string[];
 
-  // Обект; празен string изчиства връзката, undefined = не се пипа
+  // Обект; празен string изчиства връзката
   @IsString()
-  @IsOptional()
-  siteId?: string;
-
-  @IsEnum(AttendanceStatus)
-  @IsOptional()
-  status?: AttendanceStatus;
+  siteId: string;
 }

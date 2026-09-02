@@ -787,18 +787,11 @@ enum AttendanceType {
 }
 
 // Статус на присъствие
-enum AttendanceStatus {
-  PENDING // Изчакващ одобрение
-  APPROVED // Одобрен
-  REJECTED // Отхвърлен
-}
-
 // Присъствие на служител
 model Attendance {
   id     String           @id @default(cuid())
   date   DateTime         @db.Date // Дата на присъствието
   type   AttendanceType   @default(REGULAR)
-  status AttendanceStatus @default(APPROVED)
 
   // Време на работа
   checkIn      DateTime? // Час на влизане
@@ -824,10 +817,6 @@ model Attendance {
   siteId String?
   site   Site?   @relation(fields: [siteId], references: [id], onDelete: SetNull)
 
-  // Одобрен от (мениджър)
-  approvedById String?
-  approvedAt   DateTime?
-
   // Аудит
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -838,7 +827,6 @@ model Attendance {
   @@index([companyId])
   @@index([companyId, userId])
   @@index([companyId, date])
-  @@index([companyId, status])
   @@index([siteId])
   @@map("attendances")
 }

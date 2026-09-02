@@ -11,7 +11,7 @@ import {
   QueryAttendanceDto,
   BulkUpdateAttendanceDto,
 } from './dto';
-import { AttendanceStatus, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { isWorkingDay } from '../leaves/working-days.util';
 
 @Injectable()
@@ -143,7 +143,6 @@ export class AttendanceService {
       data: {
         date,
         type: dto.type,
-        status: dto.status,
         checkIn: dto.checkIn ? new Date(dto.checkIn) : null,
         checkOut: dto.checkOut ? new Date(dto.checkOut) : null,
         breakMinutes: dto.breakMinutes || 0,
@@ -249,7 +248,6 @@ export class AttendanceService {
       .map((d) => ({
         date: d,
         type: dto.type,
-        status: dto.status,
         notes: dto.notes,
         companyId,
         userId,
@@ -364,7 +362,6 @@ export class AttendanceService {
       data.push({
         date: new Date(d),
         type: dto.type,
-        status: dto.status,
         notes: dto.notes,
         companyId,
         userId,
@@ -380,7 +377,6 @@ export class AttendanceService {
     const {
       userId,
       type,
-      status,
       dateFrom,
       dateTo,
       page = 1,
@@ -397,10 +393,6 @@ export class AttendanceService {
 
     if (type) {
       where.type = type;
-    }
-
-    if (status) {
-      where.status = status;
     }
 
     if (query.siteId) {
@@ -453,9 +445,9 @@ export class AttendanceService {
     // Одобрените отпуски се показват до присъствията само за четене (те са
     // от модул Отпуски). Прозорецът е филтърът от–до, а без такъв — обхватът
     // на текущата страница (първата гледа и напред — „кой е в отпуск сега").
-    // Филтри по тип/статус/обект се отнасят само за присъствия.
+    // Филтри по тип/обект се отнасят само за присъствия.
     let leaves: Awaited<ReturnType<typeof this.findApprovedLeaves>> = [];
-    if (!type && !status && !query.siteId) {
+    if (!type && !query.siteId) {
       const pageDates = attendances.map((a) => a.date.getTime());
       const lower = dateFrom
         ? new Date(dateFrom)
@@ -503,26 +495,7 @@ export class AttendanceService {
       },
     });
 
-    // Get approver info if exists
-    let approvedBy: {
-      id: string;
-      email: string;
-      firstName: string;
-      lastName: string;
-    } | null = null;
-    if (attendance.approvedById) {
-      approvedBy = await this.prisma.user.findUnique({
-        where: { id: attendance.approvedById },
-        select: {
-          id: true,
-          email: true,
-          firstName: true,
-          lastName: true,
-        },
-      });
-    }
-
-    return { ...attendance, user, approvedBy };
+    return { ...attendance, user };
   }
 
   async update(companyId: string, id: string, dto: UpdateAttendanceDto) {
@@ -562,7 +535,6 @@ export class AttendanceService {
       where: { id },
       data: {
         type: dto.type,
-        status: dto.status,
         checkIn: dto.checkIn ? new Date(dto.checkIn) : undefined,
         checkOut: dto.checkOut ? new Date(dto.checkOut) : undefined,
         breakMinutes: dto.breakMinutes,
@@ -590,10 +562,6 @@ export class AttendanceService {
 
   // Масова редакция — id-та от друга компания просто не се засягат
   async bulkUpdate(companyId: string, dto: BulkUpdateAttendanceDto) {
-    if (dto.siteId === undefined && dto.status === undefined) {
-      throw new BadRequestException('Няма подадени полета за промяна');
-    }
-
     if (dto.siteId) {
       const site = await this.prisma.site.findFirst({
         where: { id: dto.siteId, companyId },
@@ -606,55 +574,10 @@ export class AttendanceService {
 
     const result = await this.prisma.attendance.updateMany({
       where: { companyId, id: { in: dto.ids } },
-      data: {
-        ...(dto.status !== undefined && { status: dto.status }),
-        ...(dto.siteId !== undefined && { siteId: dto.siteId || null }),
-      },
+      data: { siteId: dto.siteId || null },
     });
 
     return { updated: result.count };
-  }
-
-  async approve(companyId: string, id: string, approverId: string) {
-    const attendance = await this.prisma.attendance.findFirst({
-      where: { id, companyId },
-    });
-
-    if (!attendance) {
-      throw new NotFoundException('Attendance record not found');
-    }
-
-    const updated = await this.prisma.attendance.update({
-      where: { id },
-      data: {
-        status: AttendanceStatus.APPROVED,
-        approvedById: approverId,
-        approvedAt: new Date(),
-      },
-    });
-
-    return updated;
-  }
-
-  async reject(companyId: string, id: string, approverId: string) {
-    const attendance = await this.prisma.attendance.findFirst({
-      where: { id, companyId },
-    });
-
-    if (!attendance) {
-      throw new NotFoundException('Attendance record not found');
-    }
-
-    const updated = await this.prisma.attendance.update({
-      where: { id },
-      data: {
-        status: AttendanceStatus.REJECTED,
-        approvedById: approverId,
-        approvedAt: new Date(),
-      },
-    });
-
-    return updated;
   }
 
   async remove(companyId: string, id: string) {

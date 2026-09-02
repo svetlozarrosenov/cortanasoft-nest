@@ -7,7 +7,7 @@ import {
   Min,
   Max,
 } from 'class-validator';
-import { AttendanceType, AttendanceStatus } from '@prisma/client';
+import { AttendanceType } from '@prisma/client';
 
 export class UpdateAttendanceDto {
   @IsEnum(AttendanceType)
@@ -18,10 +18,6 @@ export class UpdateAttendanceDto {
   @IsString()
   @IsOptional()
   siteId?: string;
-
-  @IsEnum(AttendanceStatus)
-  @IsOptional()
-  status?: AttendanceStatus;
 
   @IsDateString()
   @IsOptional()
