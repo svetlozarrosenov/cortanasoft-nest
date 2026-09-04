@@ -19,6 +19,10 @@ RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists
 WORKDIR /app
 ENV NODE_ENV=production
 
+# Git SHA of the build, surfaced by GET /api/health (set from deploy.yml)
+ARG APP_VERSION=unknown
+ENV APP_VERSION=$APP_VERSION
+
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./

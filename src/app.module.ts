@@ -67,6 +67,7 @@ import { ServiceModule } from './service/service.module';
 import { EmployeeRecordsModule } from './employee-records/employee-records.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { SupportModule } from './support/support.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -88,6 +89,7 @@ import { SupportModule } from './support/support.module';
     ]),
     ScheduleModule.forRoot(),
     PrismaModule,
+    HealthModule,
     AuthModule,
     AdminModule,
     ProductsModule,
