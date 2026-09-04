@@ -123,8 +123,9 @@ export class PermissionsGuard implements CanActivate {
   }
 
   // 403 с човешко съобщение + структурирани детайли, за да може клиентът да
-  // го преведе („Нямате право да изтривате Присъствие") и да насочи към
-  // Администрация → Роли. labelKey-овете са i18n ключовете от конфигурацията.
+  // го преведе („Нямате право да изтривате Присъствие"). Без намек къде се
+  // дават правата — това е админ меню на СВ Софт, не на клиента.
+  // labelKey-овете са i18n ключовете от конфигурацията.
   static missingPermission(required: PermissionRequirement[]) {
     const details = required.map((r) => {
       const mod = PERMISSIONS_CONFIG.find((m) => m.key === r.module);

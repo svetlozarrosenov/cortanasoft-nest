@@ -14,7 +14,7 @@ export const ErrorMessages = {
     validationFailed: 'Невалидни данни',
     // Резервен текст — клиентът показва преведено съобщение по code/details
     missingPermission: (permission: string) =>
-      `Нямате право за това действие (${permission}). Правото се дава от администратор в Администрация → Роли.`,
+      `Нямате право за това действие (${permission}). Свържете се с администратора си.`,
     userNotAuthenticated: 'Потребителят не е удостоверен',
     noRoleAssigned: 'Няма зададена роля за тази компания',
   },
