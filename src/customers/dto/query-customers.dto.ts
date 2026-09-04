@@ -5,6 +5,7 @@ import {
   IsBoolean,
   IsInt,
   IsDateString,
+  IsIn,
   Min,
   Max,
 } from 'class-validator';
@@ -61,15 +62,16 @@ export class QueryCustomersDto {
   @IsInt()
   @IsOptional()
   @Min(1)
-  @Max(1000)
+  @Max(100)
   @Transform(({ value }) => parseInt(value, 10))
   limit?: number;
 
-  @IsString()
+  // Бял списък — sortBy отива директно в Prisma orderBy
   @IsOptional()
+  @IsIn(['createdAt', 'updatedAt', 'companyName', 'firstName', 'lastName', 'email', 'city', 'stage', 'type'])
   sortBy?: string;
 
-  @IsString()
   @IsOptional()
+  @IsIn(['asc', 'desc'])
   sortOrder?: 'asc' | 'desc';
 }

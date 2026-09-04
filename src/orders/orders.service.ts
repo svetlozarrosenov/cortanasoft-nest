@@ -8,6 +8,7 @@ import {
   CreateOrderDto,
   UpdateOrderDto,
   QueryOrdersDto,
+  QueryUnfulfilledDto,
   FulfillOrderDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
@@ -452,11 +453,19 @@ export class OrdersService {
   // hasn't yet had a serial / batch assigned. The frontend tags each row
   // RED / AMBER / GRAY based on stock availability + payment status so
   // the admin sees the queue of "ready to fulfil" sales at a glance.
-  async findUnfulfilledItems(companyId: string) {
+  async findUnfulfilledItems(companyId: string, query: QueryUnfulfilledDto = {}) {
+    // Само редове без разпределение по продукт с проследяване на наличност —
+    // филтрира се в БД, за да не теглим всички редове на отворените поръчки.
+    const pendingItemWhere: Prisma.OrderItemWhereInput = {
+      inventorySerialId: null,
+      inventoryBatchId: null,
+      product: { trackInventory: true },
+    };
     const orders = await this.prisma.order.findMany({
       where: {
         companyId,
         status: { notIn: ['CANCELLED', 'DELIVERED', 'DRAFT'] },
+        items: { some: pendingItemWhere },
       },
       orderBy: { orderDate: 'asc' },
       select: {
@@ -471,6 +480,7 @@ export class OrdersService {
         customerName: true,
         customerEmail: true,
         items: {
+          where: pendingItemWhere,
           select: {
             id: true,
             quantity: true,
@@ -620,12 +630,45 @@ export class OrdersService {
       return a.orderDate.localeCompare(b.orderDate);
     });
 
+    // Summary е по пълния набор; филтри + страниране само за редовете
+    const summary = {
+      total: rows.length,
+      ready: rows.filter((r) => r.readiness === 'ready').length,
+      awaitingStock: rows.filter((r) => r.readiness === 'awaiting-stock').length,
+    };
+
+    const { readiness, paymentStatus, page = 1, limit = 50 } = query;
+    const tokens = (query.search || '')
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 5);
+    const filtered = rows.filter((r) => {
+      if (readiness && r.readiness !== readiness) return false;
+      if (paymentStatus && r.paymentStatus !== paymentStatus) return false;
+      if (tokens.length > 0) {
+        const hay = [
+          r.orderNumber,
+          r.item.productSku,
+          r.item.productName,
+          r.customerName,
+          r.customerEmail || '',
+        ]
+          .join(' ')
+          .toLowerCase();
+        if (!tokens.every((tk) => hay.includes(tk))) return false;
+      }
+      return true;
+    });
+
     return {
-      items: rows,
-      summary: {
-        total: rows.length,
-        ready: rows.filter((r) => r.readiness === 'ready').length,
-        awaitingStock: rows.filter((r) => r.readiness === 'awaiting-stock').length,
+      items: filtered.slice((page - 1) * limit, page * limit),
+      summary,
+      meta: {
+        total: filtered.length,
+        page,
+        limit,
+        totalPages: Math.ceil(filtered.length / limit),
       },
     };
   }

@@ -8,17 +8,14 @@ import {
   CreatePriceListDto,
   UpdatePriceListDto,
   UpsertPriceListItemDto,
+  QueryPriceListItemsDto,
 } from './dto';
+import { Prisma } from '@prisma/client';
+import { buildTokenSearch } from '../common/utils/search-tokens';
 
+// Редовете (items) НЕ се включват в детайла — идват странирано от findItems,
+// защото листа „всички продукти" може да има 1000+ реда.
 const PRICE_LIST_INCLUDE = {
-  items: {
-    include: {
-      product: {
-        select: { id: true, sku: true, name: true, unit: true, salePrice: true },
-      },
-    },
-    orderBy: { createdAt: 'asc' as const },
-  },
   customers: {
     select: {
       id: true,
@@ -54,6 +51,41 @@ export class PriceListsService {
       throw new NotFoundException('Ценовата листа не е намерена');
     }
     return priceList;
+  }
+
+  // Редове на листата — странирано, с търсене по име/SKU на продукта
+  async findItems(companyId: string, id: string, query: QueryPriceListItemsDto) {
+    await this.findOne(companyId, id);
+    const { search, page = 1, limit = 50 } = query;
+
+    const where: Prisma.PriceListItemWhereInput = { priceListId: id };
+    const tokenSearch = buildTokenSearch<Prisma.ProductWhereInput>(search, [
+      'name',
+      'sku',
+    ]);
+    if (tokenSearch) {
+      where.product = { AND: tokenSearch.AND };
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.priceListItem.findMany({
+        where,
+        include: {
+          product: {
+            select: { id: true, sku: true, name: true, unit: true, salePrice: true },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.priceListItem.count({ where }),
+    ]);
+
+    return {
+      data: items,
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   async create(companyId: string, dto: CreatePriceListDto) {

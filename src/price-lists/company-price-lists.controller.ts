@@ -15,6 +15,7 @@ import {
   UpdatePriceListDto,
   UpsertPriceListItemDto,
   AssignCustomerDto,
+  QueryPriceListItemsDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -78,6 +79,16 @@ export class CompanyPriceListsController {
   @RequireDelete('erp', 'priceLists')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.priceListsService.remove(companyId, id);
+  }
+
+  @Get(':id/items')
+  @RequireView('erp', 'priceLists')
+  findItems(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Query() query: QueryPriceListItemsDto,
+  ) {
+    return this.priceListsService.findItems(companyId, id, query);
   }
 
   @Post(':id/items')

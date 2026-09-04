@@ -17,6 +17,7 @@ import {
   CreateOrderDto,
   UpdateOrderDto,
   QueryOrdersDto,
+  QueryUnfulfilledDto,
   FulfillOrderDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -66,8 +67,11 @@ export class CompanyOrdersController {
   // stock numbers joined in.
   @Get('unfulfilled')
   @RequireView('erp', 'unfulfilled')
-  unfulfilled(@Param('companyId') companyId: string) {
-    return this.ordersService.findUnfulfilledItems(companyId);
+  unfulfilled(
+    @Param('companyId') companyId: string,
+    @Query() query: QueryUnfulfilledDto,
+  ) {
+    return this.ordersService.findUnfulfilledItems(companyId, query);
   }
 
   @Get('export')

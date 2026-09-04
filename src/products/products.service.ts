@@ -8,6 +8,7 @@ import { WordPressService } from '../wordpress/wordpress.service';
 import { CloudCartService } from '../cloudcart/cloudcart.service';
 import { CreateProductDto, UpdateProductDto, QueryProductsDto } from './dto';
 import { Prisma, ProductType } from '@prisma/client';
+import { buildTokenSearch } from '../common/utils/search-tokens';
 
 const SKU_PREFIX_BY_TYPE: Record<ProductType, string> = {
   PRODUCT: 'PRD',
@@ -142,13 +143,15 @@ export class ProductsService {
       companyId,
     };
 
-    // Търсене по име, SKU или баркод
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { sku: { contains: search, mode: 'insensitive' } },
-        { barcode: { contains: search, mode: 'insensitive' } },
-      ];
+    // Търсене по име, SKU или баркод — всяка дума трябва да съвпадне
+    // ("кабел 3x1.5" намира "Кабел ПВВ-МБ1 3x1.5", а не всичко с "кабел")
+    const tokenSearch = buildTokenSearch<Prisma.ProductWhereInput>(search, [
+      'name',
+      'sku',
+      'barcode',
+    ]);
+    if (tokenSearch) {
+      where.AND = tokenSearch.AND;
     }
 
     if (type) {

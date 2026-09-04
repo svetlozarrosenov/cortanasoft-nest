@@ -4,7 +4,9 @@ import {
   IsEnum,
   IsBoolean,
   IsNumber,
+  IsIn,
   Min,
+  Max,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ProductType } from '@prisma/client';
@@ -37,10 +39,12 @@ export class QueryProductsDto {
   @Type(() => Number)
   @IsNumber()
   @Min(1)
+  @Max(100)
   limit?: number = 20;
 
+  // Бял списък — sortBy отива директно в Prisma orderBy
   @IsOptional()
-  @IsString()
+  @IsIn(['createdAt', 'updatedAt', 'name', 'sku', 'salePrice', 'purchasePrice', 'type'])
   sortBy?: string = 'createdAt';
 
   @IsOptional()

@@ -11,6 +11,7 @@ import {
   UpdateInventorySerialDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
+import { buildTokenSearch } from '../common/utils/search-tokens';
 import { ErrorMessages } from '../common/constants/error-messages';
 
 @Injectable()
@@ -439,12 +440,13 @@ export class InventoryService {
     const productWhere: Prisma.ProductWhereInput = {
       companyId,
       ...(categoryId && { categoryId }),
-      ...(search && {
-        OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { sku: { contains: search, mode: 'insensitive' } },
-        ],
-      }),
+      // Всяка дума от търсенето трябва да съвпадне в име/SKU/баркод/категория
+      ...buildTokenSearch<Prisma.ProductWhereInput>(search, [
+        'name',
+        'sku',
+        'barcode',
+        (f) => ({ category: { name: f } }),
+      ]),
     };
 
     // When hasStock or belowMinStock filters are active, we need to fetch ALL products
@@ -458,9 +460,16 @@ export class InventoryService {
         id: true,
         sku: true,
         name: true,
+        barcode: true,
         unit: true,
         minStock: true,
         type: true,
+        salePrice: true,
+        vatRate: true,
+        weight: true,
+        dimensionsL: true,
+        dimensionsW: true,
+        dimensionsH: true,
         category: {
           select: { id: true, name: true },
         },
@@ -557,9 +566,16 @@ export class InventoryService {
           id: product.id,
           sku: product.sku,
           name: product.name,
+          barcode: product.barcode,
           unit: product.unit,
           minStock: product.minStock,
           type: product.type,
+          salePrice: product.salePrice,
+          vatRate: product.vatRate,
+          weight: product.weight,
+          dimensionsL: product.dimensionsL,
+          dimensionsW: product.dimensionsW,
+          dimensionsH: product.dimensionsH,
           category: product.category,
         },
         totalQuantity,

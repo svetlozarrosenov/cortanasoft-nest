@@ -5,6 +5,7 @@ import {
   IsDateString,
   IsInt,
   Min,
+  Max,
   IsIn,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
@@ -109,5 +110,6 @@ export class QueryStockLevelsDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(500)
   limit?: number = 20;
 }
