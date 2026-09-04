@@ -50,6 +50,11 @@ export class UpdateLeaveDto {
   @IsOptional()
   @MaxLength(255)
   attachmentName?: string;
+
+  // Заместник за периода (по избор) — служител от същата компания
+  @IsString()
+  @IsOptional()
+  substituteUserId?: string | null;
 }
 
 export class ApproveLeaveDto {

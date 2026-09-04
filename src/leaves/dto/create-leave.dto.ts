@@ -58,6 +58,11 @@ export class CreateLeaveDto {
   @MaxLength(255)
   attachmentName?: string;
 
+  // Заместник за периода (по избор) — служител от същата компания
+  @IsString()
+  @IsOptional()
+  substituteUserId?: string;
+
   // Подаване от името на служител (само за HR/мениджъри)
   @IsString()
   @IsOptional()

@@ -23,4 +23,18 @@ export class UpdateHrSettingsDto {
   @Max(365)
   @IsOptional()
   annualLeaveDays?: number;
+
+  /** Колко дни назад HR може да въвежда отсъствие (0 = без ограничение) */
+  @IsInt()
+  @Min(0)
+  @Max(3650)
+  @IsOptional()
+  leaveMaxBackdateDays?: number;
+
+  /** Минимално предизвестие в календарни дни за платен отпуск от служител (0 = няма) */
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  @IsOptional()
+  leaveMinNoticeDays?: number;
 }

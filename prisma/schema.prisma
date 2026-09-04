@@ -538,9 +538,10 @@ model User {
   chatMessages       ChatMessage[]
 
   // Leaves (Отпуски)
-  leaveRequests  Leave[]        @relation("LeaveRequests")
-  leaveApprovals Leave[]        @relation("LeaveApprovals")
-  leaveBalances  LeaveBalance[]
+  leaveRequests      Leave[]        @relation("LeaveRequests")
+  leaveApprovals     Leave[]        @relation("LeaveApprovals")
+  leaveSubstitutions Leave[]        @relation("LeaveSubstitutions")
+  leaveBalances      LeaveBalance[]
 
   // Push Notifications
   pushSubscriptions PushSubscription[]
@@ -681,6 +682,10 @@ model HrSettings {
   workDayStart String @default("08:00") // HH:mm
   workDayEnd   String @default("17:00") // HH:mm
   breakMinutes Int    @default(60)
+
+  // Политика за отсъствия
+  leaveMaxBackdateDays Int @default(90) // Колко дни назад HR може да въвежда отсъствие (0 = без ограничение)
+  leaveMinNoticeDays   Int @default(0) // Минимално предизвестие (календарни дни) за платен отпуск от служител
 
   companyId String  @unique
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -2910,6 +2915,10 @@ model Leave {
   // Компания
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Заместник за периода (по избор) — стандартна графа в бланката „Молба за отпуск"
+  substituteUserId String?
+  substituteUser   User?   @relation("LeaveSubstitutions", fields: [substituteUserId], references: [id], onDelete: SetNull)
 
   // Одобрител (мениджър)
   approvedById  String?

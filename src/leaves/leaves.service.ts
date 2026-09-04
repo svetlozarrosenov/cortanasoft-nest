@@ -16,6 +16,12 @@ export interface LeaveViewer {
   userId: string;
   privileged: boolean;
 }
+
+// HrSettings.leaveMaxBackdateDays / leaveMinNoticeDays
+interface LeavePolicy {
+  maxBackdateDays: number;
+  minNoticeDays: number;
+}
 import {
   CreateLeaveDto,
   UpdateLeaveDto,
@@ -86,11 +92,146 @@ export class LeavesService {
       );
     }
 
-    if (dto.type === 'SICK' && !dto.documentNumber?.trim() && !dto.attachmentKey) {
+    if (
+      dto.type === 'SICK' &&
+      !dto.documentNumber?.trim() &&
+      !dto.attachmentKey
+    ) {
       throw new BadRequestException(
         'За болничен е необходим номер на болничен лист или прикачен документ',
       );
     }
+  }
+
+  // Политика за отсъствия на компанията (HR > Настройки)
+  private async getLeavePolicy(companyId: string): Promise<LeavePolicy> {
+    const s = await this.prisma.hrSettings.findUnique({
+      where: { companyId },
+      select: { leaveMaxBackdateDays: true, leaveMinNoticeDays: true },
+    });
+    return {
+      maxBackdateDays: s?.leaveMaxBackdateDays ?? 90,
+      minNoticeDays: s?.leaveMinNoticeDays ?? 0,
+    };
+  }
+
+  // Правила за периода — общи за create и update, за да не се заобикалят
+  // с редакция на чакаща молба. Връща броя работни дни (сървърът ги смята
+  // сам — не се доверяваме на стойността от клиента).
+  private validatePeriod(p: {
+    type: string;
+    startDate: Date;
+    endDate: Date;
+    halfDay: boolean;
+    privileged: boolean;
+    /** null = датите не се променят (редакция на бележка) — без проверки за минало/предизвестие */
+    policy: LeavePolicy | null;
+  }): number {
+    if (isNaN(p.startDate.getTime()) || isNaN(p.endDate.getTime())) {
+      throw new BadRequestException('Невалидна дата');
+    }
+    if (p.endDate < p.startDate) {
+      throw new BadRequestException('End date cannot be before start date');
+    }
+
+    if (p.policy) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const dayMs = 86_400_000;
+      const daysFromToday = Math.round(
+        (p.startDate.getTime() - today.getTime()) / dayMs,
+      );
+
+      // Молбата е заявка за бъдещето. Изключения: HR/мениджъри въвеждат със
+      // задна дата, а болничният по природа е такъв — листът се носи след
+      // като си бил болен.
+      if (!p.privileged && p.type !== 'SICK' && daysFromToday < 0) {
+        throw new BadRequestException('Началната дата не може да е в миналото');
+      }
+
+      // Таван за въвеждане назад — пази от сгрешена година и от „забравени" молби
+      const { maxBackdateDays, minNoticeDays } = p.policy;
+      if (maxBackdateDays > 0 && daysFromToday < -maxBackdateDays) {
+        throw new BadRequestException(
+          `Отсъствие може да се въвежда най-много ${maxBackdateDays} дни назад`,
+        );
+      }
+
+      // Минимално предизвестие за платен отпуск — само за служители; HR може да
+      // одобри и „за утре"
+      if (
+        !p.privileged &&
+        p.type === 'ANNUAL' &&
+        minNoticeDays > 0 &&
+        daysFromToday < minNoticeDays
+      ) {
+        throw new BadRequestException(
+          `Платен отпуск се заявява поне ${minNoticeDays} дни предварително`,
+        );
+      }
+    }
+
+    const { total: workingDays } = computeWorkingDays(p.startDate, p.endDate);
+    if (workingDays === 0) {
+      throw new BadRequestException(
+        'Периодът не съдържа работни дни (уикенди/официални празници)',
+      );
+    }
+
+    // Половин ден е възможен само за заявка от един работен ден
+    if (p.halfDay && workingDays !== 1) {
+      throw new BadRequestException(
+        'Половин ден може да се заяви само за един работен ден',
+      );
+    }
+    return workingDays;
+  }
+
+  private async assertNoOverlap(
+    companyId: string,
+    userId: string,
+    startDate: Date,
+    endDate: Date,
+    excludeId?: string,
+  ) {
+    const overlapping = await this.prisma.leave.findFirst({
+      where: {
+        companyId,
+        userId,
+        status: { in: ['PENDING', 'APPROVED'] },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+        startDate: { lte: endDate },
+        endDate: { gte: startDate },
+      },
+      select: { id: true },
+    });
+    if (overlapping) {
+      throw new BadRequestException(
+        'You already have a leave request for this period',
+      );
+    }
+  }
+
+  // Заместник: трябва да е друг служител от същата компания; '' / null изчистват
+  private async resolveSubstitute(
+    companyId: string,
+    userId: string,
+    substituteUserId: string | null | undefined,
+  ): Promise<string | null> {
+    if (!substituteUserId) return null;
+    if (substituteUserId === userId) {
+      throw new BadRequestException(
+        'Служителят не може да е заместник на себе си',
+      );
+    }
+    const member = await this.prisma.userCompany.findUnique({
+      where: { userId_companyId: { userId: substituteUserId, companyId } },
+      select: { id: true },
+    });
+    if (!member) {
+      throw new NotFoundException('Заместникът не е намерен в компанията');
+    }
+    return substituteUserId;
   }
 
   // Има ли четящият право да управлява отпуски (HR/мениджър) — вижда чужди детайли
@@ -224,64 +365,26 @@ export class LeavesService {
       userId = dto.userId;
     }
 
-    // Validate dates
     const startDate = new Date(dto.startDate);
     const endDate = new Date(dto.endDate);
-
-    if (endDate < startDate) {
-      throw new BadRequestException('End date cannot be before start date');
-    }
-
-    // Забрана за заявка с начална дата в миналото (HR/мениджъри могат да въвеждат със задна дата)
-    if (!privileged) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      if (startDate < today) {
-        throw new BadRequestException(
-          'Началната дата не може да е в миналото',
-        );
-      }
-    }
-
-    // Сървърът сам пресмята работните дни (без уикенди и официални празници) —
-    // не се доверяваме на стойността от клиента
-    const { total: workingDays } = computeWorkingDays(startDate, endDate);
-    if (workingDays === 0) {
-      throw new BadRequestException(
-        'Периодът не съдържа работни дни (уикенди/официални празници)',
-      );
-    }
-
-    // Половин ден е възможен само за заявка от един работен ден
-    if (dto.halfDay && workingDays !== 1) {
-      throw new BadRequestException(
-        'Половин ден може да се заяви само за един работен ден',
-      );
-    }
+    const workingDays = this.validatePeriod({
+      type: dto.type,
+      startDate,
+      endDate,
+      halfDay: dto.halfDay ?? false,
+      privileged,
+      policy: await this.getLeavePolicy(companyId),
+    });
 
     // Изисквания за обосновка/документ според типа
     this.validateLeaveDetails(dto);
 
-    // Check for overlapping leaves
-    const overlapping = await this.prisma.leave.findFirst({
-      where: {
-        companyId,
-        userId,
-        status: { in: ['PENDING', 'APPROVED'] },
-        OR: [
-          {
-            startDate: { lte: endDate },
-            endDate: { gte: startDate },
-          },
-        ],
-      },
-    });
-
-    if (overlapping) {
-      throw new BadRequestException(
-        'You already have a leave request for this period',
-      );
-    }
+    await this.assertNoOverlap(companyId, userId, startDate, endDate);
+    const substituteUserId = await this.resolveSubstitute(
+      companyId,
+      userId,
+      dto.substituteUserId,
+    );
 
     const created = await this.prisma.leave.create({
       data: {
@@ -294,6 +397,7 @@ export class LeavesService {
         documentNumber: dto.documentNumber,
         attachmentKey: dto.attachmentKey,
         attachmentName: dto.attachmentName,
+        substituteUserId,
         userId,
         companyId,
         status: 'PENDING',
@@ -308,6 +412,13 @@ export class LeavesService {
           },
         },
         approvedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        substituteUser: {
           select: {
             id: true,
             firstName: true,
@@ -333,7 +444,11 @@ export class LeavesService {
   }
 
   // Find all leaves with filters
-  async findAll(companyId: string, query: QueryLeavesDto, viewer?: LeaveViewer) {
+  async findAll(
+    companyId: string,
+    query: QueryLeavesDto,
+    viewer?: LeaveViewer,
+  ) {
     const {
       search,
       status,
@@ -341,6 +456,7 @@ export class LeavesService {
       userId,
       startDate,
       endDate,
+      scope,
       page = 1,
       limit = 20,
       sortBy = 'createdAt',
@@ -363,12 +479,24 @@ export class LeavesService {
       where.userId = userId;
     }
 
+    // Периодът е „застъпване" — отпуск 28.12–05.01 се вижда и в двете години
+    if (endDate) {
+      where.startDate = { lte: new Date(endDate) };
+    }
     if (startDate) {
-      where.startDate = { gte: new Date(startDate) };
+      where.endDate = { gte: new Date(startDate) };
     }
 
-    if (endDate) {
-      where.endDate = { lte: new Date(endDate) };
+    // Предстоящи / минали спрямо днес (текущо отсъствие е „предстоящо")
+    if (scope) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const endFilter =
+        (where.endDate as Prisma.DateTimeFilter | undefined) ?? {};
+      where.endDate =
+        scope === 'upcoming'
+          ? { ...endFilter, gte: this.laterDate(endFilter.gte, today) }
+          : { ...endFilter, lt: today };
     }
 
     if (search) {
@@ -392,6 +520,13 @@ export class LeavesService {
             },
           },
           approvedBy: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+          substituteUser: {
             select: {
               id: true,
               firstName: true,
@@ -431,6 +566,13 @@ export class LeavesService {
           },
         },
         approvedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        substituteUser: {
           select: {
             id: true,
             firstName: true,
@@ -477,29 +619,69 @@ export class LeavesService {
     // Валидирай според крайния тип/обосновка/документ
     this.validateLeaveDetails({
       type: dto.type ?? leave.type,
-      reason: dto.reason !== undefined ? dto.reason : leave.reason ?? undefined,
+      reason:
+        dto.reason !== undefined ? dto.reason : (leave.reason ?? undefined),
       documentNumber:
         dto.documentNumber !== undefined
           ? dto.documentNumber
-          : leave.documentNumber ?? undefined,
+          : (leave.documentNumber ?? undefined),
       attachmentKey:
         dto.attachmentKey !== undefined
           ? dto.attachmentKey
-          : leave.attachmentKey ?? undefined,
+          : (leave.attachmentKey ?? undefined),
     });
 
-    const data: Prisma.LeaveUpdateInput = {};
+    // Крайното състояние минава през същите правила като при create —
+    // иначе молба за утре се създава и после се „премества" в миналото
+    const type = dto.type ?? leave.type;
+    const startDate = dto.startDate ? new Date(dto.startDate) : leave.startDate;
+    const endDate = dto.endDate ? new Date(dto.endDate) : leave.endDate;
+    const halfDay = dto.halfDay ?? leave.halfDay;
+    const workingDays = this.validatePeriod({
+      type,
+      startDate,
+      endDate,
+      halfDay,
+      privileged: await this.isPrivileged(companyId, userId),
+      policy:
+        dto.startDate || dto.endDate
+          ? await this.getLeavePolicy(companyId)
+          : null,
+    });
+    if (dto.startDate || dto.endDate) {
+      await this.assertNoOverlap(
+        companyId,
+        leave.userId,
+        startDate,
+        endDate,
+        id,
+      );
+    }
 
-    if (dto.type) data.type = dto.type;
-    if (dto.startDate) data.startDate = new Date(dto.startDate);
-    if (dto.endDate) data.endDate = new Date(dto.endDate);
-    if (dto.days) data.days = dto.days;
-    if (dto.halfDay !== undefined) data.halfDay = dto.halfDay;
+    const data: Prisma.LeaveUpdateInput = {
+      type,
+      startDate,
+      endDate,
+      days: workingDays,
+      halfDay,
+    };
+
     if (dto.reason !== undefined) data.reason = dto.reason;
-    if (dto.documentNumber !== undefined) data.documentNumber = dto.documentNumber;
+    if (dto.documentNumber !== undefined)
+      data.documentNumber = dto.documentNumber;
     if (dto.attachmentKey !== undefined) data.attachmentKey = dto.attachmentKey;
     if (dto.attachmentName !== undefined)
       data.attachmentName = dto.attachmentName;
+    if (dto.substituteUserId !== undefined) {
+      const substituteUserId = await this.resolveSubstitute(
+        companyId,
+        leave.userId,
+        dto.substituteUserId,
+      );
+      data.substituteUser = substituteUserId
+        ? { connect: { id: substituteUserId } }
+        : { disconnect: true };
+    }
 
     return this.prisma.leave.update({
       where: { id },
@@ -514,6 +696,13 @@ export class LeavesService {
           },
         },
         approvedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+        substituteUser: {
           select: {
             id: true,
             firstName: true,
@@ -597,6 +786,13 @@ export class LeavesService {
             lastName: true,
           },
         },
+        substituteUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
       },
     });
 
@@ -661,6 +857,13 @@ export class LeavesService {
             lastName: true,
           },
         },
+        substituteUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
       },
     });
 
@@ -674,8 +877,10 @@ export class LeavesService {
     return rejected;
   }
 
-  // Cancel a leave request
-  async cancel(companyId: string, id: string, userId: string) {
+  // Анулиране. Служителят оттегля своя молба — чакаща винаги, одобрена само
+  // докато не е започнала (след това е факт в присъствията и се коригира от
+  // HR). HR/мениджър може да анулира чужда, включително минала (корекция).
+  async cancel(companyId: string, id: string, viewer: LeaveViewer) {
     const leave = await this.prisma.leave.findFirst({
       where: { id, companyId },
     });
@@ -684,7 +889,8 @@ export class LeavesService {
       throw new NotFoundException('Leave request not found');
     }
 
-    if (leave.userId !== userId) {
+    const isOwn = leave.userId === viewer.userId;
+    if (!isOwn && !viewer.privileged) {
       throw new ForbiddenException(
         'You can only cancel your own leave requests',
       );
@@ -692,6 +898,16 @@ export class LeavesService {
 
     if (!['PENDING', 'APPROVED'].includes(leave.status)) {
       throw new BadRequestException('This leave request cannot be cancelled');
+    }
+
+    if (leave.status === 'APPROVED' && !viewer.privileged) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (leave.startDate <= today) {
+        throw new BadRequestException(
+          'Започнал или минал отпуск не може да се оттегли — обърнете се към HR',
+        );
+      }
     }
 
     // Ако е била одобрена — върни приспаднатите дни по години
@@ -708,7 +924,7 @@ export class LeavesService {
       }
     }
 
-    return this.prisma.leave.update({
+    const cancelled = await this.prisma.leave.update({
       where: { id },
       data: {
         status: 'CANCELLED',
@@ -729,8 +945,27 @@ export class LeavesService {
             lastName: true,
           },
         },
+        substituteUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
       },
     });
+
+    // Служителят трябва да разбере, ако HR му анулира отпуска
+    if (!isOwn) {
+      await this.push.sendToUser(cancelled.userId, {
+        title: 'Анулиран отпуск',
+        body: `Вашият ${this.leaveTypeLabel(cancelled.type)} (${this.fmtDate(cancelled.startDate)} – ${this.fmtDate(cancelled.endDate)}) е анулиран`,
+        url: `/dashboard/${companyId}/hr/leaves`,
+        tag: `leave-${cancelled.id}`,
+      });
+    }
+
+    return cancelled;
   }
 
   // Delete a leave request (only pending)
@@ -792,12 +1027,16 @@ export class LeavesService {
   }
 
   // Resolve annual leave days: employee override > company default > 20
-  private async resolveAnnualLeaveDays(companyId: string, userId: string): Promise<number> {
+  private async resolveAnnualLeaveDays(
+    companyId: string,
+    userId: string,
+  ): Promise<number> {
     const userCompany = await this.prisma.userCompany.findUnique({
       where: { userId_companyId: { userId, companyId } },
       select: { maxVacationDays: true },
     });
-    if (userCompany?.maxVacationDays != null) return userCompany.maxVacationDays;
+    if (userCompany?.maxVacationDays != null)
+      return userCompany.maxVacationDays;
 
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
@@ -850,7 +1089,9 @@ export class LeavesService {
     const data: Prisma.LeaveBalanceUpdateInput = {};
     if (dto.annualCarried !== undefined) {
       if (dto.annualCarried < 0) {
-        throw new BadRequestException('Пренесените дни не може да са отрицателни');
+        throw new BadRequestException(
+          'Пренесените дни не може да са отрицателни',
+        );
       }
       data.annualCarried = dto.annualCarried;
     }
@@ -878,37 +1119,99 @@ export class LeavesService {
     return this.findAll(companyId, { ...query, userId });
   }
 
+  // Кой друг отсъства в периода (чакащи + одобрени). Достъпно за всеки служител
+  // на компанията — само имена и дати; видът отсъствие се вижда само от HR.
+  async findWhoIsOut(
+    companyId: string,
+    start: string,
+    end: string,
+    viewer: LeaveViewer,
+    excludeUserId?: string,
+  ) {
+    const startDate = new Date(start);
+    const endDate = new Date(end);
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      throw new BadRequestException('Невалидна дата');
+    }
+    const leaves = await this.prisma.leave.findMany({
+      where: {
+        companyId,
+        status: { in: ['PENDING', 'APPROVED'] },
+        startDate: { lte: endDate },
+        endDate: { gte: startDate },
+        ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
+      },
+      select: {
+        id: true,
+        userId: true,
+        type: true,
+        status: true,
+        startDate: true,
+        endDate: true,
+        user: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: { startDate: 'asc' },
+    });
+    return leaves.map((l) => ({
+      ...l,
+      type: viewer.privileged || l.userId === viewer.userId ? l.type : null,
+    }));
+  }
+
+  private laterDate(a: Date | string | undefined, b: Date): Date {
+    if (!a) return b;
+    const ad = new Date(a);
+    return ad > b ? ad : b;
+  }
+
   // Get summary stats
   async getSummary(companyId: string) {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    // Текущата седмица Пн–Нд
+    const weekStart = new Date(now);
+    weekStart.setHours(0, 0, 0, 0);
+    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    weekEnd.setHours(23, 59, 59, 999);
 
-    const [pending, approvedThisMonth, onLeaveToday] = await Promise.all([
-      this.prisma.leave.count({
-        where: { companyId, status: 'PENDING' },
-      }),
-      this.prisma.leave.count({
-        where: {
-          companyId,
-          status: 'APPROVED',
-          approvedAt: { gte: startOfMonth, lte: endOfMonth },
-        },
-      }),
-      this.prisma.leave.count({
-        where: {
-          companyId,
-          status: 'APPROVED',
-          startDate: { lte: now },
-          endDate: { gte: now },
-        },
-      }),
-    ]);
+    const [pending, approvedThisMonth, onLeaveToday, onLeaveThisWeek] =
+      await Promise.all([
+        this.prisma.leave.count({
+          where: { companyId, status: 'PENDING' },
+        }),
+        this.prisma.leave.count({
+          where: {
+            companyId,
+            status: 'APPROVED',
+            approvedAt: { gte: startOfMonth, lte: endOfMonth },
+          },
+        }),
+        this.prisma.leave.count({
+          where: {
+            companyId,
+            status: 'APPROVED',
+            startDate: { lte: now },
+            endDate: { gte: now },
+          },
+        }),
+        this.prisma.leave.count({
+          where: {
+            companyId,
+            status: 'APPROVED',
+            startDate: { lte: weekEnd },
+            endDate: { gte: weekStart },
+          },
+        }),
+      ]);
 
     return {
       pending,
       approvedThisMonth,
       onLeaveToday,
+      onLeaveThisWeek,
     };
   }
 }

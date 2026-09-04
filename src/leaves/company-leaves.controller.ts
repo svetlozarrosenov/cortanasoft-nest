@@ -101,10 +101,18 @@ export class CompanyLeavesController {
       { header: 'Status', key: 'status', width: 12 },
       { header: 'Reason', key: 'reason', width: 30 },
     ];
-    const buffer = await this.exportService.generateFile(columns, data, format, 'Leaves');
+    const buffer = await this.exportService.generateFile(
+      columns,
+      data,
+      format,
+      'Leaves',
+    );
     const ext = format === 'csv' ? 'csv' : 'xlsx';
     res.set({
-      'Content-Type': format === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        format === 'csv'
+          ? 'text/csv'
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="leaves-${new Date().toISOString().slice(0, 10)}.${ext}"`,
     });
     return new StreamableFile(buffer);
@@ -145,6 +153,28 @@ export class CompanyLeavesController {
       companyId,
       req.user.id,
       year ? parseInt(year) : undefined,
+    );
+  }
+
+  // Кой отсъства в периода — всеки служител може да види колегите си (без вид)
+  @Get('who-is-out')
+  async whoIsOut(
+    @Param('companyId') companyId: string,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+    @Query('excludeUserId') excludeUserId: string | undefined,
+    @Request() req: any,
+  ) {
+    if (!startDate || !endDate) {
+      throw new BadRequestException('startDate и endDate са задължителни');
+    }
+    const viewer = await this.leavesService.buildViewer(companyId, req.user.id);
+    return this.leavesService.findWhoIsOut(
+      companyId,
+      startDate,
+      endDate,
+      viewer,
+      excludeUserId,
     );
   }
 
@@ -246,15 +276,16 @@ export class CompanyLeavesController {
     return this.leavesService.reject(companyId, id, req.user.id, dto);
   }
 
-  // Cancel a leave request
+  // Анулиране — всеки може да оттегли своя молба (правилата са в сървиса);
+  // чужди анулира само HR/мениджър
   @Post(':id/cancel')
-  @RequireEdit('hr', 'leaves')
   async cancel(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
     @Request() req: any,
   ) {
-    return this.leavesService.cancel(companyId, id, req.user.id);
+    const viewer = await this.leavesService.buildViewer(companyId, req.user.id);
+    return this.leavesService.cancel(companyId, id, viewer);
   }
 
   // Delete a leave request

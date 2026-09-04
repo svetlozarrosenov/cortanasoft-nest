@@ -53,7 +53,12 @@ export class QueryLeavesDto {
   @IsOptional()
   limit?: number = 20;
 
-  @IsString()
+  /** upcoming = още не е приключило (вкл. текущо); past = приключило */
+  @IsEnum(['upcoming', 'past'])
+  @IsOptional()
+  scope?: 'upcoming' | 'past';
+
+  @IsEnum(['createdAt', 'startDate', 'endDate', 'days', 'status', 'type'])
   @IsOptional()
   sortBy?: string = 'createdAt';
 

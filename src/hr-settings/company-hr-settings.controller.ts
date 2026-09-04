@@ -21,6 +21,8 @@ export class CompanyHrSettingsController {
     { module: 'hr', page: 'attendance', action: 'view' },
     { module: 'hr', page: 'myAttendance', action: 'view' },
     { module: 'hr', page: 'employees', action: 'view' },
+    { module: 'hr', page: 'leaves', action: 'view' },
+    { module: 'hr', page: 'leaves', action: 'create' },
     { module: 'hr', page: 'positions', action: 'view' },
     { module: 'hr', page: 'payroll', action: 'view' },
   )
@@ -30,7 +32,10 @@ export class CompanyHrSettingsController {
 
   @Patch()
   @RequireEdit('hr', 'settings')
-  update(@Param('companyId') companyId: string, @Body() dto: UpdateHrSettingsDto) {
+  update(
+    @Param('companyId') companyId: string,
+    @Body() dto: UpdateHrSettingsDto,
+  ) {
     return this.hrSettingsService.update(companyId, dto);
   }
 }
