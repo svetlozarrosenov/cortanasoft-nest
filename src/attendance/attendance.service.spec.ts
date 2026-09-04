@@ -61,6 +61,7 @@ describe('AttendanceService', () => {
     const baseDto = {
       date: '2025-06-15',
       type: 'REGULAR',
+      userId: 'u1',
     };
 
     it('should create attendance record successfully', async () => {
@@ -149,16 +150,11 @@ describe('AttendanceService', () => {
       expect(createCall.data.workedMinutes).toBe(0);
     });
 
-    it('should use currentUserId when dto.userId is not provided', async () => {
-      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'current-user' }]);
-      mockPrisma.attendance.findFirst.mockResolvedValue(null);
-      mockPrisma.attendance.create.mockImplementation(({ data }) => Promise.resolve({ id: 'a1', ...data }));
-      mockPrisma.user.findUnique.mockResolvedValue({ id: 'current-user' });
-
-      await service.create('c1', 'current-user', baseDto as any);
-
-      const createCall = mockPrisma.attendance.create.mock.calls[0][0];
-      expect(createCall.data.userId).toBe('current-user');
+    it('refuses a record without an employee instead of defaulting to the current user', async () => {
+      await expect(
+        service.create('c1', 'current-user', { date: '2025-06-15', type: 'REGULAR' } as any),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.attendance.create).not.toHaveBeenCalled();
     });
 
     it('should create for several employees at once (userIds)', async () => {

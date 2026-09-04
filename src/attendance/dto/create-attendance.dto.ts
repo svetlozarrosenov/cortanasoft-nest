@@ -45,7 +45,7 @@ export class CreateAttendanceDto {
 
   @IsString()
   @IsOptional()
-  userId?: string; // If not provided, defaults to current user
+  userId?: string; // Задължителен (или userIds) — бекендът не подразбира текущия потребител
 
   // Няколко служители наведнъж (бригада на един обект) — има превес над userId
   @IsArray()

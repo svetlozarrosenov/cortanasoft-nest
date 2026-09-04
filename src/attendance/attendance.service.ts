@@ -34,14 +34,21 @@ export class AttendanceService {
 
   async create(
     companyId: string,
-    currentUserId: string,
+    _currentUserId: string,
     dto: CreateAttendanceDto,
   ) {
-    // Няколко служители наведнъж (бригада на един обект) или един
+    // Няколко служители наведнъж (бригада на един обект) или един.
+    // Служителят е задължителен — не се подразбира текущият потребител
+    // (собственият вход/изход е през checkIn/checkOut).
     const targetUserIds =
       dto.userIds && dto.userIds.length > 0
         ? [...new Set(dto.userIds)]
-        : [dto.userId || currentUserId];
+        : dto.userId
+          ? [dto.userId]
+          : [];
+    if (targetUserIds.length === 0) {
+      throw new BadRequestException('Избери служител');
+    }
 
     // Verify users are employees of company
     const memberships = await this.prisma.userCompany.findMany({
