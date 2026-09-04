@@ -180,6 +180,32 @@ describe('AttendanceService', () => {
     it('should store the day as UTC midnight regardless of server timezone', () => {
       expect(AttendanceService.dayKey('2025-06-15').toISOString()).toBe('2025-06-15T00:00:00.000Z');
     });
+
+    it('refuses future dates — single day, range end and picked days alike', async () => {
+      const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+      const dayAfter = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+      const today = AttendanceService.todayKey();
+
+      for (const dto of [
+        { ...baseDto, date: dayAfter },
+        { ...baseDto, date: today, dateTo: dayAfter },
+        { ...baseDto, dates: [today, dayAfter] },
+        { ...baseDto, date: tomorrow, userIds: ['u1', 'u2'] },
+      ]) {
+        await expect(service.create('c1', 'me', dto as any)).rejects.toThrow(
+          'Присъствие не може да се отбелязва за бъдеща дата',
+        );
+      }
+      // Отхвърля се преди каквато и да е заявка към базата
+      expect(mockPrisma.userCompany.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.attendance.create).not.toHaveBeenCalled();
+    });
+
+    it('computes "today" in Sofia time, not server UTC', () => {
+      // 23:30 UTC на 15.06 е вече 16.06 в София (UTC+3 през лятото)
+      expect(AttendanceService.todayKey(new Date('2025-06-15T23:30:00Z'))).toBe('2025-06-16');
+      expect(AttendanceService.todayKey(new Date('2025-06-15T12:00:00Z'))).toBe('2025-06-15');
+    });
   });
 
   describe('getDayInfo', () => {
@@ -320,6 +346,12 @@ describe('AttendanceService', () => {
   });
 
   describe('checkIn', () => {
+    it('refuses a check-in for a future date', async () => {
+      const dayAfter = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+      await expect(service.checkIn('c1', 'u1', undefined, dayAfter)).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.attendance.create).not.toHaveBeenCalled();
+    });
+
     it('should create new record when no record exists for today', async () => {
       // 1) няма отворен интервал; 2) няма празен запис за деня
       mockPrisma.attendance.findFirst.mockResolvedValue(null);

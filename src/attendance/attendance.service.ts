@@ -32,6 +32,22 @@ export class AttendanceService {
     return new Date(key.slice(0, 10) + 'T00:00:00.000Z');
   }
 
+  /** Днешната дата (YYYY-MM-DD) по българско време — сървърът е в UTC, а
+   *  „днес" за клиентите е София */
+  static todayKey(now = new Date()): string {
+    return now.toLocaleDateString('en-CA', { timeZone: 'Europe/Sofia' });
+  }
+
+  /** Присъствието е факт, не план — не се отбелязва за бъдещ ден */
+  private assertNotFuture(...dates: (string | undefined)[]) {
+    const today = AttendanceService.todayKey();
+    if (dates.some((d) => d && d.slice(0, 10) > today)) {
+      throw new BadRequestException(
+        'Присъствие не може да се отбелязва за бъдеща дата',
+      );
+    }
+  }
+
   async create(
     companyId: string,
     _currentUserId: string,
@@ -49,6 +65,8 @@ export class AttendanceService {
     if (targetUserIds.length === 0) {
       throw new BadRequestException('Избери служител');
     }
+
+    this.assertNotFuture(dto.date, dto.dateTo, ...(dto.dates ?? []));
 
     // Verify users are employees of company
     const memberships = await this.prisma.userCompany.findMany({
@@ -701,6 +719,7 @@ export class AttendanceService {
     siteId?: string,
     date?: string,
   ) {
+    this.assertNotFuture(date);
     const today = AttendanceService.dayKey(date);
 
     if (siteId) {
