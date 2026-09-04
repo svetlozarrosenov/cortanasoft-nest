@@ -95,23 +95,18 @@ export class AttendanceService {
       return this.createRange(companyId, userId, dto);
     }
 
-    // Дубликат = същият човек, ден и обект, при положение че поне единият от
-    // двата записа е „цял ден" (без часове). Няколко интервала с часове на
-    // същия обект са позволени (както при вход/изход) — сутрин и следобед.
+    // Ръчно вписване: един запис на човек за ден, независимо от обекта и
+    // часовете. Ако денят вече е отбелязан, се редактира от матрицата.
+    // (Вход/изход от „Моите присъствия" има собствена логика по-долу.)
     const date = AttendanceService.dayKey(dto.date);
     const existing = await this.prisma.attendance.findFirst({
-      where: {
-        companyId,
-        userId,
-        date,
-        siteId: dto.siteId ?? null,
-        ...(dto.checkIn ? { checkIn: null } : {}),
-      },
+      where: { companyId, userId, date },
+      select: { id: true },
     });
 
     if (existing) {
       throw new ConflictException(
-        'Вече има присъствие за този ден и обект. Редактирай съществуващия запис.',
+        'Вече има присъствие за този ден. Редактирай съществуващия запис от таблицата.',
       );
     }
 
@@ -204,8 +199,8 @@ export class AttendanceService {
   }
 
   /** Изрично избрани дни: записът се създава за всеки подаден ден — вкл.
-   *  почивни/празнични (изборът е човешки, напр. извънреден труд). Прескачат
-   *  се само точните дубликати (същия ден + обект). */
+   *  почивни/празнични (изборът е човешки, напр. извънреден труд). Дни, за
+   *  които човекът вече има запис (на който и да е обект), се прескачат. */
   private async createFromDates(
     companyId: string,
     userId: string,
@@ -239,7 +234,6 @@ export class AttendanceService {
         companyId,
         userId,
         date: { in: dateObjects },
-        siteId: dto.siteId ?? null,
       },
       select: { date: true },
     });
@@ -262,8 +256,8 @@ export class AttendanceService {
     return { count: data.length };
   }
 
-  /** Календарна информация за периода — за чиповете във формата: кой ден е
-   *  работен и кой е с одобрен отпуск на служителя */
+  /** Календарна информация за периода — за календара във формата: кой ден е
+   *  работен, кой е с одобрен отпуск и кой вече е с присъствие на служителя */
   async getDayInfo(
     companyId: string,
     userId: string,
@@ -279,36 +273,52 @@ export class AttendanceService {
       throw new BadRequestException('Периодът е твърде дълъг (макс. 3 месеца)');
     }
 
-    const leaves = await this.prisma.leave.findMany({
-      where: {
-        companyId,
-        userId,
-        status: 'APPROVED',
-        startDate: { lte: to },
-        endDate: { gte: from },
-      },
-      select: { startDate: true, endDate: true },
-    });
+    const [leaves, existing] = await Promise.all([
+      this.prisma.leave.findMany({
+        where: {
+          companyId,
+          userId,
+          status: 'APPROVED',
+          startDate: { lte: to },
+          endDate: { gte: from },
+        },
+        select: { startDate: true, endDate: true },
+      }),
+      this.prisma.attendance.findMany({
+        where: { companyId, userId, date: { gte: from, lte: to } },
+        select: { date: true },
+      }),
+    ]);
     const onLeave = (d: Date) =>
       leaves.some((l) => l.startDate <= d && l.endDate >= d);
+    const attendedDays = new Set(
+      existing.map((a) => a.date.toISOString().slice(0, 10)),
+    );
 
-    const days: { date: string; isWorkingDay: boolean; onLeave: boolean }[] = [];
+    const days: {
+      date: string;
+      isWorkingDay: boolean;
+      onLeave: boolean;
+      hasAttendance: boolean;
+    }[] = [];
     for (
       let d = new Date(from);
       d <= to;
       d = new Date(d.getTime() + 86400000)
     ) {
+      const key = d.toISOString().slice(0, 10);
       days.push({
-        date: d.toISOString().slice(0, 10),
+        date: key,
         isWorkingDay: isWorkingDay(d),
         onLeave: onLeave(d),
+        hasAttendance: attendedDays.has(key),
       });
     }
     return { days };
   }
 
   /** „От–до" вписване: по един запис на РАБОТЕН ден (КТ календара), без
-   *  дните с одобрен отпуск/болничен и без вече отбелязаните за същия обект */
+   *  дните с одобрен отпуск/болничен и без вече отбелязаните дни */
   private async createRange(
     companyId: string,
     userId: string,
@@ -341,7 +351,6 @@ export class AttendanceService {
           companyId,
           userId,
           date: { gte: from, lte: to },
-          siteId: dto.siteId ?? null,
         },
         select: { date: true },
       }),
