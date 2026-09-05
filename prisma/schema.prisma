@@ -1282,6 +1282,8 @@ model GoodsReceiptItem {
   inventoryBatches InventoryBatch[]
   inventorySerials InventorySerial[]
 
+  @@index([goodsReceiptId])
+  @@index([productId])
   @@map("goods_receipt_items")
 }
 
@@ -1871,6 +1873,10 @@ model OrderItem {
   // inventorySerialId. Старите поръчки (отпреди функцията) нямат записи тук.
   batchAllocations OrderItemBatchAllocation[]
 
+  @@index([orderId])
+  @@index([productId])
+  @@index([inventoryBatchId])
+  @@index([inventorySerialId])
   @@map("order_items")
 }
 
@@ -2183,6 +2189,7 @@ model InventoryBatch {
   productionConsumptions ProductionConsumption[]
 
   @@unique([companyId, productId, batchNumber])
+  @@index([goodsReceiptItemId])
   @@index([companyId, productId])
   @@index([companyId, expiryDate])
   @@map("inventory_batches")
@@ -2220,6 +2227,7 @@ model InventorySerial {
   serviceOrderParts    ServiceOrderPart[]
 
   @@unique([companyId, productId, serialNumber])
+  @@index([goodsReceiptItemId])
   @@index([companyId, productId])
   @@index([companyId, status])
   @@map("inventory_serials")
@@ -2321,6 +2329,7 @@ model InvoiceItem {
   orderItemId String?
   orderItem   OrderItem? @relation(fields: [orderItemId], references: [id])
 
+  @@index([orderItemId])
   @@index([invoiceId])
   @@map("invoice_items")
 }
