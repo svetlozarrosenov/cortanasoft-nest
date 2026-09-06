@@ -4,7 +4,7 @@ import {
   IsString,
   IsEnum,
   IsDateString,
-  Min,
+  NotEquals,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -20,7 +20,8 @@ export class UpdatePaymentDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  @Min(0.01)
+  // Отрицателна сума = връщане на пари (refund); нула няма смисъл.
+  @NotEquals(0)
   amount?: number;
 
   @IsOptional()

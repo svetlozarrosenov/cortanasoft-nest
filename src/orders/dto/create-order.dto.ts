@@ -9,6 +9,7 @@ import {
   IsEmail,
   IsBoolean,
   IsIn,
+  IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaymentMethod } from '@prisma/client';
@@ -45,6 +46,33 @@ export class CreateOrderItemDto {
   @IsString()
   @IsOptional()
   locationId?: string;
+}
+
+/**
+ * Плащане, получено при създаването на продажбата (напр. в брой на място).
+ * Записва се в същата транзакция като поръчката — иначе при грешка остава
+ * поръчка без плащане или плащане без поръчка.
+ */
+export class CreateOrderPaymentDto {
+  @IsNumber()
+  @Min(0.01)
+  amount: number;
+
+  @IsEnum(PaymentMethod)
+  @IsOptional()
+  method?: PaymentMethod;
+
+  @IsDateString()
+  @IsOptional()
+  paidAt?: string;
+
+  @IsString()
+  @IsOptional()
+  reference?: string;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
 }
 
 export class CreateOrderDto {
@@ -154,9 +182,16 @@ export class CreateOrderDto {
   @IsOptional()
   autoConfirm?: boolean;
 
+  // Само за интеграции (WooCommerce/CloudCart) — UI-ят подава `payments`
   @IsIn(['PENDING', 'PARTIAL', 'PAID'])
   @IsOptional()
   paymentStatus?: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateOrderPaymentDto)
+  @IsOptional()
+  payments?: CreateOrderPaymentDto[];
 
   @IsArray()
   @ValidateNested({ each: true })

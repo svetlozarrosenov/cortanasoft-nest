@@ -29,7 +29,13 @@ const ORDER_INCLUDE = {
   customer: {
     include: {
       referredBy: {
-        select: { id: true, type: true, companyName: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          type: true,
+          companyName: true,
+          firstName: true,
+          lastName: true,
+        },
       },
     },
   },
@@ -162,9 +168,13 @@ export class OrdersService {
     const itemsData = items.map((item) => {
       const product = products.find((p) => p.id === item.productId);
       const productVatRate = product ? Number(product.vatRate) : defaultVatRate;
-      const itemVatRate = item.vatRate ?? (isNaN(productVatRate) ? defaultVatRate : productVatRate);
+      const itemVatRate =
+        item.vatRate ??
+        (isNaN(productVatRate) ? defaultVatRate : productVatRate);
       const itemDiscount = item.discount ?? 0;
-      const itemSubtotal = round2(item.quantity * item.unitPrice - itemDiscount);
+      const itemSubtotal = round2(
+        item.quantity * item.unitPrice - itemDiscount,
+      );
 
       if (itemSubtotal < 0) {
         throw new BadRequestException(
@@ -190,7 +200,11 @@ export class OrdersService {
       };
     });
 
-    return { itemsData, subtotal: round2(subtotal), vatAmount: round2(vatAmount) };
+    return {
+      itemsData,
+      subtotal: round2(subtotal),
+      vatAmount: round2(vatAmount),
+    };
   }
 
   async create(companyId: string, userId: string, dto: CreateOrderDto) {
@@ -219,7 +233,9 @@ export class OrdersService {
     }
 
     // Verify all products exist (deduplicate to avoid false mismatch)
-    const uniqueProductIds = [...new Set(dto.items.map((item) => item.productId))];
+    const uniqueProductIds = [
+      ...new Set(dto.items.map((item) => item.productId)),
+    ];
     const products = await this.prisma.product.findMany({
       where: { id: { in: uniqueProductIds }, companyId },
     });
@@ -330,6 +346,27 @@ export class OrdersService {
         include: ORDER_INCLUDE,
       });
 
+      // Плащания, получени при създаването (в брой на място и т.н.)
+      if (dto.payments?.length) {
+        for (const p of dto.payments) {
+          await tx.payment.create({
+            data: {
+              orderId: createdOrder.id,
+              companyId,
+              amount: p.amount,
+              method: p.method ?? createdOrder.paymentMethod,
+              paidAt: p.paidAt ? new Date(p.paidAt) : new Date(),
+              reference: p.reference,
+              notes: p.notes,
+              currencyId,
+              exchangeRate: 1,
+              createdById: userId,
+            },
+          });
+        }
+        await this.paymentsService.recalculateOrderState(tx, createdOrder.id);
+      }
+
       // Seed payment if integration passed a non-PENDING status
       if (initialPaymentStatus !== 'PENDING') {
         await this.paymentsService.syncPaymentsFromStatus(
@@ -342,6 +379,13 @@ export class OrdersService {
         );
       }
 
+      if (dto.payments?.length || initialPaymentStatus !== 'PENDING') {
+        // paidAmount/paymentStatus са преизчислени след include-а
+        return tx.order.findUniqueOrThrow({
+          where: { id: createdOrder.id },
+          include: ORDER_INCLUDE,
+        });
+      }
       return createdOrder;
     });
 
@@ -425,7 +469,10 @@ export class OrdersService {
     ]);
 
     return {
-      data: data.map((o) => ({ ...o, deliveryStatus: computeDeliveryStatus(o) })),
+      data: data.map((o) => ({
+        ...o,
+        deliveryStatus: computeDeliveryStatus(o),
+      })),
       meta: {
         total,
         page,
@@ -453,7 +500,10 @@ export class OrdersService {
   // hasn't yet had a serial / batch assigned. The frontend tags each row
   // RED / AMBER / GRAY based on stock availability + payment status so
   // the admin sees the queue of "ready to fulfil" sales at a glance.
-  async findUnfulfilledItems(companyId: string, query: QueryUnfulfilledDto = {}) {
+  async findUnfulfilledItems(
+    companyId: string,
+    query: QueryUnfulfilledDto = {},
+  ) {
     // Само редове без разпределение по продукт с проследяване на наличност —
     // филтрира се в БД, за да не теглим всички редове на отворените поръчки.
     const pendingItemWhere: Prisma.OrderItemWhereInput = {
@@ -578,10 +628,16 @@ export class OrdersService {
         // don't belong in the dashboard.
         if (!it.product.trackInventory) continue;
 
-        const hasAllocation = Boolean(it.inventorySerialId || it.inventoryBatchId);
+        const hasAllocation = Boolean(
+          it.inventorySerialId || it.inventoryBatchId,
+        );
         const stockAvailable = stockMap.get(it.product.id) || 0;
 
-        let readiness: 'ready' | 'awaiting-stock' | 'allocated' | 'no-stock-tracked';
+        let readiness:
+          | 'ready'
+          | 'awaiting-stock'
+          | 'allocated'
+          | 'no-stock-tracked';
         if (hasAllocation) {
           readiness = 'allocated';
         } else if (stockAvailable >= Number(it.quantity)) {
@@ -634,7 +690,8 @@ export class OrdersService {
     const summary = {
       total: rows.length,
       ready: rows.filter((r) => r.readiness === 'ready').length,
-      awaitingStock: rows.filter((r) => r.readiness === 'awaiting-stock').length,
+      awaitingStock: rows.filter((r) => r.readiness === 'awaiting-stock')
+        .length,
     };
 
     const { readiness, paymentStatus, page = 1, limit = 50 } = query;
@@ -673,8 +730,21 @@ export class OrdersService {
     };
   }
 
+  /**
+   * REFUNDED не се задава на ръка — връщането на пари е плащане с
+   * отрицателна сума (PaymentsService), а статусът се извежда от него.
+   */
+  private assertNotManualRefund(status?: string) {
+    if (status === 'REFUNDED') {
+      throw new BadRequestException(
+        'Възстановяването се записва като плащане с отрицателна сума, не като статус',
+      );
+    }
+  }
+
   async update(companyId: string, id: string, dto: UpdateOrderDto) {
     const order = await this.findOne(companyId, id);
+    this.assertNotManualRefund(dto.paymentStatus);
 
     // Verify a reassigned customer belongs to this company (cross-tenant IDOR).
     // При смяна на клиента преизчисляваме и партньорския snapshot; undefined =
@@ -756,11 +826,15 @@ export class OrdersService {
         data: {
           status: dto.status,
           ...(dto.status === 'SHIPPED' && {
-            shippedAt: dto.shippedAt ? new Date(dto.shippedAt) : order.shippedAt || new Date(),
+            shippedAt: dto.shippedAt
+              ? new Date(dto.shippedAt)
+              : order.shippedAt || new Date(),
           }),
           ...(dto.status === 'DELIVERED' && {
             ...(dto.shippedAt && { shippedAt: new Date(dto.shippedAt) }),
-            deliveredAt: dto.deliveredAt ? new Date(dto.deliveredAt) : order.deliveredAt || new Date(),
+            deliveredAt: dto.deliveredAt
+              ? new Date(dto.deliveredAt)
+              : order.deliveredAt || new Date(),
           }),
         },
         include: ORDER_INCLUDE,
@@ -785,22 +859,16 @@ export class OrdersService {
     // PAID creates a synthetic payment for the remainder, PENDING wipes auto-generated ones.
     if (order.status === 'DELIVERED') {
       if (dto.paymentStatus) {
+        this.assertNotManualRefund(dto.paymentStatus);
         return this.prisma.$transaction(async (tx) => {
-          if (dto.paymentStatus === 'REFUNDED') {
-            await tx.order.update({
-              where: { id },
-              data: { paymentStatus: 'REFUNDED' },
-            });
-          } else {
-            await this.paymentsService.syncPaymentsFromStatus(
-              tx,
-              companyId,
-              id,
-              dto.paymentStatus as 'PENDING' | 'PARTIAL' | 'PAID',
-              Number(order.total),
-              order.paymentMethod,
-            );
-          }
+          await this.paymentsService.syncPaymentsFromStatus(
+            tx,
+            companyId,
+            id,
+            dto.paymentStatus as 'PENDING' | 'PARTIAL' | 'PAID',
+            Number(order.total),
+            order.paymentMethod,
+          );
           return tx.order.findFirst({
             where: { id },
             include: ORDER_INCLUDE,
@@ -827,7 +895,9 @@ export class OrdersService {
       });
       const defaultVatRate = company?.vatNumber ? 20 : 0;
 
-      const uniqueProductIds = [...new Set(dto.items.map((item) => item.productId))];
+      const uniqueProductIds = [
+        ...new Set(dto.items.map((item) => item.productId)),
+      ];
       const products = await this.prisma.product.findMany({
         where: { id: { in: uniqueProductIds }, companyId },
       });
@@ -923,23 +993,44 @@ export class OrdersService {
               customerId: dto.customerId || null,
               partnerCustomerId: partnerCustomerId ?? null,
             }),
-            ...(dto.billToCustomerId !== undefined && { billToCustomerId: dto.billToCustomerId || null }),
+            ...(dto.billToCustomerId !== undefined && {
+              billToCustomerId: dto.billToCustomerId || null,
+            }),
             ...(dto.siteId !== undefined && { siteId: dto.siteId || null }),
             ...(dto.customerName && { customerName: dto.customerName }),
-            ...(dto.customerEmail !== undefined && { customerEmail: dto.customerEmail }),
-            ...(dto.customerPhone !== undefined && { customerPhone: dto.customerPhone }),
-            ...(dto.deliveryMethod !== undefined && { deliveryMethod: dto.deliveryMethod }),
-            ...(dto.shippingAddress !== undefined && { shippingAddress: dto.shippingAddress }),
-            ...(dto.shippingCity !== undefined && { shippingCity: dto.shippingCity }),
-            ...(dto.shippingPostalCode !== undefined && { shippingPostalCode: dto.shippingPostalCode }),
-            ...(dto.receiverName !== undefined && { receiverName: dto.receiverName }),
-            ...(dto.receiverPhone !== undefined && { receiverPhone: dto.receiverPhone }),
-            ...(dto.econtOfficeCode !== undefined && { econtOfficeCode: dto.econtOfficeCode }),
-            ...(dto.econtOfficeName !== undefined && { econtOfficeName: dto.econtOfficeName }),
+            ...(dto.customerEmail !== undefined && {
+              customerEmail: dto.customerEmail,
+            }),
+            ...(dto.customerPhone !== undefined && {
+              customerPhone: dto.customerPhone,
+            }),
+            ...(dto.deliveryMethod !== undefined && {
+              deliveryMethod: dto.deliveryMethod,
+            }),
+            ...(dto.shippingAddress !== undefined && {
+              shippingAddress: dto.shippingAddress,
+            }),
+            ...(dto.shippingCity !== undefined && {
+              shippingCity: dto.shippingCity,
+            }),
+            ...(dto.shippingPostalCode !== undefined && {
+              shippingPostalCode: dto.shippingPostalCode,
+            }),
+            ...(dto.receiverName !== undefined && {
+              receiverName: dto.receiverName,
+            }),
+            ...(dto.receiverPhone !== undefined && {
+              receiverPhone: dto.receiverPhone,
+            }),
+            ...(dto.econtOfficeCode !== undefined && {
+              econtOfficeCode: dto.econtOfficeCode,
+            }),
+            ...(dto.econtOfficeName !== undefined && {
+              econtOfficeName: dto.econtOfficeName,
+            }),
             ...(dto.paymentMethod && { paymentMethod: dto.paymentMethod }),
-            // REFUNDED е ръчен override; останалите платежни статуси минават
-            // през PaymentsService по-долу, за да са консистентни с плащанията
-            ...(dto.paymentStatus === 'REFUNDED' && { paymentStatus: 'REFUNDED' as const }),
+            // paymentStatus НЕ се пише директно — минава през PaymentsService
+            // по-долу, за да е консистентен с плащанията
             ...(dto.locationId && { locationId: dto.locationId }),
             ...(dto.notes !== undefined && { notes: dto.notes }),
             shippingCost,
@@ -959,11 +1050,7 @@ export class OrdersService {
         // за остатъка, PENDING трие автоматичните. Директен запис на
         // статуса без плащанията оставя paidAmount разминат (оранжев бар
         // „PENDING с пари") и касовите отчети броят несъществуващи пари.
-        if (
-          dto.paymentStatus &&
-          dto.paymentStatus !== 'REFUNDED' &&
-          dto.paymentStatus !== order.paymentStatus
-        ) {
+        if (dto.paymentStatus && dto.paymentStatus !== order.paymentStatus) {
           await this.paymentsService.syncPaymentsFromStatus(
             tx,
             companyId,
@@ -1077,23 +1164,46 @@ export class OrdersService {
           customerId: dto.customerId || null,
           partnerCustomerId: partnerCustomerId ?? null,
         }),
-        ...(dto.billToCustomerId !== undefined && { billToCustomerId: dto.billToCustomerId || null }),
+        ...(dto.billToCustomerId !== undefined && {
+          billToCustomerId: dto.billToCustomerId || null,
+        }),
         ...(dto.customerName && { customerName: dto.customerName }),
-        ...(dto.customerEmail !== undefined && { customerEmail: dto.customerEmail }),
-        ...(dto.customerPhone !== undefined && { customerPhone: dto.customerPhone }),
-        ...(dto.deliveryMethod !== undefined && { deliveryMethod: dto.deliveryMethod }),
-        ...(dto.shippingAddress !== undefined && { shippingAddress: dto.shippingAddress }),
-        ...(dto.shippingCity !== undefined && { shippingCity: dto.shippingCity }),
-        ...(dto.shippingPostalCode !== undefined && { shippingPostalCode: dto.shippingPostalCode }),
-        ...(dto.receiverName !== undefined && { receiverName: dto.receiverName }),
-        ...(dto.receiverPhone !== undefined && { receiverPhone: dto.receiverPhone }),
-        ...(dto.econtOfficeCode !== undefined && { econtOfficeCode: dto.econtOfficeCode }),
-        ...(dto.econtOfficeName !== undefined && { econtOfficeName: dto.econtOfficeName }),
+        ...(dto.customerEmail !== undefined && {
+          customerEmail: dto.customerEmail,
+        }),
+        ...(dto.customerPhone !== undefined && {
+          customerPhone: dto.customerPhone,
+        }),
+        ...(dto.deliveryMethod !== undefined && {
+          deliveryMethod: dto.deliveryMethod,
+        }),
+        ...(dto.shippingAddress !== undefined && {
+          shippingAddress: dto.shippingAddress,
+        }),
+        ...(dto.shippingCity !== undefined && {
+          shippingCity: dto.shippingCity,
+        }),
+        ...(dto.shippingPostalCode !== undefined && {
+          shippingPostalCode: dto.shippingPostalCode,
+        }),
+        ...(dto.receiverName !== undefined && {
+          receiverName: dto.receiverName,
+        }),
+        ...(dto.receiverPhone !== undefined && {
+          receiverPhone: dto.receiverPhone,
+        }),
+        ...(dto.econtOfficeCode !== undefined && {
+          econtOfficeCode: dto.econtOfficeCode,
+        }),
+        ...(dto.econtOfficeName !== undefined && {
+          econtOfficeName: dto.econtOfficeName,
+        }),
         ...(dto.paymentMethod && { paymentMethod: dto.paymentMethod }),
-        // REFUNDED е ръчен override; останалите минават през PaymentsService
-        ...(dto.paymentStatus === 'REFUNDED' && { paymentStatus: 'REFUNDED' as const }),
+        // paymentStatus НЕ се пише директно — минава през PaymentsService
         ...(dto.locationId && { locationId: dto.locationId }),
-        ...(dto.shippingCost !== undefined && { shippingCost: dto.shippingCost }),
+        ...(dto.shippingCost !== undefined && {
+          shippingCost: dto.shippingCost,
+        }),
         ...(dto.discount !== undefined && { discount: dto.discount }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
       },
@@ -1104,11 +1214,7 @@ export class OrdersService {
     // items клона по-горе): плащанията остават източникът на истината,
     // paidAmount и статусът се преизчисляват заедно.
     let result = updated;
-    if (
-      dto.paymentStatus &&
-      dto.paymentStatus !== 'REFUNDED' &&
-      dto.paymentStatus !== order.paymentStatus
-    ) {
+    if (dto.paymentStatus && dto.paymentStatus !== order.paymentStatus) {
       await this.prisma.$transaction(async (tx) => {
         await this.paymentsService.syncPaymentsFromStatus(
           tx,
@@ -1262,7 +1368,8 @@ export class OrdersService {
 
       // FEFO предложение до количеството на реда
       let remaining = Number(item.quantity);
-      const suggested: Array<{ inventoryBatchId: string; quantity: number }> = [];
+      const suggested: Array<{ inventoryBatchId: string; quantity: number }> =
+        [];
       for (const b of batches) {
         if (remaining <= 0) break;
         const take = Math.min(Number(b.quantity), remaining);
@@ -1333,7 +1440,9 @@ export class OrdersService {
             },
           });
           if (!serial) {
-            throw new BadRequestException(ErrorMessages.inventory.serialNotFound);
+            throw new BadRequestException(
+              ErrorMessages.inventory.serialNotFound,
+            );
           }
           if (serial.status !== 'IN_STOCK') {
             throw new BadRequestException(
@@ -1419,12 +1528,18 @@ export class OrdersService {
   async confirm(companyId: string, id: string) {
     const order = await this.findOne(companyId, id);
 
-    if (order.status !== 'DRAFT' && order.status !== 'PENDING' && order.status !== 'PROCESSING') {
+    if (
+      order.status !== 'DRAFT' &&
+      order.status !== 'PENDING' &&
+      order.status !== 'PROCESSING'
+    ) {
       throw new BadRequestException(ErrorMessages.orders.canOnlyConfirmPending);
     }
 
     if (!order.items || order.items.length === 0) {
-      throw new BadRequestException(ErrorMessages.orders.cannotConfirmWithoutItems);
+      throw new BadRequestException(
+        ErrorMessages.orders.cannotConfirmWithoutItems,
+      );
     }
 
     // Deduct inventory where possible; items without stock/serial become
@@ -1439,7 +1554,11 @@ export class OrdersService {
           });
 
           // Skip inventory deduction for services
-          if (!product || product.type === 'SERVICE' || !product.trackInventory) {
+          if (
+            !product ||
+            product.type === 'SERVICE' ||
+            !product.trackInventory
+          ) {
             continue;
           }
 
@@ -1647,7 +1766,11 @@ export class OrdersService {
           });
 
           // Skip for services or non-tracked products
-          if (!product || product.type === 'SERVICE' || !product.trackInventory) {
+          if (
+            !product ||
+            product.type === 'SERVICE' ||
+            !product.trackInventory
+          ) {
             continue;
           }
 

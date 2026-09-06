@@ -15,6 +15,10 @@ import {
 } from './dto';
 import { Prisma, GoodsReceiptStatus } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
+import {
+  derivePaymentStatus,
+  sumPayments,
+} from '../payments/payment-status.util';
 
 // Standard include for goods receipt queries
 const RECEIPT_INCLUDE = {
@@ -115,17 +119,23 @@ export class GoodsReceiptsService {
         where: { id: dto.supplierId, companyId },
       });
       if (!supplier) {
-        throw new NotFoundException(ErrorMessages.goodsReceipts.supplierNotFound);
+        throw new NotFoundException(
+          ErrorMessages.goodsReceipts.supplierNotFound,
+        );
       }
     }
 
     // Verify all products exist (deduplicate IDs to avoid false mismatch)
-    const uniqueProductIds = [...new Set(dto.items.map((item) => item.productId))];
+    const uniqueProductIds = [
+      ...new Set(dto.items.map((item) => item.productId)),
+    ];
     const products = await this.prisma.product.findMany({
       where: { id: { in: uniqueProductIds }, companyId },
     });
     if (products.length !== uniqueProductIds.length) {
-      throw new BadRequestException(ErrorMessages.goodsReceipts.productsNotFound);
+      throw new BadRequestException(
+        ErrorMessages.goodsReceipts.productsNotFound,
+      );
     }
 
     // Use company currency as default
@@ -206,8 +216,8 @@ export class GoodsReceiptsService {
    * Recompute and persist a goods receipt's totalAmount (in company currency)
    * AND re-derive its payment state from the payment ledger:
    *   totalAmount = Σ items(qty × unitPrice × exchangeRate × (1 + vatRate/100)) + Σ expenses(totalAmount)
-   *   paidAmount  = Σ payments.amount
-   *   paymentStatus = PENDING / PARTIAL / PAID (REFUNDED stays manual)
+   *   paidAmount  = Σ payments.amount (нетно; връщанията са отрицателни)
+   *   paymentStatus = derivePaymentStatus() — винаги изчислен
    * Self-contained so it can run inside the receipt create/update transactions.
    */
   private async recalcReceiptState(
@@ -216,7 +226,12 @@ export class GoodsReceiptsService {
   ): Promise<void> {
     const items = await tx.goodsReceiptItem.findMany({
       where: { goodsReceiptId: receiptId },
-      select: { quantity: true, unitPrice: true, exchangeRate: true, vatRate: true },
+      select: {
+        quantity: true,
+        unitPrice: true,
+        exchangeRate: true,
+        vatRate: true,
+      },
     });
     const itemsTotal = items.reduce((sum, it) => {
       const base =
@@ -228,25 +243,13 @@ export class GoodsReceiptsService {
       _sum: { totalAmount: true },
     });
     const total =
-      Math.round((itemsTotal + Number(expAgg._sum.totalAmount || 0)) * 100) / 100;
+      Math.round((itemsTotal + Number(expAgg._sum.totalAmount || 0)) * 100) /
+      100;
 
-    const payAgg = await tx.payment.aggregate({
-      where: { goodsReceiptId: receiptId },
-      _sum: { amount: true },
+    const { paid, hasRefund } = await sumPayments(tx, {
+      goodsReceiptId: receiptId,
     });
-    const paid = Number(payAgg._sum.amount || 0);
-
-    const current = await tx.goodsReceipt.findUnique({
-      where: { id: receiptId },
-      select: { paymentStatus: true },
-    });
-    let paymentStatus: 'PENDING' | 'PARTIAL' | 'PAID' | 'REFUNDED' =
-      current?.paymentStatus === 'REFUNDED' ? 'REFUNDED' : 'PENDING';
-    if (paymentStatus !== 'REFUNDED') {
-      if (paid <= 0) paymentStatus = 'PENDING';
-      else if (paid < total) paymentStatus = 'PARTIAL';
-      else paymentStatus = 'PAID';
-    }
+    const paymentStatus = derivePaymentStatus(paid, total, hasRefund);
 
     await tx.goodsReceipt.update({
       where: { id: receiptId },
@@ -335,9 +338,17 @@ export class GoodsReceiptsService {
         (sum, exp) => sum + Number(exp.totalAmount),
         0,
       );
-      const totalQuantity = receipt.items.reduce((sum, item) => sum + Number(item.quantity), 0);
+      const totalQuantity = receipt.items.reduce(
+        (sum, item) => sum + Number(item.quantity),
+        0,
+      );
       const { items: _items, expenses: _expenses, ...rest } = receipt;
-      return { ...rest, totalAmount: totalAmount + totalExpenses, totalExpenses, totalQuantity };
+      return {
+        ...rest,
+        totalAmount: totalAmount + totalExpenses,
+        totalExpenses,
+        totalQuantity,
+      };
     });
 
     return {
@@ -368,7 +379,9 @@ export class GoodsReceiptsService {
     const receipt = await this.findOne(companyId, id);
 
     if (receipt.status !== 'EXPECTED') {
-      throw new BadRequestException(ErrorMessages.goodsReceipts.canOnlyUpdateExpected);
+      throw new BadRequestException(
+        ErrorMessages.goodsReceipts.canOnlyUpdateExpected,
+      );
     }
 
     // Verify new location if provided
@@ -377,7 +390,9 @@ export class GoodsReceiptsService {
         where: { id: dto.locationId, companyId },
       });
       if (!location) {
-        throw new NotFoundException(ErrorMessages.goodsReceipts.locationNotFound);
+        throw new NotFoundException(
+          ErrorMessages.goodsReceipts.locationNotFound,
+        );
       }
     }
 
@@ -389,12 +404,16 @@ export class GoodsReceiptsService {
           where: { id: companyId },
         });
 
-        const uniqueProductIds = [...new Set(newItems.map((item) => item.productId))];
+        const uniqueProductIds = [
+          ...new Set(newItems.map((item) => item.productId)),
+        ];
         const products = await tx.product.findMany({
           where: { id: { in: uniqueProductIds }, companyId },
         });
         if (products.length !== uniqueProductIds.length) {
-          throw new BadRequestException(ErrorMessages.goodsReceipts.productsNotFound);
+          throw new BadRequestException(
+            ErrorMessages.goodsReceipts.productsNotFound,
+          );
         }
 
         const currencyId = dto.currencyId || receipt.currencyId;
@@ -507,7 +526,9 @@ export class GoodsReceiptsService {
     // Validate transition
     const allowedTransitions = VALID_TRANSITIONS[receipt.status];
     if (!allowedTransitions.includes(targetStatus)) {
-      throw new BadRequestException(ErrorMessages.goodsReceipts.invalidStatusTransition);
+      throw new BadRequestException(
+        ErrorMessages.goodsReceipts.invalidStatusTransition,
+      );
     }
 
     const isDelivering =
@@ -519,7 +540,9 @@ export class GoodsReceiptsService {
     // Validate serial numbers if delivering
     if (isDelivering) {
       if (!receipt.items || receipt.items.length === 0) {
-        throw new BadRequestException(ErrorMessages.goodsReceipts.cannotConfirmWithoutItems);
+        throw new BadRequestException(
+          ErrorMessages.goodsReceipts.cannotConfirmWithoutItems,
+        );
       }
 
       const serialsMap = new Map<string, string[]>();
@@ -648,7 +671,7 @@ export class GoodsReceiptsService {
           if (Number(batch.quantity) < Number(batch.initialQty)) {
             throw new BadRequestException(
               'Не може да се отмени доставка, от която вече е изписана стока. ' +
-              `Партида ${batch.batchNumber}: налични ${batch.quantity} от ${batch.initialQty}`,
+                `Партида ${batch.batchNumber}: налични ${batch.quantity} от ${batch.initialQty}`,
             );
           }
         }
@@ -662,7 +685,10 @@ export class GoodsReceiptsService {
           select: { serialNumber: true, status: true },
         });
         if (consumedSerials.length > 0) {
-          const examples = consumedSerials.slice(0, 3).map((s) => s.serialNumber).join(', ');
+          const examples = consumedSerials
+            .slice(0, 3)
+            .map((s) => s.serialNumber)
+            .join(', ');
           throw new BadRequestException(
             `Не може да се отмени доставка със серийни номера, които вече не са в наличност: ${examples}`,
           );
@@ -708,10 +734,14 @@ export class GoodsReceiptsService {
     // Sync inventory to integrations (fire-and-forget). Each provider is
     // wrapped in its own .catch — one failing must never block the others.
     if (isDelivering || isCancellingDelivered) {
-      const productIds = [...new Set(receipt.items.map((item) => item.productId))];
+      const productIds = [
+        ...new Set(receipt.items.map((item) => item.productId)),
+      ];
       for (const productId of productIds) {
         this.wordPressService.syncProduct(companyId, productId).catch(() => {});
-        this.cloudCartService.syncProductToCloudCart(companyId, productId).catch(() => {});
+        this.cloudCartService
+          .syncProductToCloudCart(companyId, productId)
+          .catch(() => {});
       }
       this.dispatchStockChanged(companyId, productIds).catch(() => {});
     }
@@ -722,7 +752,10 @@ export class GoodsReceiptsService {
   // Build the `stock.changed` event payload for a batch of products and
   // hand it off to the webhook dispatcher. Reads current inventory from
   // InventoryBatch totals so subscribers get the post-update number.
-  private async dispatchStockChanged(companyId: string, productIds: string[]): Promise<void> {
+  private async dispatchStockChanged(
+    companyId: string,
+    productIds: string[],
+  ): Promise<void> {
     if (productIds.length === 0) return;
     const products = await this.prisma.product.findMany({
       where: { id: { in: productIds }, companyId },
@@ -745,7 +778,9 @@ export class GoodsReceiptsService {
         ? p.inventoryBatches.reduce((sum, b) => sum + Number(b.quantity), 0)
         : null,
     }));
-    await this.webhookDispatcher.dispatch(companyId, 'stock.changed', { items });
+    await this.webhookDispatcher.dispatch(companyId, 'stock.changed', {
+      items,
+    });
   }
 
   async cancel(companyId: string, id: string) {
@@ -756,7 +791,9 @@ export class GoodsReceiptsService {
     const receipt = await this.findOne(companyId, id);
 
     if (receipt.status !== 'EXPECTED') {
-      throw new BadRequestException(ErrorMessages.goodsReceipts.canOnlyDeleteExpected);
+      throw new BadRequestException(
+        ErrorMessages.goodsReceipts.canOnlyDeleteExpected,
+      );
     }
 
     // Delete linked expenses first, then the receipt

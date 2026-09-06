@@ -6,11 +6,8 @@ import {
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
-import {
-  CreatePaymentDto,
-  UpdatePaymentDto,
-  QueryPaymentsDto,
-} from './dto';
+import { CreatePaymentDto, UpdatePaymentDto, QueryPaymentsDto } from './dto';
+import { derivePaymentStatus, sumPayments } from './payment-status.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -46,7 +43,8 @@ export class PaymentsService {
     if (query.dateFrom || query.dateTo) {
       where.paidAt = {};
       if (query.dateFrom) where.paidAt.gte = new Date(query.dateFrom);
-      if (query.dateTo) where.paidAt.lte = new Date(query.dateTo + 'T23:59:59.999Z');
+      if (query.dateTo)
+        where.paidAt.lte = new Date(query.dateTo + 'T23:59:59.999Z');
     }
 
     const [data, total] = await Promise.all([
@@ -91,6 +89,12 @@ export class PaymentsService {
         });
         if (!receipt) throw new NotFoundException('Goods receipt not found');
 
+        await this.assertRefundWithinPaid(
+          tx,
+          { goodsReceiptId: dto.goodsReceiptId },
+          dto.amount,
+        );
+
         const payment = await tx.payment.create({
           data: {
             goodsReceiptId: dto.goodsReceiptId,
@@ -114,9 +118,20 @@ export class PaymentsService {
       // --- Order payment ---
       const order = await tx.order.findFirst({
         where: { id: dto.orderId, companyId },
-        select: { id: true, total: true, currencyId: true, paymentStatus: true },
+        select: {
+          id: true,
+          total: true,
+          currencyId: true,
+          paymentStatus: true,
+        },
       });
       if (!order) throw new NotFoundException('Order not found');
+
+      await this.assertRefundWithinPaid(
+        tx,
+        { orderId: dto.orderId },
+        dto.amount,
+      );
 
       const payment = await tx.payment.create({
         data: {
@@ -145,31 +160,43 @@ export class PaymentsService {
   }
 
   /**
+   * Връщане (отрицателна сума) не може да надвиши нетно платеното по
+   * документа — иначе „платено" става отрицателно и отчетите го броят
+   * като разход. `excludePaymentId` при редакция на съществуващо плащане.
+   */
+  private async assertRefundWithinPaid(
+    tx: PrismaTx,
+    where: Prisma.PaymentWhereInput,
+    amount: number,
+    excludePaymentId?: string,
+  ) {
+    if (amount >= 0) return;
+    const { paid } = await sumPayments(
+      tx,
+      excludePaymentId ? { ...where, id: { not: excludePaymentId } } : where,
+    );
+    if (paid + amount < -0.005) {
+      throw new BadRequestException(
+        `Връщането (${Math.abs(amount).toFixed(2)}) надвишава платената сума (${paid.toFixed(2)})`,
+      );
+    }
+  }
+
+  /**
    * Derive goodsReceipt.paidAmount + paymentStatus from its payments.
    * Reads the stored totalAmount (kept in sync by GoodsReceiptsService).
-   * REFUNDED stays a manual override. Also syncs attached expenses' status.
+   * Also syncs attached expenses' status.
    */
   async recalculateGoodsReceiptState(tx: PrismaTx, goodsReceiptId: string) {
-    const agg = await tx.payment.aggregate({
-      where: { goodsReceiptId },
-      _sum: { amount: true },
-    });
-    const paid = Number(agg._sum.amount || 0);
+    const { paid, hasRefund } = await sumPayments(tx, { goodsReceiptId });
 
     const receipt = await tx.goodsReceipt.findUnique({
       where: { id: goodsReceiptId },
-      select: { totalAmount: true, paymentStatus: true },
+      select: { totalAmount: true },
     });
     if (!receipt) return;
     const total = Number(receipt.totalAmount);
-
-    let newStatus: 'PENDING' | 'PARTIAL' | 'PAID' | 'REFUNDED' =
-      receipt.paymentStatus === 'REFUNDED' ? 'REFUNDED' : 'PENDING';
-    if (receipt.paymentStatus !== 'REFUNDED') {
-      if (paid <= 0) newStatus = 'PENDING';
-      else if (paid < total) newStatus = 'PARTIAL';
-      else newStatus = 'PAID';
-    }
+    const newStatus = derivePaymentStatus(paid, total, hasRefund);
 
     await tx.goodsReceipt.update({
       where: { id: goodsReceiptId },
@@ -189,6 +216,17 @@ export class PaymentsService {
         where: { id, companyId },
       });
       if (!payment) throw new NotFoundException('Payment not found');
+
+      if (dto.amount !== undefined) {
+        await this.assertRefundWithinPaid(
+          tx,
+          payment.goodsReceiptId
+            ? { goodsReceiptId: payment.goodsReceiptId }
+            : { orderId: payment.orderId },
+          dto.amount,
+          id,
+        );
+      }
 
       const updated = await tx.payment.update({
         where: { id },
@@ -239,33 +277,20 @@ export class PaymentsService {
   }
 
   /**
-   * Derive order.paidAmount + paymentStatus from its payments.
-   * Keeps REFUNDED as a manual override (not auto-derived).
+   * Derive order.paidAmount + paymentStatus from its payments (нетно —
+   * връщанията са отрицателни плащания; REFUNDED също е изчислен).
    * Also syncs linked invoices (non-cancelled).
    */
   async recalculateOrderState(tx: PrismaTx, orderId: string) {
-    const agg = await tx.payment.aggregate({
-      where: { orderId },
-      _sum: { amount: true },
-    });
-
-    const paid = Number(agg._sum.amount || 0);
+    const { paid, hasRefund } = await sumPayments(tx, { orderId });
     const order = await tx.order.findUnique({
       where: { id: orderId },
-      select: { total: true, paymentStatus: true, companyId: true },
+      select: { total: true, companyId: true },
     });
     if (!order) return;
 
     const total = Number(order.total);
-
-    // REFUNDED is manual — don't override it
-    let newStatus: 'PENDING' | 'PARTIAL' | 'PAID' | 'REFUNDED' =
-      order.paymentStatus === 'REFUNDED' ? 'REFUNDED' : 'PENDING';
-    if (order.paymentStatus !== 'REFUNDED') {
-      if (paid <= 0) newStatus = 'PENDING';
-      else if (paid < total) newStatus = 'PARTIAL';
-      else newStatus = 'PAID';
-    }
+    const newStatus = derivePaymentStatus(paid, total, hasRefund);
 
     await tx.order.update({
       where: { id: orderId },
@@ -283,7 +308,7 @@ export class PaymentsService {
       orderBy: { createdAt: 'asc' },
     });
 
-    let remainingPaid = paid;
+    let remainingPaid = Math.max(0, paid);
     for (const inv of invoices) {
       const invTotal = Number(inv.total);
       const allocated = Math.min(remainingPaid, invTotal);
@@ -307,6 +332,8 @@ export class PaymentsService {
    * PAID → ensure at least one synthetic payment covering the full total exists.
    * PENDING → delete synthetic/auto-generated payments (keep user-recorded ones).
    * PARTIAL → do nothing (amount unknown, let user record manually).
+   * Само за интеграции — UI-ят вече не подава paymentStatus; операторите
+   * записват плащания/връщания директно.
    */
   async syncPaymentsFromStatus(
     tx: PrismaTx,
@@ -314,7 +341,12 @@ export class PaymentsService {
     orderId: string,
     externalStatus: 'PENDING' | 'PARTIAL' | 'PAID' | 'REFUNDED',
     total: number,
-    method: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'COD' | 'POSTAL_MONEY_TRANSFER' = 'CASH',
+    method:
+      | 'CASH'
+      | 'CARD'
+      | 'BANK_TRANSFER'
+      | 'COD'
+      | 'POSTAL_MONEY_TRANSFER' = 'CASH',
   ) {
     if (externalStatus === 'PAID') {
       const existing = await tx.payment.aggregate({
