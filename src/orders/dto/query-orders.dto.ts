@@ -1,6 +1,16 @@
-import { IsOptional, IsString, IsInt, IsEnum, Min, Max, IsIn } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsInt,
+  IsEnum,
+  Min,
+  Max,
+  IsIn,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { OrderStatus, PaymentStatus } from '@prisma/client';
+
+export type OrderListView = 'open' | 'to-ship' | 'unpaid' | 'all';
 
 export class QueryOrdersDto {
   @IsString()
@@ -18,6 +28,26 @@ export class QueryOrdersDto {
   @IsString()
   @IsOptional()
   locationId?: string;
+
+  @IsString()
+  @IsOptional()
+  siteId?: string;
+
+  @IsString()
+  @IsOptional()
+  customerId?: string;
+
+  // econt/speedy покриват и legacy вариантите (econt_office, econt_address)
+  @IsString()
+  @IsOptional()
+  @IsIn(['none', 'manual', 'econt', 'speedy'])
+  deliveryMethod?: 'none' | 'manual' | 'econt' | 'speedy';
+
+  // Работни изгледи (табове): комбинират се с останалите филтри
+  @IsString()
+  @IsOptional()
+  @IsIn(['open', 'to-ship', 'unpaid', 'all'])
+  view?: OrderListView;
 
   @IsString()
   @IsOptional()
@@ -42,7 +72,14 @@ export class QueryOrdersDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['createdAt', 'orderDate', 'orderNumber', 'status', 'total', 'customerName'])
+  @IsIn([
+    'createdAt',
+    'orderDate',
+    'orderNumber',
+    'status',
+    'total',
+    'customerName',
+  ])
   sortBy?: string;
 
   @IsString()

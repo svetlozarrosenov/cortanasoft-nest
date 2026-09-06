@@ -8,6 +8,7 @@ import {
   CreateOrderDto,
   UpdateOrderDto,
   QueryOrdersDto,
+  OrderListView,
   QueryUnfulfilledDto,
   FulfillOrderDto,
 } from './dto';
@@ -420,25 +421,47 @@ export class OrdersService {
     return order;
   }
 
-  async findAll(companyId: string, query: QueryOrdersDto) {
+  /**
+   * Where-клауза на списъка. Споделена между findAll, тоталите, бройките по
+   * табове и експорта, за да показват едно и също. `withView=false` при
+   * броенето на табовете (там изгледът е това, което се брои).
+   */
+  private buildListWhere(
+    companyId: string,
+    query: QueryOrdersDto,
+    withView = true,
+  ): Prisma.OrderWhereInput {
     const {
       search,
       status,
       paymentStatus,
       locationId,
+      siteId,
+      customerId,
+      deliveryMethod,
       dateFrom,
       dateTo,
-      page = 1,
-      limit = 20,
-      sortBy = 'createdAt',
-      sortOrder = 'desc',
+      view,
     } = query;
 
-    const where: Prisma.OrderWhereInput = {
+    const and: Prisma.OrderWhereInput[] = [];
+    if (withView) {
+      const v = this.viewWhere(view);
+      if (v) and.push(v);
+    }
+    if (deliveryMethod === 'econt' || deliveryMethod === 'speedy') {
+      and.push({ deliveryMethod: { startsWith: deliveryMethod } });
+    } else if (deliveryMethod) {
+      and.push({ deliveryMethod });
+    }
+
+    return {
       companyId,
       ...(status && { status }),
       ...(paymentStatus && { paymentStatus }),
       ...(locationId && { locationId }),
+      ...(siteId && { siteId }),
+      ...(customerId && { customerId }),
       ...(dateFrom || dateTo
         ? {
             orderDate: {
@@ -453,26 +476,124 @@ export class OrdersService {
           { customerName: { contains: search, mode: 'insensitive' } },
           { customerEmail: { contains: search, mode: 'insensitive' } },
           { customerPhone: { contains: search, mode: 'insensitive' } },
+          // По редовете — „кой купи дървена маса" / по SKU
+          {
+            items: {
+              some: {
+                product: {
+                  OR: [
+                    { name: { contains: search, mode: 'insensitive' } },
+                    { sku: { contains: search, mode: 'insensitive' } },
+                  ],
+                },
+              },
+            },
+          },
+          {
+            invoices: {
+              some: {
+                invoiceNumber: { contains: search, mode: 'insensitive' },
+              },
+            },
+          },
         ],
       }),
+      ...(and.length && { AND: and }),
     };
+  }
 
-    const [data, total] = await Promise.all([
+  /**
+   * Табовете над списъка:
+   *  open    — всичко, което още не е приключило (нито доставено, нито анулирано)
+   *  to-ship — потвърдени/в обработка с доставка, за които няма активна товарителница
+   *  unpaid  — неплатени/частично платени, без анулираните
+   */
+  private viewWhere(view?: OrderListView): Prisma.OrderWhereInput | null {
+    switch (view) {
+      case 'open':
+        return { status: { notIn: ['DELIVERED', 'CANCELLED'] } };
+      case 'to-ship':
+        return {
+          status: { in: ['CONFIRMED', 'PROCESSING'] },
+          deliveryMethod: { not: 'none' },
+          shipments: { none: { status: { not: 'CANCELLED' } } },
+        };
+      case 'unpaid':
+        return {
+          paymentStatus: { in: ['PENDING', 'PARTIAL'] },
+          status: { not: 'CANCELLED' },
+        };
+      default:
+        return null;
+    }
+  }
+
+  /** Бройки за табовете при текущите останали филтри (без самия изглед). */
+  async countViews(companyId: string, query: QueryOrdersDto) {
+    const base = this.buildListWhere(companyId, query, false);
+    const count = (view: OrderListView) =>
+      this.prisma.order.count({
+        where: { AND: [base, this.viewWhere(view) ?? {}] },
+      });
+    const [open, toShip, unpaid, all] = await Promise.all([
+      count('open'),
+      count('to-ship'),
+      count('unpaid'),
+      count('all'),
+    ]);
+    return { open, toShip, unpaid, all };
+  }
+
+  async findAll(companyId: string, query: QueryOrdersDto) {
+    const {
+      page = 1,
+      limit = 20,
+      sortBy = 'createdAt',
+      sortOrder = 'desc',
+    } = query;
+
+    const where = this.buildListWhere(companyId, query);
+
+    // Тотали за целия филтриран набор (не само за страницата). Анулираните
+    // не са оборот и не се дължат — изключваме ги, освен ако потребителят
+    // изрично е филтрирал по статус „Анулирани".
+    const totalsWhere: Prisma.OrderWhereInput =
+      query.status === 'CANCELLED'
+        ? where
+        : { AND: [where, { status: { not: 'CANCELLED' } }] };
+
+    const [data, total, sums] = await Promise.all([
       this.prisma.order.findMany({
         where,
         include: ORDER_INCLUDE,
-        orderBy: { [sortBy]: sortOrder },
+        // Вторичен ключ — orderDate е ден без час, иначе редът в деня е случаен
+        orderBy:
+          sortBy === 'createdAt'
+            ? { createdAt: sortOrder }
+            : [{ [sortBy]: sortOrder }, { createdAt: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
       }),
       this.prisma.order.count({ where }),
+      this.prisma.order.aggregate({
+        where: totalsWhere,
+        _sum: { total: true, paidAmount: true },
+      }),
     ]);
+    const sumTotal = Number(sums._sum.total || 0);
+    const sumPaid = Number(sums._sum.paidAmount || 0);
+    const sumDue = Math.max(0, sumTotal - sumPaid);
 
     return {
       data: data.map((o) => ({
         ...o,
         deliveryStatus: computeDeliveryStatus(o),
       })),
+      totals: {
+        total: Math.round(sumTotal * 100) / 100,
+        paid: Math.round(sumPaid * 100) / 100,
+        due: Math.round(sumDue * 100) / 100,
+      },
       meta: {
         total,
         page,

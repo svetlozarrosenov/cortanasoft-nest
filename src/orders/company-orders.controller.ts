@@ -60,6 +60,16 @@ export class CompanyOrdersController {
     return this.ordersService.findAll(companyId, query);
   }
 
+  // Бройки за табовете над списъка (Отворени / За изпращане / Неплатени / Всички)
+  @Get('counts')
+  @RequireView('erp', 'orders')
+  counts(
+    @Param('companyId') companyId: string,
+    @Query() query: QueryOrdersDto,
+  ) {
+    return this.ordersService.countViews(companyId, query);
+  }
+
   // Order items that still need a serial / batch allocation. Used by the
   // ERP "Очакват изписване" dashboard so the admin can see at a glance
   // which paid pre-orders are ready to be fulfilled the moment a goods
@@ -82,7 +92,11 @@ export class CompanyOrdersController {
     @Query('format') format: ExportFormat = 'xlsx',
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { data } = await this.ordersService.findAll(companyId, { ...query, page: 1, limit: 10000 });
+    const { data } = await this.ordersService.findAll(companyId, {
+      ...query,
+      page: 1,
+      limit: 10000,
+    });
     const columns = [
       { header: 'Order Number', key: 'orderNumber', width: 15 },
       { header: 'Order Date', key: 'orderDate', width: 15 },
@@ -93,10 +107,18 @@ export class CompanyOrdersController {
       { header: 'VAT Amount', key: 'vatAmount', width: 15 },
       { header: 'Total', key: 'total', width: 15 },
     ];
-    const buffer = await this.exportService.generateFile(columns, data, format, 'Orders');
+    const buffer = await this.exportService.generateFile(
+      columns,
+      data,
+      format,
+      'Orders',
+    );
     const ext = format === 'csv' ? 'csv' : 'xlsx';
     res.set({
-      'Content-Type': format === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        format === 'csv'
+          ? 'text/csv'
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="orders-${new Date().toISOString().slice(0, 10)}.${ext}"`,
     });
     return new StreamableFile(buffer);
