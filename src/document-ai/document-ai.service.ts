@@ -88,6 +88,8 @@ export interface ReconcileResult {
 export interface ParsedInvoiceData {
   invoiceNumber?: string;
   invoiceDate?: string;
+  // Падеж (срок за плащане); ако фактурата дава само срок в дни, се изчислява
+  dueDate?: string;
   supplierName?: string;
   supplierVatNumber?: string;
   supplierAddress?: string;
@@ -121,7 +123,10 @@ export class DocumentAIService {
     if (!config) {
       throw new BadRequestException(ErrorMessages.ai.notConfigured);
     }
-    return { client: new Anthropic({ apiKey: config.apiKey }), model: config.model };
+    return {
+      client: new Anthropic({ apiKey: config.apiKey }),
+      model: config.model,
+    };
   }
 
   // Превежда грешките от Anthropic в ясни съобщения (стигат до оператора в
@@ -131,7 +136,10 @@ export class DocumentAIService {
     const ApiError = (Anthropic as unknown as { APIError?: new () => Error })
       .APIError;
     if (ApiError && error instanceof ApiError) {
-      const apiError = error as unknown as { status?: number; message?: string };
+      const apiError = error as unknown as {
+        status?: number;
+        message?: string;
+      };
       this.logger.error(
         `Anthropic API error: status=${apiError.status} message=${apiError.message}`,
       );
@@ -342,13 +350,21 @@ export class DocumentAIService {
       mimeType === 'application/pdf'
         ? {
             type: 'document',
-            source: { type: 'base64', media_type: 'application/pdf', data: base64Image },
+            source: {
+              type: 'base64',
+              media_type: 'application/pdf',
+              data: base64Image,
+            },
           }
         : {
             type: 'image',
             source: {
               type: 'base64',
-              media_type: mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+              media_type: mimeType as
+                | 'image/jpeg'
+                | 'image/png'
+                | 'image/gif'
+                | 'image/webp',
               data: base64Image,
             },
           };
@@ -382,7 +398,10 @@ export class DocumentAIService {
           type: 'object',
           properties: {
             invoiceNumber: { type: ['string', 'null'] },
-            invoiceDate: { type: ['string', 'null'], description: 'YYYY-MM-DD' },
+            invoiceDate: {
+              type: ['string', 'null'],
+              description: 'YYYY-MM-DD',
+            },
             totalAmount: { type: ['number', 'null'] },
             vatAmount: { type: ['number', 'null'] },
             supplier: {
@@ -414,7 +433,22 @@ export class DocumentAIService {
                       sku: { type: ['string', 'null'] },
                       unit: {
                         type: ['string', 'null'],
-                        enum: ['PIECE', 'KG', 'G', 'L', 'ML', 'M', 'CM', 'M2', 'M3', 'PACK', 'BOX', 'SET', 'HOUR', null],
+                        enum: [
+                          'PIECE',
+                          'KG',
+                          'G',
+                          'L',
+                          'ML',
+                          'M',
+                          'CM',
+                          'M2',
+                          'M3',
+                          'PACK',
+                          'BOX',
+                          'SET',
+                          'HOUR',
+                          null,
+                        ],
                       },
                       purchasePrice: { type: ['number', 'null'] },
                     },
@@ -560,7 +594,10 @@ export class DocumentAIService {
                   match: {
                     type: ['object', 'null'],
                     properties: {
-                      type: { type: 'string', enum: ['order', 'invoice', 'expense'] },
+                      type: {
+                        type: 'string',
+                        enum: ['order', 'invoice', 'expense'],
+                      },
                       id: { type: 'string' },
                       label: { type: 'string' },
                       amount: { type: ['number', 'null'] },
@@ -585,7 +622,11 @@ export class DocumentAIService {
         content: [
           {
             type: 'document',
-            source: { type: 'base64', media_type: 'application/pdf', data: base64Pdf },
+            source: {
+              type: 'base64',
+              media_type: 'application/pdf',
+              data: base64Pdf,
+            },
             // PDF-ът се кешира — иначе всеки ход от цикъла го праща наново
             // (бавно, скъпо и изяжда токен-лимита на по-ниските Anthropic tier-ове)
             cache_control: { type: 'ephemeral' },
@@ -616,7 +657,10 @@ export class DocumentAIService {
 
       const submit = toolUses.find((block) => block.name === 'submit_result');
       if (submit) {
-        const raw = submit.input as { rows?: ReconcileRow[]; confidence?: number };
+        const raw = submit.input as {
+          rows?: ReconcileRow[];
+          confidence?: number;
+        };
         return this.finalizeReconcileResult(companyId, raw);
       }
 
@@ -767,9 +811,7 @@ export class DocumentAIService {
 
     // Потвърдени+ поръчки без пълно плащане, невидени в извлечението
     const matchedOrderIds = new Set(
-      rows
-        .filter((r) => r.match?.type === 'order')
-        .map((r) => r.match!.id),
+      rows.filter((r) => r.match?.type === 'order').map((r) => r.match!.id),
     );
     const unpaid = await this.prisma.order.findMany({
       where: {
@@ -824,7 +866,13 @@ export class DocumentAIService {
             { sku: { contains: query, mode: 'insensitive' } },
           ],
         },
-        select: { id: true, name: true, sku: true, unit: true, purchasePrice: true },
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          unit: true,
+          purchasePrice: true,
+        },
         take: 5,
       });
     }
@@ -898,21 +946,22 @@ export class DocumentAIService {
 
     const response = await client.messages
       .create({
-      model,
-      max_tokens: 4096,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            documentBlock,
-            {
-              type: 'text',
-              text: `Analyze this invoice image and extract the data as JSON. Return ONLY valid JSON, no markdown, no code fences, no explanation.
+        model,
+        max_tokens: 4096,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              documentBlock,
+              {
+                type: 'text',
+                text: `Analyze this invoice image and extract the data as JSON. Return ONLY valid JSON, no markdown, no code fences, no explanation.
 
 Required JSON structure:
 {
   "invoiceNumber": "string or null",
   "invoiceDate": "YYYY-MM-DD or null",
+  "dueDate": "YYYY-MM-DD or null",
   "supplierName": "string or null",
   "supplierVatNumber": "string or null",
   "supplierAddress": "string or null",
@@ -934,16 +983,17 @@ Required JSON structure:
 Rules:
 - Extract ALL line items from the invoice
 - Dates must be in YYYY-MM-DD format
+- dueDate is the payment due date ("падеж", "срок за плащане", "платимо до", "due date", "payment due"). If the invoice only states payment terms in days (e.g. "платимо в 10-дневен срок", "net 30"), compute dueDate = invoiceDate + N days. If nothing about payment term is stated, use null (do NOT guess and do NOT copy invoiceDate)
 - Numbers must be plain numbers (no currency symbols)
 - If a value is not found, use null
 - confidence: your estimate of extraction accuracy (0-1)
 - For line items: calculate missing totalPrice = quantity * unitPrice if possible
 - The invoice may be in Bulgarian or any other language - extract data regardless of language`,
-            },
-          ],
-        },
-      ],
-    })
+              },
+            ],
+          },
+        ],
+      })
       .catch((error) => this.mapAnthropicError(error));
 
     const text =
@@ -956,6 +1006,7 @@ Rules:
       invoiceDate: parsed.invoiceDate
         ? this.parseDate(parsed.invoiceDate)
         : undefined,
+      dueDate: parsed.dueDate ? this.parseDate(parsed.dueDate) : undefined,
       supplierName: parsed.supplierName || undefined,
       supplierVatNumber: parsed.supplierVatNumber || undefined,
       supplierAddress: parsed.supplierAddress || undefined,

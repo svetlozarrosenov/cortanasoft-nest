@@ -45,6 +45,13 @@ class ScanInvoiceDto {
   mimeType?: string;
 }
 
+class ScanExpenseAttachmentDto {
+  // R2 ключ на вече прикачения към разхода документ (Expense.attachmentUrl)
+  @IsString()
+  @IsNotEmpty()
+  attachmentKey: string;
+}
+
 class ReconcileBankStatementDto {
   @IsString()
   @IsNotEmpty()
@@ -116,7 +123,10 @@ export class DocumentAIController {
         dto.mimeType || 'image/jpeg',
       );
     } else if (dto.imageUrl) {
-      parsedData = await this.documentAIService.parseInvoice(companyId, dto.imageUrl);
+      parsedData = await this.documentAIService.parseInvoice(
+        companyId,
+        dto.imageUrl,
+      );
     } else {
       throw new Error('Either imageUrl or base64Image is required');
     }
@@ -163,6 +173,70 @@ export class DocumentAIController {
       companyId,
       file.buffer.toString('base64'),
       file.mimetype,
+    );
+    return this.buildScanResult(companyId, parsedData);
+  }
+
+  /**
+   * Прочита вече прикачения към разхода документ (R2 ключ) и извлича данните
+   * за формата — операторът качва файла веднъж, после натиска „Попълни с
+   * Cortana". Нищо не се записва; резултатът само предпопълва формата.
+   */
+  @Post('scan-expense-attachment')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(ThrottlerGuard)
+  @Throttle({
+    short: { limit: 5, ttl: 60000 },
+    long: { limit: 60, ttl: 600000 },
+  })
+  @RequireView('ai', 'invoiceScanning')
+  async scanExpenseAttachment(
+    @Param('companyId') companyId: string,
+    @Body() dto: ScanExpenseAttachmentDto,
+  ): Promise<ScanResult> {
+    const key = dto.attachmentKey;
+    // Ключовете са `invoices/<companyId>/<uuid>.<ext>` — чужд ключ не минава.
+    // Стари записи с пълен URL не се поддържат (документът трябва да е в R2).
+    if (!key.startsWith(`invoices/${companyId}/`) || key.includes('..')) {
+      throw new BadRequestException(
+        'Документът не може да бъде прочетен. Прикачете го отново.',
+      );
+    }
+
+    let contentType: string;
+    let content: Buffer;
+    try {
+      const file = await this.uploads.getFile(key);
+      contentType = file.contentType;
+      const chunks: Buffer[] = [];
+      for await (const chunk of file.stream) {
+        chunks.push(chunk as Buffer);
+      }
+      content = Buffer.concat(chunks);
+    } catch {
+      throw new BadRequestException('Прикаченият документ не е намерен');
+    }
+
+    const allowed = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'application/pdf',
+    ];
+    if (!allowed.includes(contentType)) {
+      throw new BadRequestException(
+        'Поддържат се само изображения (JPEG/PNG/WebP/GIF) и PDF файлове',
+      );
+    }
+    if (content.length > 15 * 1024 * 1024) {
+      throw new BadRequestException('Файлът е твърде голям за разчитане');
+    }
+
+    const parsedData = await this.documentAIService.parseInvoiceFromBase64(
+      companyId,
+      content.toString('base64'),
+      contentType,
     );
     return this.buildScanResult(companyId, parsedData);
   }
