@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { ExpenseCategory } from '@prisma/client';
 import Anthropic from '@anthropic-ai/sdk';
 import { lookup } from 'dns/promises';
 import { randomUUID } from 'crypto';
@@ -85,11 +86,31 @@ export interface ReconcileResult {
   }[];
 }
 
+// Описания на категориите за промпта — Claude избира код от списъка
+const EXPENSE_CATEGORY_HINTS = `  DELIVERY: shipping, couriers, transport, fuel for deliveries
+  RENT: rent of premises, offices, warehouses
+  UTILITIES: electricity, water, heating, gas, waste
+  MARKETING: advertising, ads (Google/Meta), printing of promo materials, agencies
+  OFFICE_SUPPLIES: stationery, paper, toner, small office consumables
+  EQUIPMENT: machines, tools, computers, furniture, hardware purchases
+  MAINTENANCE: repairs, servicing, cleaning, spare parts for own equipment/vehicles
+  INSURANCE: insurance premiums of any kind
+  TAXES: taxes, state/municipal fees, licences from authorities
+  TRAVEL: business trips — hotels, tickets, per diems, taxi
+  COMMUNICATION: phone, mobile, internet, hosting of communication services
+  SOFTWARE: software licences, SaaS subscriptions, cloud, domains
+  CONSULTING: accountants, lawyers, consultants, freelancers, professional services
+  BANKING: bank fees, card processing fees, interest
+  OTHER: anything that does not fit above`;
+const EXPENSE_CATEGORY_CODES: string[] = Object.values(ExpenseCategory);
+
 export interface ParsedInvoiceData {
   invoiceNumber?: string;
   invoiceDate?: string;
   // Падеж (срок за плащане); ако фактурата дава само срок в дни, се изчислява
   dueDate?: string;
+  // Предложена категория на разхода (валидирана срещу ExpenseCategory)
+  expenseCategory?: ExpenseCategory;
   supplierName?: string;
   supplierVatNumber?: string;
   supplierAddress?: string;
@@ -968,6 +989,7 @@ Required JSON structure:
   "totalAmount": number or null,
   "vatAmount": number or null,
   "subtotal": number or null,
+  "expenseCategory": one of ${EXPENSE_CATEGORY_CODES.join(' | ')},
   "lineItems": [
     {
       "description": "string",
@@ -985,6 +1007,9 @@ Rules:
 - Dates must be in YYYY-MM-DD format
 - dueDate is the payment due date ("падеж", "срок за плащане", "платимо до", "due date", "payment due"). If the invoice only states payment terms in days (e.g. "платимо в 10-дневен срок", "net 30"), compute dueDate = invoiceDate + N days. If nothing about payment term is stated, use null (do NOT guess and do NOT copy invoiceDate)
 - Numbers must be plain numbers (no currency symbols)
+- expenseCategory: classify what the buyer is paying for, based on the supplier and the line items. Meanings:
+${EXPENSE_CATEGORY_HINTS}
+  Pick the single best match; use OTHER only when nothing else fits
 - If a value is not found, use null
 - confidence: your estimate of extraction accuracy (0-1)
 - For line items: calculate missing totalPrice = quantity * unitPrice if possible
@@ -1007,6 +1032,9 @@ Rules:
         ? this.parseDate(parsed.invoiceDate)
         : undefined,
       dueDate: parsed.dueDate ? this.parseDate(parsed.dueDate) : undefined,
+      expenseCategory: EXPENSE_CATEGORY_CODES.includes(parsed.expenseCategory)
+        ? (parsed.expenseCategory as ExpenseCategory)
+        : undefined,
       supplierName: parsed.supplierName || undefined,
       supplierVatNumber: parsed.supplierVatNumber || undefined,
       supplierAddress: parsed.supplierAddress || undefined,

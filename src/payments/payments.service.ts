@@ -85,13 +85,19 @@ export class PaymentsService {
       if (dto.goodsReceiptId) {
         const receipt = await tx.goodsReceipt.findFirst({
           where: { id: dto.goodsReceiptId, companyId },
-          select: { id: true, currencyId: true },
+          select: { id: true, currencyId: true, totalAmount: true },
         });
         if (!receipt) throw new NotFoundException('Goods receipt not found');
 
         await this.assertRefundWithinPaid(
           tx,
           { goodsReceiptId: dto.goodsReceiptId },
+          dto.amount,
+        );
+        await this.assertReceiptNotOverpaid(
+          tx,
+          dto.goodsReceiptId,
+          Number(receipt.totalAmount),
           dto.amount,
         );
 
@@ -183,6 +189,33 @@ export class PaymentsService {
   }
 
   /**
+   * Плащане към доставка не може да надвиши остатъка по нея — няма смисъл
+   * да платим на доставчика повече от стойността на стоката. (За продажби
+   * надплащане от клиент се допуска — връща се после с отрицателно плащане.)
+   */
+  private async assertReceiptNotOverpaid(
+    tx: PrismaTx,
+    goodsReceiptId: string,
+    total: number,
+    amount: number,
+    excludePaymentId?: string,
+  ) {
+    if (amount <= 0) return;
+    const { paid } = await sumPayments(
+      tx,
+      excludePaymentId
+        ? { goodsReceiptId, id: { not: excludePaymentId } }
+        : { goodsReceiptId },
+    );
+    const remaining = Math.max(0, total - paid);
+    if (amount > remaining + 0.005) {
+      throw new BadRequestException(
+        `Плащането (${amount.toFixed(2)}) надвишава остатъка по доставката (${remaining.toFixed(2)})`,
+      );
+    }
+  }
+
+  /**
    * Derive goodsReceipt.paidAmount + paymentStatus from its payments.
    * Reads the stored totalAmount (kept in sync by GoodsReceiptsService).
    * Also syncs attached expenses' status.
@@ -226,6 +259,19 @@ export class PaymentsService {
           dto.amount,
           id,
         );
+        if (payment.goodsReceiptId) {
+          const receipt = await tx.goodsReceipt.findUnique({
+            where: { id: payment.goodsReceiptId },
+            select: { totalAmount: true },
+          });
+          await this.assertReceiptNotOverpaid(
+            tx,
+            payment.goodsReceiptId,
+            Number(receipt?.totalAmount ?? 0),
+            dto.amount,
+            id,
+          );
+        }
       }
 
       const updated = await tx.payment.update({
