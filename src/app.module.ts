@@ -67,6 +67,7 @@ import { ServiceModule } from './service/service.module';
 import { EmployeeRecordsModule } from './employee-records/employee-records.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { SupportModule } from './support/support.module';
+import { CasesModule } from './cases/cases.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -154,6 +155,7 @@ import { HealthModule } from './health/health.module';
     EmployeeRecordsModule,
     ContractsModule,
     SupportModule,
+    CasesModule,
   ],
   controllers: [],
   providers: [],

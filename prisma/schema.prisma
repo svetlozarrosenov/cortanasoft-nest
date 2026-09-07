@@ -279,6 +279,9 @@ model Company {
   // Тикети за поддръжка (към екипа на Кортана)
   supportTickets SupportTicket[]
 
+  // Казуси — клиентски тикети на самата фирма (виж CustomerCase)
+  customerCases CustomerCase[]
+
   @@map("companies")
 }
 
@@ -589,6 +592,11 @@ model User {
   createdSupportTickets  SupportTicket[]        @relation("SupportTicketCreator")
   assignedSupportTickets SupportTicket[]        @relation("SupportTicketAssignee")
   supportTicketMessages  SupportTicketMessage[] @relation("SupportTicketMessageAuthor")
+
+  // Казуси (клиентски тикети на фирмата)
+  createdCases  CustomerCase[] @relation("CaseCreator")
+  assignedCases CustomerCase[] @relation("CaseAssignee")
+  caseMessages  CaseMessage[]  @relation("CaseMessageAuthor")
 
   @@map("users")
 }
@@ -1421,6 +1429,7 @@ model Customer {
   serviceContracts       ServiceContract[]
   creditApplications     CreditApplication[]
   contracts              Contract[]
+  customerCases          CustomerCase[]
 
   @@unique([companyId, eik])
   @@index([companyId, type])
@@ -5208,4 +5217,125 @@ model SupportTicketAttachment {
   @@index([ticketId])
   @@index([messageId])
   @@map("support_ticket_attachments")
+}
+
+// ==================== КАЗУСИ (клиентски тикети на фирмата-наемател) ====================
+// Отделен свят от SupportTicket (тикети от фирмите към СВ Софт) и от Ticket
+// (вътрешни задачи/спринтове). Тук фирмата води оплаквания/запитвания на
+// СВОИТЕ клиенти: възлага на служител, пише вътрешни бележки и публични
+// отговори, а клиентът следи развитието през публичен линк (publicToken).
+
+enum CaseStatus {
+  NEW // Въведен, никой не го е поел
+  OPEN // Работи се по него / чака действие от екипа
+  WAITING_CUSTOMER // Отговорили сме, чакаме клиента
+  RESOLVED // Решен — клиентът е уведомен
+  CLOSED // Затворен/архивиран
+}
+
+enum CasePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// Откъде е дошло запитването (за ориентация, не задвижва логика)
+enum CaseChannel {
+  EMAIL
+  PHONE
+  PORTAL // Клиентът е писал през публичната страница
+  IN_PERSON
+  OTHER
+}
+
+model CustomerCase {
+  id         String @id @default(cuid())
+  caseNumber String // CASE-2026-00001, per-company
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Клиентът от CRM + snapshot на конкретния контакт, който е писал
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+
+  subject     String
+  description String @db.Text // Запитването, както е записано — клиентът го вижда
+
+  status   CaseStatus   @default(NEW)
+  priority CasePriority @default(MEDIUM)
+  channel  CaseChannel  @default(EMAIL)
+
+  // Служител от същата фирма
+  assignedToId String?
+  assignedTo   User?   @relation("CaseAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdById  String
+  createdBy    User    @relation("CaseCreator", fields: [createdById], references: [id])
+
+  // Публична страница /case/<token>. Cortana НЕ праща имейли на клиента —
+  // фирмата копира линка и го праща ръчно.
+  publicToken String @unique
+
+  resolvedAt DateTime?
+  closedAt   DateTime?
+
+  messages    CaseMessage[]
+  attachments CaseAttachment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, caseNumber])
+  @@index([companyId, status])
+  @@index([companyId, assignedToId])
+  @@index([companyId, customerId])
+  @@index([companyId, createdAt])
+  @@map("customer_cases")
+}
+
+// Нишката по казуса: публичен отговор (клиентът го вижда), вътрешна бележка
+// (само екипът) или съобщение от клиента през публичната страница.
+model CaseMessage {
+  id     String       @id @default(cuid())
+  caseId String
+  case   CustomerCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  body String @db.Text
+
+  isPublic       Boolean @default(false) // true = видимо на публичната страница
+  isFromCustomer Boolean @default(false) // true = писано от клиента (authorUser = null, винаги публично)
+
+  authorUserId String?
+  authorUser   User?   @relation("CaseMessageAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  attachments CaseAttachment[]
+
+  createdAt DateTime @default(now())
+
+  @@index([caseId, createdAt])
+  @@map("case_messages")
+}
+
+// Файл към казуса (към описанието) или към конкретно съобщение (R2, частен bucket)
+model CaseAttachment {
+  id       String @id @default(cuid())
+  fileName String
+  fileKey  String
+  fileSize Int
+  mimeType String
+
+  caseId    String
+  case      CustomerCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  messageId String?
+  message   CaseMessage? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([caseId])
+  @@index([messageId])
+  @@map("case_attachments")
 }

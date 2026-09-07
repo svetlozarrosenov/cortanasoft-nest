@@ -477,8 +477,14 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
             key: 'stockTransfersList',
             labelKey: 'modules.warehouse.stockTransfersList',
             columns: [
-              { key: 'transferNumber', labelKey: 'modules.warehouse.transferNumber' },
-              { key: 'fromLocation', labelKey: 'modules.warehouse.fromLocation' },
+              {
+                key: 'transferNumber',
+                labelKey: 'modules.warehouse.transferNumber',
+              },
+              {
+                key: 'fromLocation',
+                labelKey: 'modules.warehouse.fromLocation',
+              },
               { key: 'toLocation', labelKey: 'modules.warehouse.toLocation' },
               { key: 'date', labelKey: 'common.date' },
               { key: 'status', labelKey: 'common.status' },
@@ -504,7 +510,10 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
             columns: [
               { key: 'name', labelKey: 'common.name' },
               { key: 'product', labelKey: 'modules.production.product' },
-              { key: 'outputQuantity', labelKey: 'modules.production.outputQuantity' },
+              {
+                key: 'outputQuantity',
+                labelKey: 'modules.production.outputQuantity',
+              },
               { key: 'itemsCount', labelKey: 'modules.production.itemsCount' },
               { key: 'status', labelKey: 'common.status' },
             ],
@@ -520,12 +529,18 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
             key: 'productionOrdersList',
             labelKey: 'modules.production.productionOrdersList',
             columns: [
-              { key: 'orderNumber', labelKey: 'modules.production.orderNumber' },
+              {
+                key: 'orderNumber',
+                labelKey: 'modules.production.orderNumber',
+              },
               { key: 'product', labelKey: 'modules.production.product' },
               { key: 'bom', labelKey: 'modules.production.bom' },
               { key: 'quantity', labelKey: 'modules.production.quantity' },
               { key: 'status', labelKey: 'common.status' },
-              { key: 'plannedStartDate', labelKey: 'modules.production.plannedStartDate' },
+              {
+                key: 'plannedStartDate',
+                labelKey: 'modules.production.plannedStartDate',
+              },
             ],
           },
         ],
@@ -755,7 +770,10 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
             key: 'issuedList',
             labelKey: 'modules.warranties.issuedList',
             columns: [
-              { key: 'warrantyNumber', labelKey: 'modules.warranties.warrantyNumber' },
+              {
+                key: 'warrantyNumber',
+                labelKey: 'modules.warranties.warrantyNumber',
+              },
               { key: 'product', labelKey: 'modules.erp.product' },
               { key: 'customer', labelKey: 'modules.crm.customer' },
               { key: 'startDate', labelKey: 'modules.warranties.startDate' },
@@ -950,6 +968,34 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
     ],
   },
   {
+    // Казуси — клиентските тикети на фирмата (не бъркай със support = тикети към СВ Софт)
+    key: 'cases',
+    labelKey: 'modules.cases.title',
+    icon: 'MessagesSquare',
+    pages: [
+      {
+        key: 'cases',
+        labelKey: 'modules.cases.cases',
+        actions: ['view', 'create', 'edit', 'delete'],
+        tables: [
+          {
+            key: 'casesList',
+            labelKey: 'modules.cases.casesList',
+            columns: [
+              { key: 'caseNumber', labelKey: 'modules.cases.caseNumber' },
+              { key: 'subject', labelKey: 'modules.cases.subject' },
+              { key: 'customer', labelKey: 'modules.cases.customer' },
+              { key: 'status', labelKey: 'common.status' },
+              { key: 'priority', labelKey: 'modules.cases.priority' },
+              { key: 'assignedTo', labelKey: 'modules.cases.assignedTo' },
+              { key: 'createdAt', labelKey: 'common.createdAt' },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
     key: 'support',
     labelKey: 'modules.support.title',
     icon: 'LifeBuoy',
@@ -1047,7 +1093,10 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
               { key: 'amount', labelKey: 'modules.admin.amount' },
               { key: 'billingCycle', labelKey: 'modules.admin.billingCycle' },
               { key: 'status', labelKey: 'common.status' },
-              { key: 'nextInvoiceDate', labelKey: 'modules.admin.nextInvoiceDate' },
+              {
+                key: 'nextInvoiceDate',
+                labelKey: 'modules.admin.nextInvoiceDate',
+              },
             ],
           },
         ],
@@ -1186,7 +1235,9 @@ export function createFullPermissions(): RolePermissions {
 // Нормализира permissions спрямо текущия конфиг.
 // Попълва липсващи модули, страници, таблици и колони от конфига,
 // без да променя вече зададени стойности.
-export function normalizePermissions(permissions: RolePermissions): RolePermissions {
+export function normalizePermissions(
+  permissions: RolePermissions,
+): RolePermissions {
   if (!permissions || !permissions.modules) {
     return permissions;
   }
