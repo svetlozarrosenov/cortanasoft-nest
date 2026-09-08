@@ -15,6 +15,14 @@ import { Prisma } from '@prisma/client';
 import { isWorkingDay } from '../leaves/working-days.util';
 import { HrSettingsService } from '../hr-settings/hr-settings.service';
 
+/** Ден, пропуснат при многодневно добавяне, и защо */
+export interface SkippedDay {
+  date: string;
+  reason: 'recorded' | 'leave';
+  /** „08:00–12:00 (Люлин), 13:00–17:00 (Младост)" при reason=recorded */
+  existing?: string;
+}
+
 @Injectable()
 export class AttendanceService {
   constructor(
@@ -115,6 +123,65 @@ export class AttendanceService {
     return { ...row, checkIn, checkOut, breakMinutes, workedMinutes };
   }
 
+  /** „08:00" по българско време — за съобщения към потребителя */
+  static sofiaTime(d: Date): string {
+    return d.toLocaleTimeString('bg-BG', {
+      timeZone: 'Europe/Sofia',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  }
+
+  /** „08:00–12:00 (Люлин)" — описание на съществуващ сегмент за съобщения */
+  static describeSegment(seg: {
+    checkIn: Date | null;
+    checkOut: Date | null;
+    site?: { name: string } | null;
+  }): string {
+    const hours =
+      seg.checkIn && seg.checkOut
+        ? `${AttendanceService.sofiaTime(seg.checkIn)}–${AttendanceService.sofiaTime(seg.checkOut)}`
+        : seg.checkIn
+          ? `от ${AttendanceService.sofiaTime(seg.checkIn)} (отворен)`
+          : 'цял ден';
+    return seg.site ? `${hours} (${seg.site.name})` : hours;
+  }
+
+  /** Може ли сегмент [checkIn, checkOut] да съжителства с вече записаните за
+   *  деня: всички трябва да са с часове и да не се застъпват. */
+  private assertSegmentFits(
+    others: {
+      checkIn: Date | null;
+      checkOut: Date | null;
+      site?: { name: string } | null;
+    }[],
+    checkIn: Date | null,
+    checkOut: Date | null,
+  ) {
+    if (others.length === 0) return;
+    const list = others.map((o) => AttendanceService.describeSegment(o));
+    if (!checkIn || !checkOut) {
+      throw new ConflictException(
+        `Вече има присъствие за този ден (${list.join(', ')}). Втори интервал се добавя само с часове от–до.`,
+      );
+    }
+    const openOrWholeDay = others.find((o) => !o.checkIn || !o.checkOut);
+    if (openOrWholeDay) {
+      throw new ConflictException(
+        `Денят вече е отбелязан като ${AttendanceService.describeSegment(openOrWholeDay)}. Първо му задай часове, после добави втория интервал.`,
+      );
+    }
+    const clash = others.find(
+      (o) => checkIn < o.checkOut! && checkOut > o.checkIn!,
+    );
+    if (clash) {
+      throw new ConflictException(
+        `Часовете се застъпват с ${AttendanceService.describeSegment(clash)}.`,
+      );
+    }
+  }
+
   /** Присъствието е факт, не план — не се отбелязва за бъдещ ден */
   private assertNotFuture(...dates: (string | undefined)[]) {
     const today = AttendanceService.todayKey();
@@ -171,13 +238,15 @@ export class AttendanceService {
     // Бригада: дните са избрани общо, затова за всеки човек прескачаме
     // неговите одобрени отпуски (календарът в UI-а не може да ги покаже за всички)
     let count = 0;
+    let skippedCount = 0;
     for (const userId of targetUserIds) {
       const res = await this.createForUser(companyId, userId, dto, {
         skipLeaves: true,
       });
       count += 'count' in res ? res.count : 1;
+      skippedCount += 'skipped' in res ? res.skipped.length : 0;
     }
-    return { count, users: targetUserIds.length };
+    return { count, users: targetUserIds.length, skippedCount };
   }
 
   private async createForUser(
@@ -197,18 +266,26 @@ export class AttendanceService {
       return this.createRange(companyId, userId, dto);
     }
 
-    // Ръчно вписване: един запис на човек за ден, независимо от обекта и
-    // часовете. Ако денят вече е отбелязан, се редактира от матрицата.
+    // Ръчно вписване за един ден. Денят е поредица от времеви сегменти
+    // (по един запис на обект): втори запис се допуска само ако всички са
+    // с часове и не се застъпват — иначе денят си остава един запис.
     // (Вход/изход от „Моите присъствия" има собствена логика по-долу.)
     const date = AttendanceService.dayKey(dto.date);
-    const existing = await this.prisma.attendance.findFirst({
+    const existing = await this.prisma.attendance.findMany({
       where: { companyId, userId, date },
-      select: { id: true },
+      select: {
+        id: true,
+        checkIn: true,
+        checkOut: true,
+        site: { select: { name: true } },
+      },
     });
 
-    if (existing) {
-      throw new ConflictException(
-        'Вече има присъствие за този ден. Редактирай съществуващия запис от таблицата.',
+    if (existing.length > 0) {
+      this.assertSegmentFits(
+        existing,
+        dto.checkIn ? new Date(dto.checkIn) : null,
+        dto.checkOut ? new Date(dto.checkOut) : null,
       );
     }
 
@@ -300,9 +377,35 @@ export class AttendanceService {
     });
   }
 
+  /** Пропуснат ден при многодневно добавяне — за обратна връзка в UI-а:
+   *  ден с вече отбелязано присъствие (с описание на сегментите) или с
+   *  одобрен отпуск. Неработните дни при период не се докладват. */
+  private skippedDay(
+    key: string,
+    reason: 'recorded' | 'leave',
+    existing?: {
+      checkIn: Date | null;
+      checkOut: Date | null;
+      site: { name: string } | null;
+    }[],
+  ): SkippedDay {
+    return {
+      date: key,
+      reason,
+      ...(existing && existing.length > 0
+        ? {
+            existing: existing
+              .map((e) => AttendanceService.describeSegment(e))
+              .join(', '),
+          }
+        : {}),
+    };
+  }
+
   /** Изрично избрани дни: записът се създава за всеки подаден ден — вкл.
    *  почивни/празнични (изборът е човешки, напр. извънреден труд). Дни, за
-   *  които човекът вече има запис (на който и да е обект), се прескачат. */
+   *  които човекът вече има запис (на който и да е обект), се прескачат и
+   *  се връщат в `skipped`, за да ги види HR. */
   private async createFromDates(
     companyId: string,
     userId: string,
@@ -314,6 +417,7 @@ export class AttendanceService {
       throw new BadRequestException('Твърде много дни наведнъж (макс. 92)');
     }
     let dateObjects = dates.map((d) => AttendanceService.dayKey(d));
+    const skipped: SkippedDay[] = [];
 
     if (opts.skipLeaves && dateObjects.length > 0) {
       const leaves = await this.prisma.leave.findMany({
@@ -326,29 +430,65 @@ export class AttendanceService {
         },
         select: { startDate: true, endDate: true },
       });
-      dateObjects = dateObjects.filter(
-        (d) => !leaves.some((l) => l.startDate <= d && l.endDate >= d),
-      );
+      dateObjects = dateObjects.filter((d) => {
+        const onLeave = leaves.some((l) => l.startDate <= d && l.endDate >= d);
+        if (onLeave) {
+          skipped.push(this.skippedDay(d.toISOString().slice(0, 10), 'leave'));
+        }
+        return !onLeave;
+      });
     }
 
-    const existing = await this.prisma.attendance.findMany({
-      where: {
-        companyId,
-        userId,
-        date: { in: dateObjects },
-      },
-      select: { date: true },
+    const existingByDay = await this.existingSegmentsByDay(companyId, userId, {
+      in: dateObjects,
     });
-    const existingDays = new Set(
-      existing.map((a) => a.date.toISOString().slice(0, 10)),
-    );
 
-    const data: Prisma.AttendanceCreateManyInput[] = dateObjects
-      .filter((d) => !existingDays.has(d.toISOString().slice(0, 10)))
-      .map((d) => this.dayRow(companyId, userId, dto, d));
+    const data: Prisma.AttendanceCreateManyInput[] = [];
+    for (const d of dateObjects) {
+      const key = d.toISOString().slice(0, 10);
+      const already = existingByDay.get(key);
+      if (already) {
+        skipped.push(this.skippedDay(key, 'recorded', already));
+        continue;
+      }
+      data.push(this.dayRow(companyId, userId, dto, d));
+    }
 
     await this.prisma.attendance.createMany({ data });
-    return { count: data.length };
+    return { count: data.length, skipped };
+  }
+
+  /** Сегментите на човека по ден (YYYY-MM-DD → списък) за даден филтър по дата */
+  private async existingSegmentsByDay(
+    companyId: string,
+    userId: string,
+    date: Prisma.DateTimeFilter,
+  ) {
+    const rows = await this.prisma.attendance.findMany({
+      where: { companyId, userId, date },
+      select: {
+        date: true,
+        checkIn: true,
+        checkOut: true,
+        site: { select: { name: true } },
+      },
+      orderBy: { checkIn: 'asc' },
+    });
+    const byDay = new Map<
+      string,
+      {
+        checkIn: Date | null;
+        checkOut: Date | null;
+        site: { name: string } | null;
+      }[]
+    >();
+    for (const r of rows) {
+      const key = r.date.toISOString().slice(0, 10);
+      const list = byDay.get(key) ?? [];
+      list.push(r);
+      byDay.set(key, list);
+    }
+    return byDay;
   }
 
   /** Календарна информация за периода — за календара във формата: кой ден е
@@ -430,7 +570,7 @@ export class AttendanceService {
       throw new BadRequestException('Периодът е твърде дълъг (макс. 3 месеца)');
     }
 
-    const [leaves, existing] = await Promise.all([
+    const [leaves, existingByDay] = await Promise.all([
       this.prisma.leave.findMany({
         where: {
           companyId,
@@ -441,22 +581,13 @@ export class AttendanceService {
         },
         select: { startDate: true, endDate: true },
       }),
-      this.prisma.attendance.findMany({
-        where: {
-          companyId,
-          userId,
-          date: { gte: from, lte: to },
-        },
-        select: { date: true },
-      }),
+      this.existingSegmentsByDay(companyId, userId, { gte: from, lte: to }),
     ]);
-    const existingDays = new Set(
-      existing.map((a) => a.date.toISOString().slice(0, 10)),
-    );
     const onLeave = (d: Date) =>
       leaves.some((l) => l.startDate <= d && l.endDate >= d);
 
     const data: Prisma.AttendanceCreateManyInput[] = [];
+    const skipped: SkippedDay[] = [];
     for (
       let d = new Date(from);
       d <= to;
@@ -465,13 +596,21 @@ export class AttendanceService {
       // Неработните дни се прескачат, освен при изричен избор
       // (извънреден труд в събота/празник)
       if (!dto.includeNonWorkingDays && !isWorkingDay(d)) continue;
-      if (onLeave(d)) continue;
-      if (existingDays.has(d.toISOString().slice(0, 10))) continue;
+      const key = d.toISOString().slice(0, 10);
+      if (onLeave(d)) {
+        skipped.push(this.skippedDay(key, 'leave'));
+        continue;
+      }
+      const already = existingByDay.get(key);
+      if (already) {
+        skipped.push(this.skippedDay(key, 'recorded', already));
+        continue;
+      }
       data.push(this.dayRow(companyId, userId, dto, new Date(d)));
     }
 
     await this.prisma.attendance.createMany({ data });
-    return { count: data.length };
+    return { count: data.length, skipped };
   }
 
   async findAll(companyId: string, query: QueryAttendanceDto) {
@@ -635,6 +774,25 @@ export class AttendanceService {
       const diffMs = checkOut.getTime() - checkIn.getTime();
       workedMinutes = Math.floor(diffMs / 60000) - breakMinutes;
       if (workedMinutes < 0) workedMinutes = 0;
+    }
+
+    // При няколко сегмента в деня новите часове не бива да се застъпват с
+    // останалите (проверява се само ако се пипат часовете)
+    if (dto.checkIn || dto.checkOut) {
+      const siblings = await this.prisma.attendance.findMany({
+        where: {
+          companyId,
+          userId: attendance.userId,
+          date: attendance.date,
+          id: { not: id },
+        },
+        select: {
+          checkIn: true,
+          checkOut: true,
+          site: { select: { name: true } },
+        },
+      });
+      this.assertSegmentFits(siblings, checkIn, checkOut);
     }
 
     const updated = await this.prisma.attendance.update({

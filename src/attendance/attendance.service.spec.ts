@@ -47,6 +47,7 @@ describe('AttendanceService', () => {
     jest.clearAllMocks();
     mockPrisma.leave.findFirst.mockResolvedValue(null);
     mockPrisma.leave.findMany.mockResolvedValue([]);
+    mockPrisma.attendance.findMany.mockResolvedValue([]);
     mockPrisma.payroll.findMany.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -83,25 +84,70 @@ describe('AttendanceService', () => {
         .rejects.toThrow(BadRequestException);
     });
 
-    it('refuses a second record for the same day regardless of site or hours', async () => {
-      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
-      mockPrisma.attendance.findFirst.mockResolvedValue({ id: 'existing' });
+    describe('second segment on the same day', () => {
+      const morning = {
+        id: 'a-morning',
+        checkIn: new Date('2025-06-15T05:00:00Z'), // 08:00 София
+        checkOut: new Date('2025-06-15T09:00:00Z'), // 12:00 София
+        site: { name: 'Люлин' },
+      };
+      beforeEach(() => {
+        mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
+        mockPrisma.attendance.create.mockImplementation(({ data }) =>
+          Promise.resolve({ id: 'a2', ...data }),
+        );
+        mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1' });
+      });
 
-      await expect(
-        service.create('c1', 'u1', {
+      it('allows a timed, non-overlapping second segment (another site)', async () => {
+        mockPrisma.attendance.findMany.mockResolvedValue([morning]);
+
+        const res = (await service.create('c1', 'me', {
           ...baseDto,
           siteId: undefined,
-          checkIn: '2025-06-15T09:00:00Z',
-          checkOut: '2025-06-15T17:00:00Z',
-        } as any),
-      ).rejects.toThrow(ConflictException);
-      // Проверката е само по човек+ден — без обект и без филтър по часове
-      expect(mockPrisma.attendance.findFirst.mock.calls[0][0].where).toEqual({
-        companyId: 'c1',
-        userId: 'u1',
-        date: expect.any(Date),
+          checkIn: '2025-06-15T09:30:00Z',
+          checkOut: '2025-06-15T14:00:00Z',
+        } as any)) as any;
+
+        expect(res.id).toBe('a2');
+        expect(mockPrisma.attendance.create).toHaveBeenCalledTimes(1);
       });
-      expect(mockPrisma.attendance.create).not.toHaveBeenCalled();
+
+      it('refuses a second segment without hours', async () => {
+        mockPrisma.attendance.findMany.mockResolvedValue([morning]);
+
+        await expect(service.create('c1', 'me', baseDto as any)).rejects.toThrow(
+          /Вече има присъствие за този ден \(08:00–12:00 \(Люлин\)\)/,
+        );
+        expect(mockPrisma.attendance.create).not.toHaveBeenCalled();
+      });
+
+      it('refuses overlapping hours and names the clashing segment', async () => {
+        mockPrisma.attendance.findMany.mockResolvedValue([morning]);
+
+        await expect(
+          service.create('c1', 'me', {
+            ...baseDto,
+            checkIn: '2025-06-15T08:00:00Z', // 11:00 — вътре в 08–12
+            checkOut: '2025-06-15T14:00:00Z',
+          } as any),
+        ).rejects.toThrow(/застъпват с 08:00–12:00 \(Люлин\)/);
+        expect(mockPrisma.attendance.create).not.toHaveBeenCalled();
+      });
+
+      it('refuses when the existing record is a whole day (no hours)', async () => {
+        mockPrisma.attendance.findMany.mockResolvedValue([
+          { id: 'whole', checkIn: null, checkOut: null, site: null },
+        ]);
+
+        await expect(
+          service.create('c1', 'me', {
+            ...baseDto,
+            checkIn: '2025-06-15T09:30:00Z',
+            checkOut: '2025-06-15T14:00:00Z',
+          } as any),
+        ).rejects.toThrow(/отбелязан като цял ден/);
+      });
     });
 
     it('refuses a single-day record on a day with an approved leave', async () => {
@@ -166,7 +212,7 @@ describe('AttendanceService', () => {
 
       const result = (await service.create('c1', 'me', { ...baseDto, userIds: ['u1', 'u2'] } as any)) as any;
 
-      expect(result).toEqual({ count: 2, users: 2 });
+      expect(result).toEqual({ count: 2, users: 2, skippedCount: 0 });
       const created = mockPrisma.attendance.create.mock.calls.map((c) => c[0].data.userId);
       expect(created).toEqual(['u1', 'u2']);
     });
@@ -215,7 +261,7 @@ describe('AttendanceService', () => {
         breakMinutes: 60,
       } as any);
 
-      expect(res).toEqual({ count: 2 });
+      expect(res).toEqual({ count: 2, skipped: [] });
       const rows = mockPrisma.attendance.createMany.mock.calls[0][0].data;
       expect(rows).toHaveLength(2);
       // 08:00–17:00 българско лятно време (UTC+3) = 05:00–14:00Z
@@ -224,6 +270,34 @@ describe('AttendanceService', () => {
       expect(rows[1].checkIn.toISOString()).toBe('2025-06-17T05:00:00.000Z');
       // 9 ч − 60 мин почивка
       expect(rows.every((r: any) => r.breakMinutes === 60 && r.workedMinutes === 480)).toBe(true);
+    });
+
+    it('skips already recorded days and reports them with the existing segments', async () => {
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
+      mockPrisma.attendance.findMany.mockResolvedValue([
+        {
+          date: new Date('2025-06-17T00:00:00Z'),
+          checkIn: new Date('2025-06-17T07:00:00Z'),
+          checkOut: new Date('2025-06-17T09:00:00Z'),
+          site: { name: 'Люлин' },
+        },
+      ]);
+      mockPrisma.attendance.createMany.mockResolvedValue({ count: 2 });
+
+      const res = (await service.create('c1', 'me', {
+        ...baseDto,
+        dates: ['2025-06-16', '2025-06-17', '2025-06-18'],
+      } as any)) as any;
+
+      expect(res.count).toBe(2);
+      expect(res.skipped).toEqual([
+        { date: '2025-06-17', reason: 'recorded', existing: '10:00–12:00 (Люлин)' },
+      ]);
+      const rows = mockPrisma.attendance.createMany.mock.calls[0][0].data;
+      expect(rows.map((r: any) => r.date.toISOString().slice(0, 10))).toEqual([
+        '2025-06-16',
+        '2025-06-18',
+      ]);
     });
 
     it('leaves picked days without hours when from/to are not given (whole day)', async () => {
@@ -314,6 +388,36 @@ describe('AttendanceService', () => {
   });
 
   describe('update', () => {
+    it('refuses hours that overlap a sibling segment of the same day', async () => {
+      mockPrisma.attendance.findFirst.mockResolvedValue({
+        id: 'a2',
+        userId: 'u1',
+        date: new Date('2025-06-15T00:00:00Z'),
+        checkIn: new Date('2025-06-15T09:30:00Z'),
+        checkOut: new Date('2025-06-15T14:00:00Z'),
+        breakMinutes: 0,
+        workedMinutes: 270,
+      });
+      mockPrisma.attendance.findMany.mockResolvedValue([
+        {
+          checkIn: new Date('2025-06-15T05:00:00Z'),
+          checkOut: new Date('2025-06-15T09:00:00Z'),
+          site: { name: 'Люлин' },
+        },
+      ]);
+
+      await expect(
+        service.update('c1', 'a2', { checkIn: '2025-06-15T08:00:00Z' } as any),
+      ).rejects.toThrow(ConflictException);
+      // Търсят се само другите записи за същия човек и ден
+      expect(mockPrisma.attendance.findMany.mock.calls[0][0].where).toMatchObject({
+        companyId: 'c1',
+        userId: 'u1',
+        id: { not: 'a2' },
+      });
+      expect(mockPrisma.attendance.update).not.toHaveBeenCalled();
+    });
+
     it('should throw NotFoundException for non-existent record', async () => {
       mockPrisma.attendance.findFirst.mockResolvedValue(null);
 
