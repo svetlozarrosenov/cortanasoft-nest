@@ -38,6 +38,83 @@ export class AttendanceService {
     return now.toLocaleDateString('en-CA', { timeZone: 'Europe/Sofia' });
   }
 
+  /** Час от денонощието по българско време → конкретен момент (UTC) за
+   *  дадения ден. Отместването се взима от Intl за самата дата, така че
+   *  лятното/зимното време се отчита правилно за всеки ден от периода. */
+  static sofiaTimeToDate(dateKey: string, hhmm: string): Date {
+    const [y, mo, d] = dateKey.slice(0, 10).split('-').map(Number);
+    const [h, mi] = hhmm.split(':').map(Number);
+    const wall = Date.UTC(y, mo - 1, d, h, mi);
+    // Първо приближение с отместването към „стенния" час, после проверка
+    // с отместването към получения момент (около смяната на часа)
+    let utc = wall - AttendanceService.sofiaOffsetMs(wall);
+    utc = wall - AttendanceService.sofiaOffsetMs(utc);
+    return new Date(utc);
+  }
+
+  private static readonly SOFIA_FMT = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Sofia',
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+
+  private static sofiaOffsetMs(utcMs: number): number {
+    const p: Record<string, number> = {};
+    for (const part of AttendanceService.SOFIA_FMT.formatToParts(
+      new Date(utcMs),
+    )) {
+      if (part.type !== 'literal') p[part.type] = Number(part.value);
+    }
+    const asUtc = Date.UTC(
+      p.year,
+      p.month - 1,
+      p.day,
+      p.hour,
+      p.minute,
+      p.second,
+    );
+    return asUtc - utcMs;
+  }
+
+  /** Дневен запис за период/избрани дни: без часове (цял ден) или с общите
+   *  часове „от–до" от формата, приложени към конкретната дата. Излизане
+   *  „преди" влизането = нощна смяна, свършва на следващия ден. */
+  private dayRow(
+    companyId: string,
+    userId: string,
+    dto: CreateAttendanceDto,
+    date: Date,
+  ): Prisma.AttendanceCreateManyInput {
+    const row: Prisma.AttendanceCreateManyInput = {
+      date,
+      type: dto.type,
+      notes: dto.notes,
+      companyId,
+      userId,
+      siteId: dto.siteId || undefined,
+    };
+    if (!dto.startTime || !dto.endTime) return row;
+
+    const key = date.toISOString().slice(0, 10);
+    const checkIn = AttendanceService.sofiaTimeToDate(key, dto.startTime);
+    let checkOut = AttendanceService.sofiaTimeToDate(key, dto.endTime);
+    if (checkOut <= checkIn) {
+      checkOut = new Date(checkOut.getTime() + 24 * 60 * 60000);
+    }
+    const breakMinutes = dto.breakMinutes || 0;
+    const workedMinutes = Math.max(
+      0,
+      Math.floor((checkOut.getTime() - checkIn.getTime()) / 60000) -
+        breakMinutes,
+    );
+    return { ...row, checkIn, checkOut, breakMinutes, workedMinutes };
+  }
+
   /** Присъствието е факт, не план — не се отбелязва за бъдещ ден */
   private assertNotFuture(...dates: (string | undefined)[]) {
     const today = AttendanceService.todayKey();
@@ -268,14 +345,7 @@ export class AttendanceService {
 
     const data: Prisma.AttendanceCreateManyInput[] = dateObjects
       .filter((d) => !existingDays.has(d.toISOString().slice(0, 10)))
-      .map((d) => ({
-        date: d,
-        type: dto.type,
-        notes: dto.notes,
-        companyId,
-        userId,
-        siteId: dto.siteId || undefined,
-      }));
+      .map((d) => this.dayRow(companyId, userId, dto, d));
 
     await this.prisma.attendance.createMany({ data });
     return { count: data.length };
@@ -397,14 +467,7 @@ export class AttendanceService {
       if (!dto.includeNonWorkingDays && !isWorkingDay(d)) continue;
       if (onLeave(d)) continue;
       if (existingDays.has(d.toISOString().slice(0, 10))) continue;
-      data.push({
-        date: new Date(d),
-        type: dto.type,
-        notes: dto.notes,
-        companyId,
-        userId,
-        siteId: dto.siteId || undefined,
-      });
+      data.push(this.dayRow(companyId, userId, dto, new Date(d)));
     }
 
     await this.prisma.attendance.createMany({ data });

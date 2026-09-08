@@ -6,6 +6,7 @@ import {
   IsDateString,
   IsEnum,
   IsInt,
+  Matches,
   Min,
   Max,
 } from 'class-validator';
@@ -60,6 +61,17 @@ export class CreateAttendanceDto {
   @IsDateString()
   @IsOptional()
   checkOut?: string;
+
+  // При няколко дни (dates/dateTo): едни и същи часове „от–до" за всеки
+  // ден, като час от денонощието по българско време ("08:00"). Бекендът
+  // ги превръща в конкретен момент за всяка дата. Трябват и двата.
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
+  @IsOptional()
+  startTime?: string;
+
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
+  @IsOptional()
+  endTime?: string;
 
   @IsInt()
   @Min(0)

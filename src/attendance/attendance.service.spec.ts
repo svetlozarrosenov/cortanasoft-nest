@@ -14,6 +14,7 @@ const mockPrisma = {
     findMany: jest.fn(),
     findUnique: jest.fn(),
     create: jest.fn(),
+    createMany: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
     delete: jest.fn(),
@@ -199,6 +200,78 @@ describe('AttendanceService', () => {
       // Отхвърля се преди каквато и да е заявка към базата
       expect(mockPrisma.userCompany.findMany).not.toHaveBeenCalled();
       expect(mockPrisma.attendance.create).not.toHaveBeenCalled();
+    });
+
+    it('applies the shared from/to hours and break to every picked day', async () => {
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
+      mockPrisma.attendance.findMany.mockResolvedValue([]);
+      mockPrisma.attendance.createMany.mockResolvedValue({ count: 2 });
+
+      const res = await service.create('c1', 'me', {
+        ...baseDto,
+        dates: ['2025-06-16', '2025-06-17'],
+        startTime: '08:00',
+        endTime: '17:00',
+        breakMinutes: 60,
+      } as any);
+
+      expect(res).toEqual({ count: 2 });
+      const rows = mockPrisma.attendance.createMany.mock.calls[0][0].data;
+      expect(rows).toHaveLength(2);
+      // 08:00–17:00 българско лятно време (UTC+3) = 05:00–14:00Z
+      expect(rows[0].checkIn.toISOString()).toBe('2025-06-16T05:00:00.000Z');
+      expect(rows[0].checkOut.toISOString()).toBe('2025-06-16T14:00:00.000Z');
+      expect(rows[1].checkIn.toISOString()).toBe('2025-06-17T05:00:00.000Z');
+      // 9 ч − 60 мин почивка
+      expect(rows.every((r: any) => r.breakMinutes === 60 && r.workedMinutes === 480)).toBe(true);
+    });
+
+    it('leaves picked days without hours when from/to are not given (whole day)', async () => {
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
+      mockPrisma.attendance.findMany.mockResolvedValue([]);
+      mockPrisma.attendance.createMany.mockResolvedValue({ count: 1 });
+
+      await service.create('c1', 'me', { ...baseDto, dates: ['2025-06-16'] } as any);
+
+      const row = mockPrisma.attendance.createMany.mock.calls[0][0].data[0];
+      expect(row.checkIn).toBeUndefined();
+      expect(row.workedMinutes).toBeUndefined();
+    });
+
+    it('applies the hours across a from–to range too, per working day', async () => {
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
+      mockPrisma.leave.findMany.mockResolvedValue([]);
+      mockPrisma.attendance.findMany.mockResolvedValue([]);
+      mockPrisma.attendance.createMany.mockResolvedValue({ count: 5 });
+
+      // Понеделник–неделя → 5 работни дни
+      await service.create('c1', 'me', {
+        ...baseDto,
+        date: '2025-06-16',
+        dateTo: '2025-06-22',
+        startTime: '09:00',
+        endTime: '13:00',
+      } as any);
+
+      const rows = mockPrisma.attendance.createMany.mock.calls[0][0].data;
+      expect(rows).toHaveLength(5);
+      expect(rows[4].checkIn.toISOString()).toBe('2025-06-20T06:00:00.000Z');
+      expect(rows[4].workedMinutes).toBe(240);
+    });
+
+    it('converts Sofia wall-clock time per date, respecting DST on both sides', () => {
+      // Зимно време UTC+2
+      expect(AttendanceService.sofiaTimeToDate('2025-01-15', '08:00').toISOString()).toBe(
+        '2025-01-15T06:00:00.000Z',
+      );
+      // Лятно време UTC+3
+      expect(AttendanceService.sofiaTimeToDate('2025-07-15', '08:00').toISOString()).toBe(
+        '2025-07-15T05:00:00.000Z',
+      );
+      // Денят на смяната (30.03.2025, 03:00 → 04:00): следобедът вече е UTC+3
+      expect(AttendanceService.sofiaTimeToDate('2025-03-30', '17:00').toISOString()).toBe(
+        '2025-03-30T14:00:00.000Z',
+      );
     });
 
     it('computes "today" in Sofia time, not server UTC', () => {
