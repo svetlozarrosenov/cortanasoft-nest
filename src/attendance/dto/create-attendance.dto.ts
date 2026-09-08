@@ -8,7 +8,6 @@ import {
   IsInt,
   Matches,
   Min,
-  Max,
 } from 'class-validator';
 import { AttendanceType } from '@prisma/client';
 
@@ -72,12 +71,6 @@ export class CreateAttendanceDto {
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
   @IsOptional()
   endTime?: string;
-
-  @IsInt()
-  @Min(0)
-  @Max(480)
-  @IsOptional()
-  breakMinutes?: number;
 
   @IsInt()
   @Min(0)

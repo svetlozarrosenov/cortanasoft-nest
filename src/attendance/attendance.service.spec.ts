@@ -53,7 +53,13 @@ describe('AttendanceService', () => {
       providers: [
         AttendanceService,
         { provide: PrismaService, useValue: mockPrisma },
-        { provide: HrSettingsService, useValue: { getWorkDayHours: jest.fn().mockResolvedValue(8) } },
+        {
+          provide: HrSettingsService,
+          useValue: {
+            getWorkDayHours: jest.fn().mockResolvedValue(8),
+            get: jest.fn().mockResolvedValue({ breakMinutes: 60 }),
+          },
+        },
       ],
     }).compile();
     service = module.get<AttendanceService>(AttendanceService);
@@ -84,7 +90,50 @@ describe('AttendanceService', () => {
         .rejects.toThrow(BadRequestException);
     });
 
-    describe('second segment on the same day', () => {
+    describe('allocateBreak (day-level break rule)', () => {
+    const seg = (from: string, to: string) => ({
+      checkIn: new Date(`2025-06-15T${from}:00Z`),
+      checkOut: new Date(`2025-06-15T${to}:00Z`),
+    });
+
+    it('deducts the full break from a single 8h+ segment', () => {
+      expect(AttendanceService.allocateBreak([seg('08:00', '17:00')], 60)).toEqual([60]);
+    });
+
+    it('deducts nothing from a short day', () => {
+      expect(AttendanceService.allocateBreak([seg('08:00', '12:00')], 60)).toEqual([0]);
+    });
+
+    it('treats a gap between segments as the break (punch cancels deduct)', () => {
+      expect(AttendanceService.allocateBreak([seg('08:00', '12:00'), seg('13:00', '17:00')], 60)).toEqual([
+        0, 0,
+      ]);
+    });
+
+    it('deducts only what the gap does not cover, on the longest segment', () => {
+      expect(AttendanceService.allocateBreak([seg('08:00', '12:00'), seg('12:30', '17:30')], 60)).toEqual([
+        0, 30,
+      ]);
+    });
+
+    it('puts the break on the longest segment when segments touch', () => {
+      expect(AttendanceService.allocateBreak([seg('13:00', '17:00'), seg('08:00', '13:00')], 60)).toEqual([
+        0, 60,
+      ]);
+    });
+
+    it('never deducts more than the segment holds', () => {
+      // 5 сегмента по 1:15 с 15 мин между тях = 6:15 работа, дупки 60 → нищо
+      const five = ['08:00', '09:30', '11:00', '12:30', '14:00'].map((h) => {
+        const [hh, mm] = h.split(':').map(Number);
+        const end = `${String(hh + 1).padStart(2, '0')}:${String(mm + 15).padStart(2, '0')}`;
+        return seg(h, end);
+      });
+      expect(AttendanceService.allocateBreak(five, 60)).toEqual([0, 0, 0, 0, 0]);
+    });
+  });
+
+  describe('second segment on the same day', () => {
       const morning = {
         id: 'a-morning',
         checkIn: new Date('2025-06-15T05:00:00Z'), // 08:00 София
@@ -160,31 +209,49 @@ describe('AttendanceService', () => {
       expect(mockPrisma.attendance.create).not.toHaveBeenCalled();
     });
 
-    it('should calculate workedMinutes when checkIn and checkOut provided', async () => {
+    it('stores the gross span on create and lets the day rule deduct the break', async () => {
       const dto = {
         ...baseDto,
         checkIn: '2025-06-15T09:00:00Z',
         checkOut: '2025-06-15T17:00:00Z',
-        breakMinutes: 30,
+        breakMinutes: 30, // игнорира се — почивката е правило на деня
       };
       mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
       mockPrisma.attendance.findFirst.mockResolvedValue(null);
       mockPrisma.attendance.create.mockImplementation(({ data }) => Promise.resolve({ id: 'a1', ...data }));
+      // 1) проверка за съществуващи; 2) затворените сегменти за преизчислението
+      mockPrisma.attendance.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          {
+            id: 'a1',
+            checkIn: new Date('2025-06-15T09:00:00Z'),
+            checkOut: new Date('2025-06-15T17:00:00Z'),
+            breakMinutes: 0,
+            workedMinutes: 480,
+          },
+        ]);
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1' });
 
-      await service.create('c1', 'u1', dto as any);
+      const result = (await service.create('c1', 'u1', dto as any)) as any;
 
       const createCall = mockPrisma.attendance.create.mock.calls[0][0];
-      // 8 hours = 480 minutes, minus 30 break = 450
-      expect(createCall.data.workedMinutes).toBe(450);
+      expect(createCall.data.workedMinutes).toBe(480);
+      expect(createCall.data.breakMinutes).toBeUndefined();
+      // 8 ч ≥ 6 ч → 60 мин от настройките
+      expect(mockPrisma.attendance.update).toHaveBeenCalledWith({
+        where: { id: 'a1' },
+        data: { breakMinutes: 60, workedMinutes: 420 },
+      });
+      expect(result.workedMinutes).toBe(420);
+      expect(result.breakMinutes).toBe(60);
     });
 
     it('should clamp workedMinutes to 0 when negative', async () => {
       const dto = {
         ...baseDto,
         checkIn: '2025-06-15T09:00:00Z',
-        checkOut: '2025-06-15T09:05:00Z',
-        breakMinutes: 60,
+        checkOut: '2025-06-15T09:00:00Z',
       };
       mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
       mockPrisma.attendance.findFirst.mockResolvedValue(null);
@@ -248,7 +315,7 @@ describe('AttendanceService', () => {
       expect(mockPrisma.attendance.create).not.toHaveBeenCalled();
     });
 
-    it('applies the shared from/to hours and break to every picked day', async () => {
+    it('applies the shared from/to hours and the settings break to every picked day', async () => {
       mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
       mockPrisma.attendance.findMany.mockResolvedValue([]);
       mockPrisma.attendance.createMany.mockResolvedValue({ count: 2 });
@@ -258,7 +325,6 @@ describe('AttendanceService', () => {
         dates: ['2025-06-16', '2025-06-17'],
         startTime: '08:00',
         endTime: '17:00',
-        breakMinutes: 60,
       } as any);
 
       expect(res).toEqual({ count: 2, skipped: [] });
@@ -268,7 +334,7 @@ describe('AttendanceService', () => {
       expect(rows[0].checkIn.toISOString()).toBe('2025-06-16T05:00:00.000Z');
       expect(rows[0].checkOut.toISOString()).toBe('2025-06-16T14:00:00.000Z');
       expect(rows[1].checkIn.toISOString()).toBe('2025-06-17T05:00:00.000Z');
-      // 9 ч − 60 мин почивка
+      // 9 ч − 60 мин почивка от HR > Настройки
       expect(rows.every((r: any) => r.breakMinutes === 60 && r.workedMinutes === 480)).toBe(true);
     });
 
@@ -424,26 +490,67 @@ describe('AttendanceService', () => {
       await expect(service.update('c1', 'bad', {} as any)).rejects.toThrow(NotFoundException);
     });
 
-    it('should recalculate workedMinutes on update', async () => {
+    it('recalculates the whole day on update: the break moves to the longest segment', async () => {
+      const date = new Date('2025-06-15T00:00:00Z');
       mockPrisma.attendance.findFirst.mockResolvedValue({
-        id: 'a1',
+        id: 'a2',
         userId: 'u1',
-        checkIn: new Date('2025-06-15T09:00:00Z'),
-        checkOut: new Date('2025-06-15T17:00:00Z'),
+        date,
+        checkIn: new Date('2025-06-15T10:00:00Z'),
+        checkOut: new Date('2025-06-15T12:00:00Z'),
         breakMinutes: 0,
-        workedMinutes: 480,
+        workedMinutes: 120,
       });
-      mockPrisma.attendance.update.mockImplementation(({ data }) =>
-        Promise.resolve({ id: 'a1', userId: 'u1', ...data }),
+      // 1) съседи за застъпване; 2) затворени сегменти за преизчислението:
+      // 05–09 (4 ч) + новият 09–15 (6 ч), допрени → 60 мин върху дългия
+      mockPrisma.attendance.findMany
+        .mockResolvedValueOnce([
+          { checkIn: new Date('2025-06-15T05:00:00Z'), checkOut: new Date('2025-06-15T09:00:00Z'), site: null },
+        ])
+        .mockResolvedValueOnce([
+          { id: 'a1', checkIn: new Date('2025-06-15T05:00:00Z'), checkOut: new Date('2025-06-15T09:00:00Z'), breakMinutes: 60, workedMinutes: 180 },
+          { id: 'a2', checkIn: new Date('2025-06-15T09:00:00Z'), checkOut: new Date('2025-06-15T15:00:00Z'), breakMinutes: 0, workedMinutes: 360 },
+        ]);
+      mockPrisma.attendance.update.mockImplementation(({ where, data }) =>
+        Promise.resolve({ id: where.id, userId: 'u1', ...data }),
       );
       mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1' });
 
-      // Update breakMinutes from 0 to 60
-      await service.update('c1', 'a1', { breakMinutes: 60 } as any);
+      const result = (await service.update('c1', 'a2', {
+        checkIn: '2025-06-15T09:00:00Z',
+        checkOut: '2025-06-15T15:00:00Z',
+      } as any)) as any;
 
-      const updateCall = mockPrisma.attendance.update.mock.calls[0][0];
-      // 480 - 60 = 420
-      expect(updateCall.data.workedMinutes).toBe(420);
+      const calls = mockPrisma.attendance.update.mock.calls.map((c) => c[0]);
+      // Самата редакция пише брутото
+      expect(calls[0].where).toEqual({ id: 'a2' });
+      expect(calls[0].data.workedMinutes).toBe(360);
+      expect(calls[0].data.breakMinutes).toBeUndefined();
+      // Преизчисление: a1 губи почивката, a2 я взима
+      expect(calls).toContainEqual({ where: { id: 'a1' }, data: { breakMinutes: 0, workedMinutes: 240 } });
+      expect(calls).toContainEqual({ where: { id: 'a2' }, data: { breakMinutes: 60, workedMinutes: 300 } });
+      expect(result.workedMinutes).toBe(300);
+    });
+
+    it('does not touch rows whose break and worked minutes are already right', async () => {
+      mockPrisma.attendance.findFirst.mockResolvedValue({
+        id: 'a1',
+        userId: 'u1',
+        date: new Date('2025-06-15T00:00:00Z'),
+        checkIn: new Date('2025-06-15T05:00:00Z'),
+        checkOut: new Date('2025-06-15T14:00:00Z'),
+        breakMinutes: 60,
+        workedMinutes: 480,
+      });
+      mockPrisma.attendance.findMany.mockResolvedValue([
+        { id: 'a1', checkIn: new Date('2025-06-15T05:00:00Z'), checkOut: new Date('2025-06-15T14:00:00Z'), breakMinutes: 60, workedMinutes: 480 },
+      ]);
+      mockPrisma.attendance.update.mockResolvedValue({ id: 'a1', userId: 'u1' });
+      mockPrisma.user.findUnique.mockResolvedValue({ id: 'u1' });
+
+      await service.update('c1', 'a1', { notes: 'x' } as any);
+
+      expect(mockPrisma.attendance.update).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -606,8 +713,9 @@ describe('AttendanceService', () => {
       await service.checkOut('c1', 'u1');
       expect(mockPrisma.attendance.update).toHaveBeenCalled();
       const updateCall = mockPrisma.attendance.update.mock.calls[0][0];
-      // workedMinutes should be >= 0
+      // Брутото; почивката идва от преизчислението на деня
       expect(updateCall.data.workedMinutes).toBeGreaterThanOrEqual(0);
+      expect(updateCall.data.breakMinutes).toBeUndefined();
     });
   });
 
