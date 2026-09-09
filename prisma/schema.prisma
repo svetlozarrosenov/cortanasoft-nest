@@ -689,7 +689,13 @@ model HrSettings {
 
   workDayStart String @default("08:00") // HH:mm
   workDayEnd   String @default("17:00") // HH:mm
-  breakMinutes Int    @default(60)
+  // Почивка „от–до" вътре в работния ден; и двете null = без почивка.
+  // Дължината (breakMinutes) се извежда — не се пази отделно.
+  breakStart String? @default("12:00") // HH:mm
+  breakEnd   String? @default("13:00") // HH:mm
+  // Допустим недостиг на отработени часове за месеца, преди човекът да
+  // светне в червено в матрицата на присъствията
+  hoursToleranceMinutes Int @default(30)
 
   // Политика за отсъствия
   leaveMaxBackdateDays Int @default(90) // Колко дни назад HR може да въвежда отсъствие (0 = без ограничение)

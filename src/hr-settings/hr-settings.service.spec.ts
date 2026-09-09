@@ -8,7 +8,8 @@ const base = {
   companyId: 'c1',
   workDayStart: '08:00',
   workDayEnd: '17:00',
-  breakMinutes: 60,
+  breakStart: '12:00',
+  breakEnd: '13:00',
 };
 
 const mockPrisma = {
@@ -44,6 +45,7 @@ describe('HrSettingsService', () => {
       create: { companyId: 'c1' },
       update: {},
     });
+    expect(res.breakMinutes).toBe(60);
     expect(res.workDayMinutes).toBe(480);
     expect(res.workDayHours).toBe(8);
     expect(res.annualLeaveDays).toBe(20);
@@ -70,7 +72,7 @@ describe('HrSettingsService', () => {
       ...base,
       ...data,
     }));
-    await service.update('c1', { breakMinutes: 30 });
+    await service.update('c1', { breakStart: '12:00', breakEnd: '12:30' });
     expect(mockPrisma.company.update).not.toHaveBeenCalled();
   });
 
@@ -82,13 +84,47 @@ describe('HrSettingsService', () => {
     }));
     const res = await service.update('c1', {
       workDayEnd: '16:30',
-      breakMinutes: 30,
+      breakStart: '12:00',
+      breakEnd: '12:30',
     });
     expect(mockPrisma.hrSettings.update).toHaveBeenCalledWith({
       where: { companyId: 'c1' },
-      data: { workDayStart: '08:00', workDayEnd: '16:30', breakMinutes: 30 },
+      data: {
+        workDayStart: '08:00',
+        workDayEnd: '16:30',
+        breakStart: '12:00',
+        breakEnd: '12:30',
+      },
     });
+    expect(res.breakMinutes).toBe(30);
     expect(res.workDayHours).toBe(8);
+  });
+
+  it('update: clearing the break window (both null) means no break', async () => {
+    mockPrisma.hrSettings.upsert.mockResolvedValue(base);
+    mockPrisma.hrSettings.update.mockImplementation(({ data }) => ({
+      ...base,
+      ...data,
+    }));
+    const res = await service.update('c1', {
+      breakStart: null,
+      breakEnd: null,
+    });
+    expect(mockPrisma.hrSettings.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ breakStart: null, breakEnd: null }),
+      }),
+    );
+    expect(res.breakMinutes).toBe(0);
+    expect(res.workDayHours).toBe(9);
+  });
+
+  it('update: rejects a half-set break window', async () => {
+    mockPrisma.hrSettings.upsert.mockResolvedValue(base);
+    await expect(
+      service.update('c1', { breakStart: '12:00', breakEnd: null }),
+    ).rejects.toThrow(BadRequestException);
+    expect(mockPrisma.hrSettings.update).not.toHaveBeenCalled();
   });
 
   it('update: rejects end before start', async () => {
@@ -99,10 +135,21 @@ describe('HrSettingsService', () => {
     expect(mockPrisma.hrSettings.update).not.toHaveBeenCalled();
   });
 
-  it('update: rejects break covering the whole day', async () => {
+  it('update: rejects a break outside the work day or ending before it starts', async () => {
     mockPrisma.hrSettings.upsert.mockResolvedValue(base);
-    await expect(service.update('c1', { breakMinutes: 540 })).rejects.toThrow(
+    await expect(
+      service.update('c1', { breakStart: '07:00', breakEnd: '08:30' }),
+    ).rejects.toThrow(BadRequestException);
+    await expect(
+      service.update('c1', { breakStart: '16:00', breakEnd: '17:00' }),
+    ).rejects.toThrow(BadRequestException);
+    await expect(
+      service.update('c1', { breakStart: '13:00', breakEnd: '12:00' }),
+    ).rejects.toThrow(BadRequestException);
+    // Смяна на работния ден, която оставя почивката отвън, също се отхвърля
+    await expect(service.update('c1', { workDayEnd: '12:30' })).rejects.toThrow(
       BadRequestException,
     );
+    expect(mockPrisma.hrSettings.update).not.toHaveBeenCalled();
   });
 });

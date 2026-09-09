@@ -72,6 +72,16 @@ export class CreateAttendanceDto {
   @IsOptional()
   endTime?: string;
 
+  // Почивка „от–до" вътре в startTime–endTime: денят се записва като два
+  // сегмента около нея. Без нея — един сегмент с автоматично приспадане.
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
+  @IsOptional()
+  breakStart?: string;
+
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
+  @IsOptional()
+  breakEnd?: string;
+
   @IsInt()
   @Min(0)
   @IsOptional()

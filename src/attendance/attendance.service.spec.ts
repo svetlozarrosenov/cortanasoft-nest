@@ -57,7 +57,11 @@ describe('AttendanceService', () => {
           provide: HrSettingsService,
           useValue: {
             getWorkDayHours: jest.fn().mockResolvedValue(8),
-            get: jest.fn().mockResolvedValue({ breakMinutes: 60 }),
+            get: jest.fn().mockResolvedValue({
+              breakMinutes: 60,
+              workDayHours: 8,
+              hoursToleranceMinutes: 30,
+            }),
           },
         },
       ],
@@ -336,6 +340,77 @@ describe('AttendanceService', () => {
       expect(rows[1].checkIn.toISOString()).toBe('2025-06-17T05:00:00.000Z');
       // 9 ч − 60 мин почивка от HR > Настройки
       expect(rows.every((r: any) => r.breakMinutes === 60 && r.workedMinutes === 480)).toBe(true);
+    });
+
+    it('splits each day into two segments around the given break window', async () => {
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
+      mockPrisma.site.findFirst.mockResolvedValue({ id: 'site-1' });
+      mockPrisma.attendance.findMany.mockResolvedValue([]);
+      mockPrisma.attendance.createMany.mockResolvedValue({ count: 4 });
+
+      const res = await service.create('c1', 'me', {
+        ...baseDto,
+        dates: ['2025-06-16', '2025-06-17'],
+        startTime: '08:00',
+        endTime: '17:00',
+        breakStart: '12:00',
+        breakEnd: '13:00',
+        siteId: 'site-1',
+      } as any);
+
+      // count = дни, не редове
+      expect(res).toEqual({ count: 2, skipped: [] });
+      const rows = mockPrisma.attendance.createMany.mock.calls[0][0].data;
+      expect(rows).toHaveLength(4);
+      expect(rows.map((r: any) => r.checkIn.toISOString())).toEqual([
+        '2025-06-16T05:00:00.000Z',
+        '2025-06-16T10:00:00.000Z',
+        '2025-06-17T05:00:00.000Z',
+        '2025-06-17T10:00:00.000Z',
+      ]);
+      expect(rows[0].checkOut.toISOString()).toBe('2025-06-16T09:00:00.000Z');
+      expect(rows[1].checkOut.toISOString()).toBe('2025-06-16T14:00:00.000Z');
+      // Почивката е празнина между сегментите — нищо не се приспада
+      expect(rows.map((r: any) => [r.breakMinutes, r.workedMinutes])).toEqual([
+        [0, 240],
+        [0, 240],
+        [0, 240],
+        [0, 240],
+      ]);
+      expect(rows.every((r: any) => r.siteId === 'site-1')).toBe(true);
+    });
+
+    it('ignores a break window that is not strictly inside the hours (or on a night shift)', async () => {
+      mockPrisma.userCompany.findMany.mockResolvedValue([{ userId: 'u1' }]);
+      mockPrisma.attendance.findMany.mockResolvedValue([]);
+      mockPrisma.attendance.createMany.mockResolvedValue({ count: 1 });
+
+      // Почивката е след края на смяната → един сегмент с правилото
+      await service.create('c1', 'me', {
+        ...baseDto,
+        dates: ['2025-06-16'],
+        startTime: '08:00',
+        endTime: '12:30',
+        breakStart: '12:00',
+        breakEnd: '13:00',
+      } as any);
+      let rows = mockPrisma.attendance.createMany.mock.calls[0][0].data;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].workedMinutes).toBe(270);
+
+      // Нощна смяна 22:00–06:00 с почивка 12:00–13:00 → един сегмент
+      await service.create('c1', 'me', {
+        ...baseDto,
+        dates: ['2025-06-16'],
+        startTime: '22:00',
+        endTime: '06:00',
+        breakStart: '12:00',
+        breakEnd: '13:00',
+      } as any);
+      rows = mockPrisma.attendance.createMany.mock.calls[1][0].data;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].checkOut.toISOString()).toBe('2025-06-17T03:00:00.000Z');
+      expect(rows[0].breakMinutes).toBe(60);
     });
 
     it('skips already recorded days and reports them with the existing segments', async () => {
@@ -790,7 +865,16 @@ describe('AttendanceService', () => {
       expect(u1.cells['2025-06-02'].minutes).toBe(480);
       expect(u1.cells['2025-06-02'].records.map((x) => x.siteName)).toEqual(['Варна', 'София']);
       expect(u1.cells['2025-06-03'].open).toBe(true);
-      expect(u1.totals).toEqual({ presentDays: 2, minutes: 480, leaveDays: 0, missingDays: 19 });
+      // 21 работни дни, минус 3-ти (отворен интервал — денят още тече) = 20 × 8 ч
+      expect(u1.totals).toEqual({
+        presentDays: 2,
+        minutes: 480,
+        leaveDays: 0,
+        missingDays: 19,
+        expectedMinutes: 9600,
+        diffMinutes: -9120,
+        short: true,
+      });
       expect(u1.position).toBe('Монтажник');
       expect(u1.hourlyRate).toBe(15);
       expect(u1.payroll).toEqual({ id: 'p1', status: 'PAID', netSalary: 900, paidAt: new Date('2025-07-05T00:00:00Z') });
@@ -802,7 +886,54 @@ describe('AttendanceService', () => {
       expect(u2.hourlyRate).toBe(12);
       expect(u2.payroll).toBeNull();
       expect(u2.cells['2025-06-03'].leave).toBe('ANNUAL');
-      expect(u2.totals).toEqual({ presentDays: 0, minutes: 0, leaveDays: 3, missingDays: 18 });
+      // 21 работни дни, минус 3 дни отпуск (не се отработват) = 18 × 8 ч
+      expect(u2.totals).toEqual({
+        presentDays: 0,
+        minutes: 0,
+        leaveDays: 3,
+        missingDays: 18,
+        expectedMinutes: 8640,
+        diffMinutes: -8640,
+        short: true,
+      });
+    });
+
+    it('leaves and the settings tolerance keep the hours from going red', async () => {
+      mockPrisma.userCompany.findMany.mockResolvedValue([
+        { user: { id: 'u1', firstName: 'A', lastName: 'A', isActive: true } },
+      ]);
+      // Пон 2 юни: 7:40 ч (20 мин под нормата), вт 3 юни: отпуск
+      mockPrisma.attendance.findMany.mockResolvedValue([
+        {
+          id: 'a1',
+          userId: 'u1',
+          date: new Date('2025-06-02T00:00:00Z'),
+          checkIn: new Date('2025-06-02T05:00:00Z'),
+          checkOut: new Date('2025-06-02T12:40:00Z'),
+          workedMinutes: 460,
+          siteId: null,
+          site: null,
+        },
+      ]);
+      mockPrisma.leave.findMany.mockResolvedValue([
+        {
+          userId: 'u1',
+          type: 'SICK',
+          startDate: new Date('2025-06-03T00:00:00Z'),
+          endDate: new Date('2025-06-03T00:00:00Z'),
+          halfDay: false,
+        },
+      ]);
+
+      // Само първите два работни дни се броят за очаквани
+      const r = await service.getMonthOverview('c1', '2025-06', 'u1', undefined, '2025-06-03');
+      const u1 = r.employees[0];
+      expect(r.toleranceMinutes).toBe(30);
+      // Болничният ден не се очаква да е отработен → очакват се само 8 ч
+      expect(u1.totals.expectedMinutes).toBe(480);
+      expect(u1.totals.diffMinutes).toBe(-20);
+      // 20 мин недостиг < 30 мин толеранс → без червено
+      expect(u1.totals.short).toBe(false);
     });
 
     it('counts missing days only up to the client-local today', async () => {

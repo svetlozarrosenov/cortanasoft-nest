@@ -1,4 +1,11 @@
-import { IsInt, IsOptional, Matches, Max, Min } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  Matches,
+  Max,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -11,11 +18,23 @@ export class UpdateHrSettingsDto {
   @IsOptional()
   workDayEnd?: string;
 
+  /** Почивка „от–до" вътре в работния ден; null и за двете = без почивка */
+  @ValidateIf((o: UpdateHrSettingsDto) => o.breakStart != null)
+  @Matches(HHMM, { message: 'breakStart трябва да е във формат HH:mm' })
+  @IsOptional()
+  breakStart?: string | null;
+
+  @ValidateIf((o: UpdateHrSettingsDto) => o.breakEnd != null)
+  @Matches(HHMM, { message: 'breakEnd трябва да е във формат HH:mm' })
+  @IsOptional()
+  breakEnd?: string | null;
+
+  /** Допустим недостиг на часове за месеца, преди да се маркира в червено */
   @IsInt()
   @Min(0)
   @Max(480)
   @IsOptional()
-  breakMinutes?: number;
+  hoursToleranceMinutes?: number;
 
   /** Дни платен отпуск по подразбиране за служител без индивидуална стойност */
   @IsInt()

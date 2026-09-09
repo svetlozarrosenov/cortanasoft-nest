@@ -89,16 +89,19 @@ export class AttendanceService {
     return asUtc - utcMs;
   }
 
-  /** Дневен запис за период/избрани дни: без часове (цял ден) или с общите
-   *  часове „от–до" от формата, приложени към конкретната дата. Излизане
-   *  „преди" влизането = нощна смяна, свършва на следващия ден. */
-  private dayRow(
+  /** Записите за един ден при период/избрани дни: без часове (цял ден) или
+   *  с общите часове „от–до" от формата, приложени към конкретната дата.
+   *  Зададена почивка „от–до" вътре в интервала разделя деня на два
+   *  сегмента — преди и след нея (така се вижда реалната почивка като
+   *  празнина). Излизане „преди" влизането = нощна смяна, свършва на
+   *  следващия ден; тогава почивката не се прилага. */
+  private dayRows(
     companyId: string,
     userId: string,
     dto: CreateAttendanceDto,
     date: Date,
     dayBreak: number,
-  ): Prisma.AttendanceCreateManyInput {
+  ): Prisma.AttendanceCreateManyInput[] {
     const row: Prisma.AttendanceCreateManyInput = {
       date,
       type: dto.type,
@@ -107,14 +110,36 @@ export class AttendanceService {
       userId,
       siteId: dto.siteId || undefined,
     };
-    if (!dto.startTime || !dto.endTime) return row;
+    if (!dto.startTime || !dto.endTime) return [row];
 
     const key = date.toISOString().slice(0, 10);
-    const checkIn = AttendanceService.sofiaTimeToDate(key, dto.startTime);
-    let checkOut = AttendanceService.sofiaTimeToDate(key, dto.endTime);
-    if (checkOut <= checkIn) {
+    const at = (hhmm: string) => AttendanceService.sofiaTimeToDate(key, hhmm);
+    const checkIn = at(dto.startTime);
+    let checkOut = at(dto.endTime);
+    const nightShift = checkOut <= checkIn;
+    if (nightShift) {
       checkOut = new Date(checkOut.getTime() + 24 * 60 * 60000);
     }
+
+    if (!nightShift && dto.breakStart && dto.breakEnd) {
+      const breakStart = at(dto.breakStart);
+      const breakEnd = at(dto.breakEnd);
+      if (
+        checkIn < breakStart &&
+        breakStart < breakEnd &&
+        breakEnd < checkOut
+      ) {
+        const segment = (from: Date, to: Date) => ({
+          ...row,
+          checkIn: from,
+          checkOut: to,
+          breakMinutes: 0,
+          workedMinutes: AttendanceService.spanMinutes(from, to),
+        });
+        return [segment(checkIn, breakStart), segment(breakEnd, checkOut)];
+      }
+    }
+
     // Дните тук са без други сегменти (иначе са прескочени), затова
     // правилото за почивката се прилага направо върху единствения интервал
     const [breakMinutes] = AttendanceService.allocateBreak(
@@ -123,7 +148,7 @@ export class AttendanceService {
     );
     const workedMinutes =
       AttendanceService.spanMinutes(checkIn, checkOut) - breakMinutes;
-    return { ...row, checkIn, checkOut, breakMinutes, workedMinutes };
+    return [{ ...row, checkIn, checkOut, breakMinutes, workedMinutes }];
   }
 
   /** При ≥ 6 ч работа в деня се полага почивка за хранене */
@@ -562,6 +587,7 @@ export class AttendanceService {
     ]);
 
     const data: Prisma.AttendanceCreateManyInput[] = [];
+    let days = 0;
     for (const d of dateObjects) {
       const key = d.toISOString().slice(0, 10);
       const already = existingByDay.get(key);
@@ -569,11 +595,14 @@ export class AttendanceService {
         skipped.push(this.skippedDay(key, 'recorded', already));
         continue;
       }
-      data.push(this.dayRow(companyId, userId, dto, d, settings.breakMinutes));
+      data.push(
+        ...this.dayRows(companyId, userId, dto, d, settings.breakMinutes),
+      );
+      days++;
     }
 
     await this.prisma.attendance.createMany({ data });
-    return { count: data.length, skipped };
+    return { count: days, skipped };
   }
 
   /** Сегментите на човека по ден (YYYY-MM-DD → списък) за даден филтър по дата */
@@ -707,6 +736,7 @@ export class AttendanceService {
 
     const data: Prisma.AttendanceCreateManyInput[] = [];
     const skipped: SkippedDay[] = [];
+    let days = 0;
     for (
       let d = new Date(from);
       d <= to;
@@ -726,12 +756,19 @@ export class AttendanceService {
         continue;
       }
       data.push(
-        this.dayRow(companyId, userId, dto, new Date(d), settings.breakMinutes),
+        ...this.dayRows(
+          companyId,
+          userId,
+          dto,
+          new Date(d),
+          settings.breakMinutes,
+        ),
       );
+      days++;
     }
 
     await this.prisma.attendance.createMany({ data });
-    return { count: data.length, skipped };
+    return { count: days, skipped };
   }
 
   async findAll(companyId: string, query: QueryAttendanceDto) {
@@ -1242,7 +1279,7 @@ export class AttendanceService {
     const from = new Date(Date.UTC(year, mon - 1, 1));
     const to = new Date(Date.UTC(year, mon, 0));
 
-    const [members, attendances, leaves, workDayHours, payrolls] = await Promise.all([
+    const [members, attendances, leaves, settings, payrolls] = await Promise.all([
       this.prisma.userCompany.findMany({
         where: { companyId, ...(userId ? { userId } : {}) },
         select: {
@@ -1283,8 +1320,9 @@ export class AttendanceService {
         },
         select: { userId: true, type: true, startDate: true, endDate: true, halfDay: true },
       }),
-      // Часове в работен ден — дневната ставка е ставка/час × тези часове
-      this.hrSettings.getWorkDayHours(companyId),
+      // Часове в работен ден (дневна ставка = ставка/час × тях) + толеранса
+      // за недостиг на часове
+      this.hrSettings.get(companyId),
       // Ведомост за месеца (една на човек) — за маркера „платено" пред името
       this.prisma.payroll.findMany({
         where: {
@@ -1298,6 +1336,8 @@ export class AttendanceService {
       }),
     ]);
     const payrollByUser = new Map(payrolls.map((p) => [p.userId, p]));
+    const workDayHours = settings.workDayHours;
+    const toleranceMinutes = settings.hoursToleranceMinutes;
 
     const days: { date: string; isWorkingDay: boolean }[] = [];
     for (let d = new Date(from); d <= to; d = new Date(d.getTime() + 86400000)) {
@@ -1374,6 +1414,18 @@ export class AttendanceService {
             d.date <= todayKey &&
             !(cells[d.date]?.records.length || cells[d.date]?.leave),
         ).length;
+        // Колко часа се очакват до днес: работните дни минус отпуските
+        // (те са „платени" и не се отработват). Ден с отворен интервал още
+        // тече — не се очаква, за да не свети червено на човек на работа.
+        const expectedDays = days.reduce((sum, d) => {
+          if (!d.isWorkingDay || d.date > todayKey) return sum;
+          const cell = cells[d.date];
+          if (cell?.open) return sum;
+          const onLeave = cell?.leave ? (cell.halfDay ? 0.5 : 1) : 0;
+          return sum + (1 - onLeave);
+        }, 0);
+        const expectedMinutes = Math.round(expectedDays * workDayHours * 60);
+        const diffMinutes = minutes - expectedMinutes;
         // Ефективна ставка на час: личната, иначе тази на позицията
         const rate = mem.hourlyRate ?? mem.position?.hourlyRate ?? null;
         const payroll = payrollByUser.get(mem.user.id);
@@ -1388,12 +1440,29 @@ export class AttendanceService {
             ? { id: payroll.id, status: payroll.status, netSalary: Number(payroll.netSalary), paidAt: payroll.paidAt }
             : null,
           cells,
-          totals: { presentDays, minutes, leaveDays, missingDays },
+          totals: {
+            presentDays,
+            minutes,
+            leaveDays,
+            missingDays,
+            expectedMinutes,
+            diffMinutes,
+            // Недостиг над толеранса от HR > Настройки
+            short: diffMinutes < -toleranceMinutes,
+          },
         };
       })
       .filter((e) => !siteId || e.totals.presentDays > 0);
 
-    return { month, today: todayKey, days, workingDays, workDayHours, employees };
+    return {
+      month,
+      today: todayKey,
+      days,
+      workingDays,
+      workDayHours,
+      toleranceMinutes,
+      employees,
+    };
   }
 
   async findOpenIntervals(companyId: string, date?: string) {
