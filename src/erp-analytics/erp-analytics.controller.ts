@@ -6,7 +6,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ErpAnalyticsService } from './erp-analytics.service';
-import { QueryProfitAnalyticsDto } from './dto';
+import { QueryProfitAnalyticsDto, QueryCustomerReceivablesDto } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import { PermissionsGuard, RequireView } from '../common/guards/permissions.guard';
@@ -15,6 +15,7 @@ import {
   FinancialSummaryResult,
   SalesReportResult,
   CustomersReportResult,
+  CustomerReceivablesResult,
   ProductsReportResult,
 } from './erp-analytics.service';
 
@@ -57,6 +58,16 @@ export class ErpAnalyticsController {
     @Query() query: QueryProfitAnalyticsDto,
   ): Promise<CustomersReportResult> {
     return this.analyticsService.getCustomersReport(companyId, query);
+  }
+
+  // Задължения на клиенти (към момента) — част от отчета „Клиенти"
+  @Get('customers/receivables')
+  @RequireView('bi', 'customers')
+  async getCustomerReceivables(
+    @Param('companyId') companyId: string,
+    @Query() query: QueryCustomerReceivablesDto,
+  ): Promise<CustomerReceivablesResult> {
+    return this.analyticsService.getCustomerReceivables(companyId, query);
   }
 
   @Get('products')

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { QueryProfitAnalyticsDto } from './dto';
+import { Prisma } from '@prisma/client';
+import { QueryProfitAnalyticsDto, QueryCustomerReceivablesDto } from './dto';
 import { ExpensesService } from '../expenses/expenses.service';
 
 export interface ProductProfitData {
@@ -147,6 +148,26 @@ export interface CustomersReportResult {
     totalSpent: number;
   }>;
   newCustomersTrend: Array<{ date: string; count: number }>;
+}
+
+// ==================== Customer Receivables ====================
+
+export interface CustomerReceivableRow {
+  customerId: string;
+  customerName: string;
+  unpaidOrders: number;
+  oldestUnpaidDate: string | null;
+  ordersTotal: number;
+  paidTotal: number;
+  due: number;
+}
+
+export interface CustomerReceivablesResult {
+  data: CustomerReceivableRow[];
+  meta: { total: number; page: number; limit: number; totalPages: number };
+  // Общо дължимо към фирмата от всички клиенти (без филтъра по име)
+  totalDue: number;
+  customersWithDue: number;
 }
 
 // ==================== Products Report ====================
@@ -1101,6 +1122,101 @@ export class ErpAnalyticsService {
   }
 
   // ==================== Products Report ====================
+  // Кой клиент колко дължи — салдо към момента по всички активни продажби
+  // (без чернови/чакащи/анулирани и без възстановени). Дълг на поръчка =
+  // total − paidAmount, отрязан на 0 (надплащането е позволено и не намалява
+  // дълга по другите поръчки). Име: актуалното от картона на клиента, с
+  // fallback към снапшота в поръчката.
+  async getCustomerReceivables(
+    companyId: string,
+    query: QueryCustomerReceivablesDto,
+  ): Promise<CustomerReceivablesResult> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const offset = (page - 1) * limit;
+    const search = query.search?.trim();
+
+    const nameExpr = Prisma.sql`COALESCE(
+      NULLIF(TRIM(c."companyName"), ''),
+      NULLIF(TRIM(CONCAT_WS(' ', c."firstName", c."lastName")), ''),
+      MAX(o."customerName")
+    )`;
+    const dueExpr = Prisma.sql`SUM(GREATEST(o.total - o."paidAmount", 0))`;
+    const baseWhere = Prisma.sql`
+      o."companyId" = ${companyId}
+      AND o."customerId" IS NOT NULL
+      AND o.status IN ('CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED')
+      AND o."paymentStatus" <> 'REFUNDED'`;
+    const searchHaving = search
+      ? Prisma.sql`AND ${nameExpr} ILIKE ${'%' + search + '%'}`
+      : Prisma.empty;
+
+    // Групираме веднъж; филтърът по име и броенето са върху същия израз, за да
+    // не се разминават резултатът и totalPages.
+    const grouped = Prisma.sql`
+      SELECT
+        o."customerId" AS "customerId",
+        ${nameExpr} AS "customerName",
+        COUNT(*) FILTER (WHERE o.total - o."paidAmount" > 0)::int AS "unpaidOrders",
+        MIN(o."orderDate") FILTER (WHERE o.total - o."paidAmount" > 0) AS "oldestUnpaidDate",
+        SUM(o.total)::float8 AS "ordersTotal",
+        SUM(o."paidAmount")::float8 AS "paidTotal",
+        ${dueExpr}::float8 AS due
+      FROM orders o
+      LEFT JOIN customers c ON c.id = o."customerId"
+      WHERE ${baseWhere}
+      GROUP BY o."customerId", c."companyName", c."firstName", c."lastName"
+      HAVING ${dueExpr} > 0 ${searchHaving}`;
+
+    const [rows, countRows, totals] = await Promise.all([
+      this.prisma.$queryRaw<
+        Array<{
+          customerId: string;
+          customerName: string;
+          unpaidOrders: number;
+          oldestUnpaidDate: Date | null;
+          ordersTotal: number;
+          paidTotal: number;
+          due: number;
+        }>
+      >(
+        Prisma.sql`${grouped} ORDER BY due DESC, "customerName" ASC LIMIT ${limit} OFFSET ${offset}`,
+      ),
+      this.prisma.$queryRaw<Array<{ count: number }>>(
+        Prisma.sql`SELECT COUNT(*)::int AS count FROM (${grouped}) g`,
+      ),
+      this.prisma.$queryRaw<Array<{ totalDue: number; customers: number }>>(
+        Prisma.sql`
+          SELECT COALESCE(SUM(due), 0)::float8 AS "totalDue", COUNT(*)::int AS customers
+          FROM (
+            SELECT ${dueExpr} AS due
+            FROM orders o
+            WHERE ${baseWhere}
+            GROUP BY o."customerId"
+            HAVING ${dueExpr} > 0
+          ) g`,
+      ),
+    ]);
+
+    const total = countRows[0]?.count ?? 0;
+    return {
+      data: rows.map((r) => ({
+        ...r,
+        oldestUnpaidDate: r.oldestUnpaidDate
+          ? r.oldestUnpaidDate.toISOString()
+          : null,
+      })),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+      totalDue: totals[0]?.totalDue ?? 0,
+      customersWithDue: totals[0]?.customers ?? 0,
+    };
+  }
+
   async getProductsReport(
     companyId: string,
     query: QueryProfitAnalyticsDto,
