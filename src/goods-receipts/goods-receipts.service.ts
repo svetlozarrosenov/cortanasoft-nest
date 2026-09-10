@@ -394,6 +394,12 @@ export class GoodsReceiptsService {
               totalAmount: true,
             },
           },
+          // Само последното плащане — за „кога е платена" в списъка
+          payments: {
+            select: { paidAt: true },
+            orderBy: { paidAt: 'desc' },
+            take: 1,
+          },
         },
         orderBy: { [sortBy]: sortOrder },
         skip: (page - 1) * limit,
@@ -419,12 +425,13 @@ export class GoodsReceiptsService {
         (sum, item) => sum + Number(item.quantity),
         0,
       );
-      const { items: _items, expenses: _expenses, ...rest } = receipt;
+      const { items: _items, expenses: _expenses, payments, ...rest } = receipt;
       return {
         ...rest,
         totalAmount: totalAmount + totalExpenses,
         totalExpenses,
         totalQuantity,
+        lastPaidAt: payments[0]?.paidAt ?? null,
       };
     });
 
