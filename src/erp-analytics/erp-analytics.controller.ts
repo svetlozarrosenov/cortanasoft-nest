@@ -16,6 +16,7 @@ import {
   SalesReportResult,
   CustomersReportResult,
   CustomerReceivablesResult,
+  CustomerReceivableOrder,
   ProductsReportResult,
 } from './erp-analytics.service';
 
@@ -68,6 +69,18 @@ export class ErpAnalyticsController {
     @Query() query: QueryCustomerReceivablesDto,
   ): Promise<CustomerReceivablesResult> {
     return this.analyticsService.getCustomerReceivables(companyId, query);
+  }
+
+  @Get('customers/:customerId/receivables')
+  @RequireView('bi', 'customers')
+  async getCustomerReceivableOrders(
+    @Param('companyId') companyId: string,
+    @Param('customerId') customerId: string,
+  ): Promise<CustomerReceivableOrder[]> {
+    return this.analyticsService.getCustomerReceivableOrders(
+      companyId,
+      customerId,
+    );
   }
 
   @Get('products')

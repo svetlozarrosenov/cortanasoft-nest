@@ -170,6 +170,17 @@ export interface CustomerReceivablesResult {
   customersWithDue: number;
 }
 
+export interface CustomerReceivableOrder {
+  id: string;
+  orderNumber: string;
+  orderDate: string;
+  status: string;
+  paymentStatus: string;
+  total: number;
+  paidAmount: number;
+  due: number;
+}
+
 // ==================== Products Report ====================
 
 export interface ProductsReportResult {
@@ -1215,6 +1226,40 @@ export class ErpAnalyticsService {
       totalDue: totals[0]?.totalDue ?? 0,
       customersWithDue: totals[0]?.customers ?? 0,
     };
+  }
+
+  // Поръчките, които формират дълга на един клиент — същите критерии като
+  // getCustomerReceivables, най-старите първи (тях трябва да се гонят).
+  async getCustomerReceivableOrders(
+    companyId: string,
+    customerId: string,
+  ): Promise<CustomerReceivableOrder[]> {
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        orderNumber: string;
+        orderDate: Date;
+        status: string;
+        paymentStatus: string;
+        total: number;
+        paidAmount: number;
+      }>
+    >`
+      SELECT o.id, o."orderNumber", o."orderDate", o.status::text AS status,
+             o."paymentStatus"::text AS "paymentStatus",
+             o.total::float8 AS total, o."paidAmount"::float8 AS "paidAmount"
+      FROM orders o
+      WHERE o."companyId" = ${companyId}
+        AND o."customerId" = ${customerId}
+        AND o.status IN ('CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED')
+        AND o."paymentStatus" <> 'REFUNDED'
+        AND o.total > o."paidAmount"
+      ORDER BY o."orderDate" ASC, o."orderNumber" ASC`;
+    return rows.map((r) => ({
+      ...r,
+      orderDate: r.orderDate.toISOString(),
+      due: Math.round((r.total - r.paidAmount) * 100) / 100,
+    }));
   }
 
   async getProductsReport(
