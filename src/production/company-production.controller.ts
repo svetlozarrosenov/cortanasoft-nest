@@ -97,6 +97,17 @@ export class CompanyProductionController {
     return this.productionService.getExistingBatches(companyId, id);
   }
 
+  // Налични партиди на материал — избор на партида при ръчно изписване
+  @Get(':id/material-batches')
+  @RequireView('production', 'orders')
+  materialBatches(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Query('productId') productId: string,
+  ) {
+    return this.productionService.getMaterialBatches(companyId, id, productId);
+  }
+
   @Post(':id/start')
   @RequireEdit('production', 'orders')
   start(

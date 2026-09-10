@@ -10,12 +10,22 @@ const mockPrisma = {
   },
   inventoryBatch: {
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
   },
   location: {
     findFirst: jest.fn(),
+  },
+  product: {
+    findFirst: jest.fn(),
+  },
+  productionConsumption: {
+    create: jest.fn(),
+  },
+  productionMaterialIssuance: {
+    create: jest.fn(),
   },
   $transaction: jest.fn((cb: any) => cb(mockPrisma)),
 };
@@ -236,6 +246,139 @@ describe('ProductionService', () => {
           }),
         }),
       );
+    });
+  });
+
+  // Ръчно изписване без рецепта: потребителят може да посочи от кои партиди
+  // взима материала; иначе — FIFO както досега.
+  describe('issueMaterial', () => {
+    const inProgress = { id: 'po1', status: 'IN_PROGRESS', locationId: 'loc1' };
+
+    beforeEach(() => {
+      mockPrisma.productionOrder.findFirst.mockResolvedValue(inProgress);
+      mockPrisma.product.findFirst.mockResolvedValue({
+        id: 'm1',
+        name: 'Фолио',
+      });
+      mockPrisma.productionMaterialIssuance.create.mockResolvedValue({
+        id: 'iss1',
+      });
+    });
+
+    it('should deduct from the batches the user picked', async () => {
+      mockPrisma.inventoryBatch.findFirst
+        .mockResolvedValueOnce({
+          id: 'b1',
+          batchNumber: 'A',
+          quantity: 10,
+          unitCost: 2,
+        })
+        .mockResolvedValueOnce({
+          id: 'b2',
+          batchNumber: 'B',
+          quantity: 10,
+          unitCost: 4,
+        });
+
+      await service.issueMaterial('c1', 'po1', 'u1', {
+        productId: 'm1',
+        quantity: 6,
+        batches: [
+          { inventoryBatchId: 'b1', quantity: 2 },
+          { inventoryBatchId: 'b2', quantity: 4 },
+        ],
+      });
+
+      expect(mockPrisma.inventoryBatch.update).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { quantity: 8 },
+      });
+      expect(mockPrisma.inventoryBatch.update).toHaveBeenCalledWith({
+        where: { id: 'b2' },
+        data: { quantity: 6 },
+      });
+      // FIFO търсенето не се ползва при ръчен избор
+      expect(mockPrisma.inventoryBatch.findMany).not.toHaveBeenCalled();
+      // Себестойността е претеглена по реално взетите партиди: (2·2 + 4·4) / 6
+      expect(mockPrisma.productionMaterialIssuance.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ quantity: 6, unitCost: 20 / 6 }),
+        }),
+      );
+    });
+
+    it('should reject picked batches that do not add up to the quantity', async () => {
+      await expect(
+        service.issueMaterial('c1', 'po1', 'u1', {
+          productId: 'm1',
+          quantity: 6,
+          batches: [{ inventoryBatchId: 'b1', quantity: 2 }],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.inventoryBatch.update).not.toHaveBeenCalled();
+    });
+
+    it('should fall back to FIFO when no batches are picked', async () => {
+      mockPrisma.inventoryBatch.findMany.mockResolvedValue([
+        { id: 'b1', batchNumber: 'A', quantity: 10, unitCost: 2 },
+      ]);
+
+      await service.issueMaterial('c1', 'po1', 'u1', {
+        productId: 'm1',
+        quantity: 6,
+      });
+
+      expect(mockPrisma.inventoryBatch.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.inventoryBatch.update).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { quantity: 4 },
+      });
+    });
+  });
+
+  describe('getMaterialBatches', () => {
+    it('should list only batches with stock at the order location, oldest first', async () => {
+      mockPrisma.productionOrder.findFirst.mockResolvedValue({
+        locationId: 'loc1',
+      });
+      mockPrisma.product.findFirst.mockResolvedValue({
+        id: 'm1',
+        name: 'Фолио',
+        type: 'BATCH',
+        unit: 'KG',
+      });
+      mockPrisma.inventoryBatch.findMany.mockResolvedValue([
+        {
+          id: 'b1',
+          batchNumber: 'A',
+          quantity: 2.5,
+          expiryDate: null,
+          location: { name: 'Склад' },
+        },
+        {
+          id: 'b2',
+          batchNumber: 'B',
+          quantity: 4,
+          expiryDate: null,
+          location: null,
+        },
+      ]);
+
+      const result = await service.getMaterialBatches('c1', 'po1', 'm1');
+
+      expect(mockPrisma.inventoryBatch.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            companyId: 'c1',
+            productId: 'm1',
+            quantity: { gt: 0 },
+            locationId: 'loc1',
+          },
+          orderBy: { createdAt: 'asc' },
+        }),
+      );
+      expect(result.totalAvailable).toBe(6.5);
+      expect(result.availableBatches.map((b) => b.id)).toEqual(['b1', 'b2']);
     });
   });
 });

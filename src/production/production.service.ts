@@ -392,10 +392,58 @@ export class ProductionService {
         locationId: dto.locationId ?? order.locationId,
         userId,
         notes: dto.notes,
+        batchAllocations: dto.batches,
       });
 
       return issuance;
     });
+  }
+
+  // Наличните партиди на един материал (в склада на поръчката, ако има такъв)
+  // — за да посочи потребителят от кои партиди изписва при ръчно изписване.
+  async getMaterialBatches(companyId: string, id: string, productId: string) {
+    const order = await this.prisma.productionOrder.findFirst({
+      where: { id, companyId },
+      select: { locationId: true },
+    });
+    if (!order) {
+      throw new NotFoundException(ErrorMessages.production.notFound);
+    }
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, companyId },
+      select: { id: true, name: true, type: true, unit: true },
+    });
+    if (!product) {
+      throw new NotFoundException(ErrorMessages.production.productNotFound);
+    }
+
+    const batches = await this.prisma.inventoryBatch.findMany({
+      where: {
+        companyId,
+        productId,
+        quantity: { gt: 0 },
+        ...(order.locationId && { locationId: order.locationId }),
+      },
+      orderBy: { createdAt: 'asc' }, // FIFO
+      include: { location: { select: { name: true } } },
+    });
+
+    return {
+      productId: product.id,
+      productName: product.name,
+      productType: product.type,
+      unit: product.unit,
+      totalAvailable:
+        Math.round(batches.reduce((s, b) => s + Number(b.quantity), 0) * 1000) /
+        1000,
+      availableBatches: batches.map((b) => ({
+        id: b.id,
+        batchNumber: b.batchNumber,
+        quantity: Number(b.quantity),
+        expiryDate: b.expiryDate,
+        locationName: b.location?.name ?? null,
+      })),
+    };
   }
 
   /**
