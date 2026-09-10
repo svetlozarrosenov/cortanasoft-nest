@@ -22,6 +22,7 @@ import {
   CreateExpenseDto,
   UpdateExpenseDto,
   QueryExpensesDto,
+  MarkExpensePaidDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -100,6 +101,7 @@ export class ExpensesController {
       { header: 'VAT Amount', key: 'vatAmount', width: 15 },
       { header: 'Total Amount', key: 'totalAmount', width: 15 },
       { header: 'Expense Date', key: 'expenseDate', width: 15 },
+      { header: 'Payment Method', key: 'paymentMethod', width: 18 },
       { header: 'Status', key: 'status', width: 15 },
     ];
     const buffer = await this.exportService.generateFile(columns, data, format, 'Expenses');
@@ -165,8 +167,12 @@ export class ExpensesController {
 
   @Post(':id/mark-paid')
   @RequireEdit('erp', 'expenses')
-  markAsPaid(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.expensesService.markAsPaid(companyId, id);
+  markAsPaid(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: MarkExpensePaidDto,
+  ) {
+    return this.expensesService.markAsPaid(companyId, id, dto);
   }
 
   @Post(':id/cancel')

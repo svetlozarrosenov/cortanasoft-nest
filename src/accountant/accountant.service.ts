@@ -17,6 +17,15 @@ import {
   SendToAccountantDto,
 } from './dto';
 
+// Етикети за описа (Excel е на български за счетоводителя)
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  CASH: 'В брой',
+  CARD: 'С карта',
+  BANK_TRANSFER: 'Банков превод',
+  COD: 'Наложен платеж',
+  POSTAL_MONEY_TRANSFER: 'Пощенски запис',
+};
+
 @Injectable()
 export class AccountantService {
   private readonly logger = new Logger(AccountantService.name);
@@ -455,6 +464,7 @@ export class AccountantService {
           amount: true,
           vatAmount: true,
           totalAmount: true,
+          paymentMethod: true,
           supplier: { select: { name: true, eik: true, vatNumber: true } },
           currency: { select: { code: true } },
         },
@@ -476,6 +486,8 @@ export class AccountantService {
           total: Number(r.totalAmount),
           // Сумите на доставка са конвертирани → базова валута (null = базова).
           currencyCode: null as string | null,
+          // Доставките се плащат през Payment-и (може и смесено) — не се обобщава
+          paymentMethod: '',
         };
       }),
       ...expenses.map((e) => ({
@@ -489,6 +501,7 @@ export class AccountantService {
         vat: Number(e.vatAmount),
         total: Number(e.totalAmount),
         currencyCode: e.currency?.code || null,
+        paymentMethod: PAYMENT_METHOD_LABELS[e.paymentMethod ?? ''] ?? '',
       })),
     ].sort((a, b) => a.date.getTime() - b.date.getTime());
 
@@ -550,6 +563,7 @@ export class AccountantService {
       { header: 'ДДС', key: 'vat', width: 14 },
       { header: 'Общо', key: 'total', width: 14 },
       { header: 'Валута', key: 'currency', width: 10 },
+      { header: 'Плащане', key: 'paymentMethod', width: 14 },
     ];
     expenses.forEach((r) =>
       expenseSheet.addRow({
@@ -563,6 +577,7 @@ export class AccountantService {
         vat: r.vat,
         total: r.total,
         currency: r.currencyCode || baseCurrency,
+        paymentMethod: r.paymentMethod,
       }),
     );
 

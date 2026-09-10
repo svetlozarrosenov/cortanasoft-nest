@@ -8,7 +8,7 @@ import {
   IsEnum,
   IsBoolean,
 } from 'class-validator';
-import { ExpenseCategory, ExpenseStatus } from '@prisma/client';
+import { ExpenseCategory, ExpenseStatus, PaymentMethod } from '@prisma/client';
 
 export class CreateExpenseDto {
   @IsString()
@@ -51,6 +51,10 @@ export class CreateExpenseDto {
   @IsOptional()
   status?: ExpenseStatus;
 
+  @IsEnum(PaymentMethod)
+  @IsOptional()
+  paymentMethod?: PaymentMethod;
+
   @IsString()
   @IsOptional()
   notes?: string;
@@ -70,5 +74,4 @@ export class CreateExpenseDto {
   @IsString()
   @IsOptional()
   siteId?: string;
-
 }

@@ -3145,6 +3145,10 @@ model Expense {
   dueDate     DateTime? // Падеж за плащане
   paidAt      DateTime? // Дата на плащане
 
+  // Начин на плащане (null = неизвестен; старите записи). Ползва се и от
+  // банковото съгласуване — разход „в брой" не се очаква в извлечението.
+  paymentMethod PaymentMethod?
+
   // Документи
   invoiceNumber String? // Номер на фактура
   receiptNumber String? // Номер на касова бележка

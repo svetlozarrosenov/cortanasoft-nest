@@ -4,6 +4,7 @@ import {
   CreateExpenseDto,
   UpdateExpenseDto,
   QueryExpensesDto,
+  MarkExpensePaidDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
 
@@ -44,6 +45,7 @@ export class ExpensesService {
         receiptNumber: dto.receiptNumber,
         attachmentUrl: dto.attachmentUrl,
         status: dto.status || 'PENDING',
+        paymentMethod: dto.paymentMethod,
         notes: dto.notes,
         isRecurring: dto.isRecurring || false,
         recurringInterval: dto.recurringInterval,
@@ -98,6 +100,10 @@ export class ExpensesService {
 
     if (query.status) {
       where.status = query.status;
+    }
+
+    if (query.paymentMethod) {
+      where.paymentMethod = query.paymentMethod;
     }
 
     if (query.supplierId) {
@@ -215,6 +221,8 @@ export class ExpensesService {
     if (dto.description !== undefined) updateData.description = dto.description;
     if (dto.category !== undefined) updateData.category = dto.category;
     if (dto.status !== undefined) updateData.status = dto.status;
+    if (dto.paymentMethod !== undefined)
+      updateData.paymentMethod = dto.paymentMethod;
     if (dto.notes !== undefined) updateData.notes = dto.notes;
     if (dto.invoiceNumber !== undefined)
       updateData.invoiceNumber = dto.invoiceNumber;
@@ -327,7 +335,7 @@ export class ExpensesService {
     });
   }
 
-  async markAsPaid(companyId: string, id: string) {
+  async markAsPaid(companyId: string, id: string, dto?: MarkExpensePaidDto) {
     await this.findOne(companyId, id);
 
     return this.prisma.expense.update({
@@ -335,6 +343,8 @@ export class ExpensesService {
       data: {
         status: 'PAID',
         paidAt: new Date(),
+        // Ако при плащането е уточнен начин — записва се; иначе остава въведеният
+        ...(dto?.paymentMethod ? { paymentMethod: dto.paymentMethod } : {}),
       },
       include: {
         supplier: true,

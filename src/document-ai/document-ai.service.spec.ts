@@ -500,6 +500,7 @@ describe('DocumentAIService', () => {
         model: 'claude-haiku-4-5',
       });
       mockPrisma.order.findMany.mockResolvedValue([]);
+      mockPrisma.expense.findMany.mockResolvedValue([]);
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           DocumentAIService,
@@ -588,6 +589,71 @@ describe('DocumentAIService', () => {
       expect(result.rows[1].match).toBeNull();
       expect(result.awaitingOrders).toHaveLength(1);
       expect(result.awaitingOrders[0].orderNumber).toBe('ORD-20');
+    });
+
+    it('should flag recorded expenses that have no row in the statement', async () => {
+      mockCreate.mockResolvedValueOnce({
+        stop_reason: 'tool_use',
+        content: [
+          {
+            type: 'tool_use',
+            id: 't1',
+            name: 'submit_result',
+            input: {
+              rows: [
+                {
+                  date: '2026-08-05',
+                  counterparty: 'ЕВН',
+                  amount: 120,
+                  direction: 'out',
+                  match: { type: 'expense', id: 'e1', label: 'Ток август', confidence: 0.95 },
+                },
+                { date: '2026-08-28', counterparty: 'Такса пакет', amount: 12, direction: 'out', match: null },
+              ],
+              confidence: 0.9,
+            },
+          },
+        ],
+      });
+      // e1 е мачнат; e2 е дубликат без ред в извлечението
+      mockPrisma.expense.findMany.mockResolvedValue([
+        { id: 'e1', description: 'Ток август', totalAmount: 120, expenseDate: new Date('2026-08-05'), status: 'PAID', paymentMethod: 'BANK_TRANSFER', supplier: { name: 'ЕВН' } },
+        { id: 'e2', description: 'Ток август', totalAmount: 120, expenseDate: new Date('2026-08-06'), status: 'PAID', paymentMethod: null, supplier: null },
+      ]);
+
+      const result = await service.reconcileBankStatement('c1', 'base64pdf');
+
+      expect(result.unmatchedExpenses).toHaveLength(1);
+      expect(result.unmatchedExpenses[0].id).toBe('e2');
+      // Търсенето е за периода на извлечението и само за банкови/картови/неизвестни
+      const call = mockPrisma.expense.findMany.mock.calls.at(-1)![0];
+      expect(call.where.companyId).toBe('c1');
+      expect(call.where.OR).toEqual([
+        { paymentMethod: { in: ['BANK_TRANSFER', 'CARD'] } },
+        { paymentMethod: null },
+      ]);
+      const period = call.where.AND[0].OR[0].paidAt;
+      expect(period.gte).toEqual(new Date('2026-08-05'));
+      expect(period.lte.getTime()).toBeGreaterThanOrEqual(new Date('2026-08-28').getTime());
+    });
+
+    it('should skip the reverse expense check when no row has a date', async () => {
+      mockCreate.mockResolvedValueOnce({
+        stop_reason: 'tool_use',
+        content: [
+          {
+            type: 'tool_use',
+            id: 't1',
+            name: 'submit_result',
+            input: { rows: [{ amount: 12, direction: 'out', match: null }], confidence: 0.9 },
+          },
+        ],
+      });
+
+      const result = await service.reconcileBankStatement('c1', 'base64pdf');
+
+      expect(result.unmatchedExpenses).toEqual([]);
+      expect(mockPrisma.expense.findMany).not.toHaveBeenCalled();
     });
 
     it('should reject when the company has no AI key', async () => {

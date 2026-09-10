@@ -1,5 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { ExpenseCategory } from '@prisma/client';
+import { ExpenseCategory, PaymentMethod } from '@prisma/client';
 import Anthropic from '@anthropic-ai/sdk';
 import { lookup } from 'dns/promises';
 import { randomUUID } from 'crypto';
@@ -84,6 +84,20 @@ export interface ReconcileResult {
     paidAmount: number;
     orderDate: Date;
   }[];
+  /**
+   * Разходи в периода на извлечението, които не са мачнати с нито един ред
+   * (сървърно). „В брой" и наложен платеж се пропускат — те не минават през
+   * банката; без начин на плащане (стари записи) — показват се за проверка.
+   */
+  unmatchedExpenses: {
+    id: string;
+    description: string;
+    supplierName: string | null;
+    totalAmount: number;
+    expenseDate: Date;
+    status: string;
+    paymentMethod: string | null;
+  }[];
 }
 
 // Описания на категориите за промпта — Claude избира код от списъка
@@ -103,6 +117,13 @@ const EXPENSE_CATEGORY_HINTS = `  DELIVERY: shipping, couriers, transport, fuel 
   BANKING: bank fees, card processing fees, interest
   OTHER: anything that does not fit above`;
 const EXPENSE_CATEGORY_CODES: string[] = Object.values(ExpenseCategory);
+// Начини на плащане, които има смисъл да се четат от фактура за разход
+const INVOICE_PAYMENT_METHOD_CODES: string[] = [
+  'BANK_TRANSFER',
+  'CASH',
+  'CARD',
+  'COD',
+];
 
 export interface ParsedInvoiceData {
   invoiceNumber?: string;
@@ -111,6 +132,8 @@ export interface ParsedInvoiceData {
   dueDate?: string;
   // Предложена категория на разхода (валидирана срещу ExpenseCategory)
   expenseCategory?: ExpenseCategory;
+  // Начин на плащане, ако фактурата го посочва („Начин на плащане: банков път")
+  paymentMethod?: PaymentMethod;
   // Данните на доставчика от фактурата — стигат за нов запис в „Доставчици"
   supplierName?: string;
   supplierEik?: string;
@@ -665,7 +688,7 @@ export class DocumentAIService {
             text: `This is a bank statement (likely Bulgarian, any bank format). Reconcile it against the company's records:
 
 1. Extract EVERY transaction row: date, counterparty, payment reference/description, amount (positive number) and direction ('in' = money received, 'out' = money paid out). Skip opening/closing balance lines.
-2. For every row try to find the matching record: incoming money usually matches a sales order or an issued invoice (search_orders / search_invoices — try the amount and any invoice/order number or customer name from the reference); outgoing money usually matches an expense (search_expenses). Bank fees, interest and card settlements usually have no match — leave match null.
+2. For every row try to find the matching record: incoming money usually matches a sales order or an issued invoice (search_orders / search_invoices — try the amount and any invoice/order number or customer name from the reference); outgoing money usually matches an expense (search_expenses; an expense with paymentMethod CASH or COD did not go through the bank — do not match it to a statement row). Bank fees, interest and card settlements usually have no match — leave match null.
 3. Set match only when reasonably sure (confidence 0-1). When unsure, leave match null — a human reviews everything.
 4. Finish by calling submit_result exactly once. Dates in YYYY-MM-DD, amounts as plain positive numbers.`,
           },
@@ -807,6 +830,7 @@ export class DocumentAIService {
           totalAmount: true,
           status: true,
           expenseDate: true,
+          paymentMethod: true,
           supplier: { select: { name: true } },
         },
         orderBy: { expenseDate: 'desc' },
@@ -860,6 +884,65 @@ export class DocumentAIService {
       take: 30,
     });
 
+    // Обратната проверка: разходи в периода на извлечението без ред в него.
+    // Периодът = min–max дата от разчетените редове; без дати няма как да се
+    // прецени кой разход е „трябвало" да е вътре → пропуска се.
+    const matchedExpenseIds = new Set(
+      rows.filter((r) => r.match?.type === 'expense').map((r) => r.match!.id),
+    );
+    const rowDates = rows
+      .map((r) => (r.date ? new Date(r.date) : null))
+      .filter((d): d is Date => !!d && !Number.isNaN(d.getTime()));
+    let unmatchedExpenses: ReconcileResult['unmatchedExpenses'] = [];
+    if (rowDates.length > 0) {
+      const from = new Date(Math.min(...rowDates.map((d) => d.getTime())));
+      const to = new Date(Math.max(...rowDates.map((d) => d.getTime())));
+      to.setHours(23, 59, 59, 999);
+      const inPeriod = { gte: from, lte: to };
+      const candidates = await this.prisma.expense.findMany({
+        where: {
+          companyId,
+          status: { not: 'CANCELLED' },
+          OR: [
+            { paymentMethod: { in: ['BANK_TRANSFER', 'CARD'] } },
+            { paymentMethod: null },
+          ],
+          // Платен разход се търси по датата на плащане, иначе по датата на разхода
+          AND: [
+            {
+              OR: [
+                { paidAt: inPeriod },
+                { paidAt: null, expenseDate: inPeriod },
+              ],
+            },
+          ],
+        },
+        select: {
+          id: true,
+          description: true,
+          totalAmount: true,
+          expenseDate: true,
+          status: true,
+          paymentMethod: true,
+          supplier: { select: { name: true } },
+        },
+        orderBy: { expenseDate: 'asc' },
+        take: 60,
+      });
+      unmatchedExpenses = candidates
+        .filter((e) => !matchedExpenseIds.has(e.id))
+        .slice(0, 30)
+        .map((e) => ({
+          id: e.id,
+          description: e.description,
+          supplierName: e.supplier?.name ?? null,
+          totalAmount: Number(e.totalAmount),
+          expenseDate: e.expenseDate,
+          status: e.status,
+          paymentMethod: e.paymentMethod,
+        }));
+    }
+
     return {
       rows,
       confidence: raw.confidence || 0.8,
@@ -873,6 +956,7 @@ export class DocumentAIService {
           paidAmount: Number(o.paidAmount ?? 0),
           orderDate: o.orderDate,
         })),
+      unmatchedExpenses,
     };
   }
 
@@ -1007,6 +1091,10 @@ export class DocumentAIService {
             type: ['string', 'null'],
             enum: [...EXPENSE_CATEGORY_CODES, null],
           },
+          paymentMethod: {
+            type: ['string', 'null'],
+            enum: [...INVOICE_PAYMENT_METHOD_CODES, null],
+          },
           lineItems: {
             type: 'array',
             items: {
@@ -1053,6 +1141,7 @@ Rules:
 - expenseCategory: classify what the buyer is paying for, based on the supplier and the line items. Meanings:
 ${EXPENSE_CATEGORY_HINTS}
   Pick the single best match; use OTHER only when nothing else fits
+- paymentMethod: only if the invoice states how it is paid ("Начин на плащане", "Плащане", "payment method"): "по банков път"/"банков превод"/"по сметка" → BANK_TRANSFER, "в брой" → CASH, "с карта"/"ПОС" → CARD, "наложен платеж" → COD. Otherwise null
 - If a value is not found, use null
 - confidence: your estimate of extraction accuracy (0-1)
 - For line items: calculate missing totalPrice = quantity * unitPrice if possible
@@ -1103,6 +1192,9 @@ ${EXPENSE_CATEGORY_HINTS}
       totalAmount: parsed.totalAmount ?? undefined,
       vatAmount: parsed.vatAmount ?? undefined,
       subtotal: parsed.subtotal ?? undefined,
+      paymentMethod: INVOICE_PAYMENT_METHOD_CODES.includes(parsed.paymentMethod)
+        ? (parsed.paymentMethod as PaymentMethod)
+        : undefined,
       lineItems: (parsed.lineItems || []).map((item: any) => ({
         description: item.description || '',
         quantity: item.quantity || 1,
