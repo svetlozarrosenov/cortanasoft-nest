@@ -111,7 +111,7 @@ describe('DocumentAIController', () => {
       );
       mockPrisma.product.findMany.mockResolvedValue(mockProducts);
       mockPrisma.supplier.findMany.mockResolvedValue([
-        { id: 's1', name: 'Тест Доставчик ЕООД' },
+        { id: 's1', name: 'Тест Доставчик ЕООД', eik: null, vatNumber: null },
       ]);
 
       const result = await controller.scanInvoice(companyId, {
@@ -182,39 +182,106 @@ describe('DocumentAIController', () => {
       ).toHaveBeenCalledWith('company-1', 'base64data', 'image/jpeg');
     });
 
-    it('should match supplier by VAT number', async () => {
+    /** Сканиране само за доставчика — продуктите не участват */
+    const scanSupplier = async (
+      parsed: Record<string, unknown>,
+      suppliers: {
+        id: string;
+        name: string;
+        eik?: string | null;
+        vatNumber?: string | null;
+      }[],
+    ) => {
       mockDocumentAIService.parseInvoiceFromBase64.mockResolvedValue({
-        supplierVatNumber: 'BG111222333',
         lineItems: [],
         confidence: 0.8,
+        ...parsed,
       });
       mockPrisma.product.findMany.mockResolvedValue([]);
-      mockPrisma.supplier.findMany.mockResolvedValue([
-        { id: 's2', name: 'Supplier By VAT' },
-      ]);
-
-      const result = await controller.scanInvoice(companyId, {
+      mockPrisma.supplier.findMany.mockResolvedValue(suppliers);
+      return controller.scanInvoice(companyId, {
         base64Image: 'data',
         mimeType: 'image/png',
       });
+    };
+
+    it('should match the supplier by EIK, even when the invoice prints only the VAT number', async () => {
+      const result = await scanSupplier(
+        {
+          supplierName: 'Съвсем друго изписване',
+          supplierVatNumber: 'bg111222333',
+        },
+        [
+          { id: 's2', name: 'Доставчик', eik: '111222333', vatNumber: null },
+          { id: 's3', name: 'Друг', eik: '999999999', vatNumber: null },
+        ],
+      );
 
       expect(result.suggestedSupplier).toEqual({
         id: 's2',
-        name: 'Supplier By VAT',
+        name: 'Доставчик',
+        matchedBy: 'eik',
+        ambiguous: false,
       });
+    });
 
-      // Verify the Prisma query includes VAT number condition
-      expect(mockPrisma.supplier.findMany).toHaveBeenCalledWith(
+    // ЕИК-ът е идентичност, името — не; при разминаване печели ЕИК-ът
+    it('should prefer the EIK match over a name match', async () => {
+      const result = await scanSupplier(
+        { supplierName: 'Кай Груп', supplierEik: '822106611' },
+        [
+          { id: 'byName', name: 'Кай Груп АД', eik: null, vatNumber: null },
+          { id: 'byEik', name: 'КГ Трейд', eik: '822106611', vatNumber: null },
+        ],
+      );
+
+      expect(result.suggestedSupplier?.id).toBe('byEik');
+    });
+
+    it('should match the name despite legal form, punctuation and latin lookalikes', async () => {
+      // „ВИК-Бургас ЕООД" с латинско B и C срещу „ВИК Бургас" в базата
+      const result = await scanSupplier({ supplierName: 'BИK-Бургас ЕООД' }, [
+        { id: 's4', name: 'ВИК Бургас', eik: null, vatNumber: null },
+      ]);
+
+      expect(result.suggestedSupplier).toEqual({
+        id: 's4',
+        name: 'ВИК Бургас',
+        matchedBy: 'name',
+        ambiguous: false,
+      });
+    });
+
+    // Дублирани записи с един ЕИК — фронтендът иска потвърждение
+    it('should flag an ambiguous match', async () => {
+      const result = await scanSupplier({ supplierEik: '812115210' }, [
+        { id: 's5', name: 'ВИК Бургас', eik: '812115210', vatNumber: null },
+        { id: 's6', name: 'ВИК-БУРГАС', eik: '812115210', vatNumber: null },
+      ]);
+
+      expect(result.suggestedSupplier?.ambiguous).toBe(true);
+    });
+
+    it('should return a supplier draft when nothing matches', async () => {
+      const result = await scanSupplier(
+        {
+          supplierName: 'Нов Доставчик ЕООД',
+          supplierEik: '206396633',
+          supplierVatNumber: 'BG206396633',
+          supplierAddress: 'ул. Тестова 1',
+          supplierIban: 'BG80BNBG96611020345678',
+        },
+        [{ id: 's7', name: 'Някой друг', eik: '111111111', vatNumber: null }],
+      );
+
+      expect(result.suggestedSupplier).toBeUndefined();
+      expect(result.supplierDraft).toEqual(
         expect.objectContaining({
-          where: expect.objectContaining({
-            companyId,
-            isActive: true,
-            OR: expect.arrayContaining([
-              expect.objectContaining({
-                vatNumber: 'BG111222333',
-              }),
-            ]),
-          }),
+          name: 'Нов Доставчик ЕООД',
+          eik: '206396633',
+          vatNumber: 'BG206396633',
+          address: 'ул. Тестова 1',
+          iban: 'BG80BNBG96611020345678',
         }),
       );
     });

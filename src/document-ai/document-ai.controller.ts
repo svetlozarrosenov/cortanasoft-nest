@@ -27,7 +27,6 @@ import {
 } from './document-ai.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
 
 // NB: глобалният ValidationPipe е с whitelist:true — полета БЕЗ декоратор
 // се режат от тялото. Всяко DTO поле тук трябва да носи валидатор.
@@ -66,12 +65,109 @@ interface ProductMatch {
   originalDescription: string;
 }
 
+/** Латински букви, изглеждащи като кирилски — фактурите редовно ги смесват */
+const LOOKALIKE: Record<string, string> = {
+  A: 'А',
+  B: 'В',
+  C: 'С',
+  E: 'Е',
+  H: 'Н',
+  K: 'К',
+  M: 'М',
+  O: 'О',
+  P: 'Р',
+  T: 'Т',
+  X: 'Х',
+  Y: 'У',
+};
+
+/** Правни форми — не носят идентичност и се махат преди сравнение */
+const LEGAL_FORMS = new Set([
+  'еоод',
+  'оод',
+  'еад',
+  'ад',
+  'ет',
+  'сд',
+  'кд',
+  'дззд',
+  'ltd',
+  'limited',
+  'llc',
+  'inc',
+  'corp',
+  'plc',
+  'gmbh',
+  'ug',
+  'sarl',
+  'sas',
+  'bv',
+  'nv',
+  'spa',
+  'srl',
+  'doo',
+  'kft',
+  'sro',
+  'co',
+]);
+
+const digitsOf = (value?: string | null): string =>
+  (value || '').replace(/\D/g, '');
+
+const normalizeVat = (value?: string | null): string =>
+  (value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/** Латинските двойници стават кирилица, за да съвпаднат двата изписа */
+const foldLookalikes = (token: string): string =>
+  token
+    .toUpperCase()
+    .replace(/[A-Z]/g, (ch) => LOOKALIKE[ch] || ch)
+    .toLowerCase();
+
+const normalizeCompanyName = (value?: string | null): string =>
+  (value || '')
+    .toLowerCase()
+    // кавички, тирета, точки и пр. стават граници между думите
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .split(' ')
+    .filter(
+      (token) =>
+        token &&
+        // и „Ltd", и кирилско „ЕООД", изписано с латински букви
+        !LEGAL_FORMS.has(token) &&
+        !LEGAL_FORMS.has(foldLookalikes(token)),
+    )
+    .map(foldLookalikes)
+    .join(' ');
+
+interface SuggestedSupplier {
+  id: string;
+  name: string;
+  /** По какво е разпознат — по име не е сигурно и се иска потвърждение */
+  matchedBy: 'eik' | 'vat' | 'name';
+  /** Повече от един кандидат (напр. дублирани записи с един ЕИК) */
+  ambiguous: boolean;
+}
+
+/** Данните на доставчика от фактурата — за формата „нов доставчик" */
+interface SupplierDraft {
+  name: string;
+  eik?: string;
+  vatNumber?: string;
+  address?: string;
+  city?: string;
+  phone?: string;
+  email?: string;
+  bankName?: string;
+  iban?: string;
+  bic?: string;
+}
+
 interface ScanResult extends ParsedInvoiceData {
   matchedProducts: ProductMatch[];
-  suggestedSupplier?: {
-    id: string;
-    name: string;
-  };
+  suggestedSupplier?: SuggestedSupplier;
+  supplierDraft?: SupplierDraft;
 }
 
 @Controller('companies/:companyId/cortana')
@@ -379,46 +475,113 @@ export class DocumentAIController {
       }
     }
 
-    // Try to find matching supplier
-    let suggestedSupplier: { id: string; name: string } | undefined;
-
-    if (parsedData.supplierName || parsedData.supplierVatNumber) {
-      const orConditions: Prisma.SupplierWhereInput[] = [];
-
-      if (parsedData.supplierName) {
-        orConditions.push({
-          name: {
-            contains: parsedData.supplierName,
-            mode: 'insensitive' as Prisma.QueryMode,
-          },
-        });
-      }
-      if (parsedData.supplierVatNumber) {
-        orConditions.push({
-          vatNumber: parsedData.supplierVatNumber,
-        });
-      }
-
-      const suppliers = await this.prisma.supplier.findMany({
-        where: {
-          companyId,
-          isActive: true,
-          ...(orConditions.length > 0 ? { OR: orConditions } : {}),
-        },
-        select: { id: true, name: true },
-        take: 1,
-      });
-
-      if (suppliers.length > 0) {
-        suggestedSupplier = suppliers[0];
-      }
-    }
+    const suggestedSupplier = await this.findSupplierMatch(
+      companyId,
+      parsedData,
+    );
 
     return {
       ...parsedData,
       matchedProducts,
       suggestedSupplier,
+      supplierDraft: parsedData.supplierName
+        ? {
+            name: parsedData.supplierName,
+            eik: parsedData.supplierEik,
+            vatNumber: parsedData.supplierVatNumber,
+            address: parsedData.supplierAddress,
+            city: parsedData.supplierCity,
+            phone: parsedData.supplierPhone,
+            email: parsedData.supplierEmail,
+            bankName: parsedData.supplierBankName,
+            iban: parsedData.supplierIban,
+            bic: parsedData.supplierBic,
+          }
+        : undefined,
     };
+  }
+
+  /**
+   * Търсене на доставчика от фактурата в записите на компанията, подредено по
+   * надеждност: ЕИК → ДДС номер → име. Само първите две са идентичност и
+   * фронтендът ги избира автоматично; по име се иска потвърждение.
+   *
+   * Сравнява се върху нормализиран текст, защото фактурите пишат имената
+   * различно от базата: „ВИК-Бургас ЕООД" ↔ „ВИК Бургас", кавички, двойни
+   * интервали, и латински букви, вмъкнати в кирилско име (Е/E, О/O, А/A…).
+   */
+  private async findSupplierMatch(
+    companyId: string,
+    parsed: ParsedInvoiceData,
+  ): Promise<SuggestedSupplier | undefined> {
+    if (
+      !parsed.supplierName &&
+      !parsed.supplierEik &&
+      !parsed.supplierVatNumber
+    ) {
+      return undefined;
+    }
+
+    const suppliers = await this.prisma.supplier.findMany({
+      where: { companyId, isActive: true },
+      select: { id: true, name: true, eik: true, vatNumber: true },
+    });
+    if (suppliers.length === 0) return undefined;
+
+    const pick = (
+      matches: typeof suppliers,
+      matchedBy: SuggestedSupplier['matchedBy'],
+    ): SuggestedSupplier => ({
+      id: matches[0].id,
+      name: matches[0].name,
+      matchedBy,
+      ambiguous: matches.length > 1,
+    });
+
+    // 1. ЕИК — и срещу eik, и срещу ДДС номера без кода на държавата
+    const eik = digitsOf(parsed.supplierEik || parsed.supplierVatNumber);
+    if (eik.length === 9 || eik.length === 13) {
+      const byEik = suppliers.filter(
+        (s) => digitsOf(s.eik) === eik || digitsOf(s.vatNumber) === eik,
+      );
+      if (byEik.length > 0) return pick(byEik, 'eik');
+    }
+
+    // 2. ДДС номер (главни букви, без интервали и тирета)
+    const vat = normalizeVat(parsed.supplierVatNumber);
+    if (vat) {
+      const byVat = suppliers.filter((s) => normalizeVat(s.vatNumber) === vat);
+      if (byVat.length > 0) return pick(byVat, 'vat');
+    }
+
+    // 3. Име — точно съвпадение на нормализираното, после подниз в двете посоки
+    const name = normalizeCompanyName(parsed.supplierName);
+    if (name.length >= 3) {
+      const normalized = suppliers.map((s) => ({
+        supplier: s,
+        name: normalizeCompanyName(s.name),
+      }));
+      const exact = normalized.filter((s) => s.name === name);
+      if (exact.length > 0) {
+        return pick(
+          exact.map((s) => s.supplier),
+          'name',
+        );
+      }
+      const partial = normalized.filter(
+        (s) =>
+          s.name.length >= 3 &&
+          (s.name.includes(name) || name.includes(s.name)),
+      );
+      if (partial.length > 0) {
+        return pick(
+          partial.map((s) => s.supplier),
+          'name',
+        );
+      }
+    }
+
+    return undefined;
   }
 
   private findBestProductMatch(

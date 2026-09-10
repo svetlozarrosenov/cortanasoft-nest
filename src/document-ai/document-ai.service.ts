@@ -111,9 +111,17 @@ export interface ParsedInvoiceData {
   dueDate?: string;
   // Предложена категория на разхода (валидирана срещу ExpenseCategory)
   expenseCategory?: ExpenseCategory;
+  // Данните на доставчика от фактурата — стигат за нов запис в „Доставчици"
   supplierName?: string;
+  supplierEik?: string;
   supplierVatNumber?: string;
   supplierAddress?: string;
+  supplierCity?: string;
+  supplierPhone?: string;
+  supplierEmail?: string;
+  supplierBankName?: string;
+  supplierIban?: string;
+  supplierBic?: string;
   totalAmount?: number;
   vatAmount?: number;
   subtotal?: number;
@@ -965,10 +973,66 @@ export class DocumentAIService {
             },
           };
 
+    // Резултатът се връща през tool, а не като текст: свободният отговор
+    // понякога идва с преамбюл или отрязан JSON и парсването тихо връщаше
+    // празен резултат — формата не се променяше и изглеждаше „не сработи".
+    const submitTool: Anthropic.Tool = {
+      name: 'submit_invoice',
+      description:
+        'Submit the extracted invoice data. Call this exactly once with everything you could read.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          invoiceNumber: { type: ['string', 'null'] },
+          invoiceDate: { type: ['string', 'null'], description: 'YYYY-MM-DD' },
+          dueDate: { type: ['string', 'null'], description: 'YYYY-MM-DD' },
+          supplierName: { type: ['string', 'null'] },
+          supplierEik: {
+            type: ['string', 'null'],
+            description:
+              'Bulgarian company id (ЕИК/БУЛСТАТ), 9 or 13 digits, digits only',
+          },
+          supplierVatNumber: { type: ['string', 'null'] },
+          supplierAddress: { type: ['string', 'null'] },
+          supplierCity: { type: ['string', 'null'] },
+          supplierPhone: { type: ['string', 'null'] },
+          supplierEmail: { type: ['string', 'null'] },
+          supplierBankName: { type: ['string', 'null'] },
+          supplierIban: { type: ['string', 'null'] },
+          supplierBic: { type: ['string', 'null'] },
+          totalAmount: { type: ['number', 'null'] },
+          vatAmount: { type: ['number', 'null'] },
+          subtotal: { type: ['number', 'null'] },
+          expenseCategory: {
+            type: ['string', 'null'],
+            enum: [...EXPENSE_CATEGORY_CODES, null],
+          },
+          lineItems: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                description: { type: 'string' },
+                quantity: { type: 'number' },
+                unitPrice: { type: 'number' },
+                totalPrice: { type: 'number' },
+                productCode: { type: ['string', 'null'] },
+              },
+              required: ['description', 'quantity', 'unitPrice'],
+            },
+          },
+          confidence: { type: 'number' },
+        },
+        required: ['lineItems', 'confidence'],
+      },
+    };
+
     const response = await client.messages
       .create({
         model,
         max_tokens: 4096,
+        tools: [submitTool],
+        tool_choice: { type: 'tool', name: 'submit_invoice' },
         messages: [
           {
             role: 'user',
@@ -976,36 +1040,15 @@ export class DocumentAIService {
               documentBlock,
               {
                 type: 'text',
-                text: `Analyze this invoice image and extract the data as JSON. Return ONLY valid JSON, no markdown, no code fences, no explanation.
-
-Required JSON structure:
-{
-  "invoiceNumber": "string or null",
-  "invoiceDate": "YYYY-MM-DD or null",
-  "dueDate": "YYYY-MM-DD or null",
-  "supplierName": "string or null",
-  "supplierVatNumber": "string or null",
-  "supplierAddress": "string or null",
-  "totalAmount": number or null,
-  "vatAmount": number or null,
-  "subtotal": number or null,
-  "expenseCategory": one of ${EXPENSE_CATEGORY_CODES.join(' | ')},
-  "lineItems": [
-    {
-      "description": "string",
-      "quantity": number,
-      "unitPrice": number,
-      "totalPrice": number,
-      "productCode": "string or null"
-    }
-  ],
-  "confidence": number between 0 and 1
-}
+                text: `Analyze this invoice and submit the data with the submit_invoice tool.
 
 Rules:
 - Extract ALL line items from the invoice
 - Dates must be in YYYY-MM-DD format
 - dueDate is the payment due date ("падеж", "срок за плащане", "платимо до", "due date", "payment due"). If the invoice only states payment terms in days (e.g. "платимо в 10-дневен срок", "net 30"), compute dueDate = invoiceDate + N days. If nothing about payment term is stated, use null (do NOT guess and do NOT copy invoiceDate)
+- The supplier is the ISSUER of the invoice ("Доставчик", "Получател на плащането"), never the buyer/recipient ("Получател", "Купувач"). Take the supplier fields only from the issuer block
+- supplierEik: the issuer's ЕИК/БУЛСТАТ, digits only. If only a VAT number "BG123456789" is printed, put the digits in supplierEik as well
+- supplierIban/supplierBic/supplierBankName: the issuer's bank details when the invoice prints them
 - Numbers must be plain numbers (no currency symbols)
 - expenseCategory: classify what the buyer is paying for, based on the supplier and the line items. Meanings:
 ${EXPENSE_CATEGORY_HINTS}
@@ -1021,10 +1064,20 @@ ${EXPENSE_CATEGORY_HINTS}
       })
       .catch((error) => this.mapAnthropicError(error));
 
-    const text =
-      response.content[0].type === 'text' ? response.content[0].text : '';
-
-    const parsed = this.parseJsonResponse(text);
+    const submitted = response.content.find(
+      (block): block is Anthropic.ToolUseBlock =>
+        block.type === 'tool_use' && block.name === 'submit_invoice',
+    );
+    if (!submitted) {
+      this.logger.error(
+        'Claude did not call submit_invoice; stop_reason=' +
+          String(response.stop_reason),
+      );
+      throw new BadRequestException(
+        'Cortana не успя да разчете документа. Опитайте отново или попълнете данните ръчно.',
+      );
+    }
+    const parsed = submitted.input as any;
 
     return {
       invoiceNumber: parsed.invoiceNumber || undefined,
@@ -1036,8 +1089,17 @@ ${EXPENSE_CATEGORY_HINTS}
         ? (parsed.expenseCategory as ExpenseCategory)
         : undefined,
       supplierName: parsed.supplierName || undefined,
+      supplierEik: parsed.supplierEik
+        ? String(parsed.supplierEik).replace(/\D/g, '') || undefined
+        : undefined,
       supplierVatNumber: parsed.supplierVatNumber || undefined,
       supplierAddress: parsed.supplierAddress || undefined,
+      supplierCity: parsed.supplierCity || undefined,
+      supplierPhone: parsed.supplierPhone || undefined,
+      supplierEmail: parsed.supplierEmail || undefined,
+      supplierBankName: parsed.supplierBankName || undefined,
+      supplierIban: parsed.supplierIban || undefined,
+      supplierBic: parsed.supplierBic || undefined,
       totalAmount: parsed.totalAmount ?? undefined,
       vatAmount: parsed.vatAmount ?? undefined,
       subtotal: parsed.subtotal ?? undefined,
@@ -1050,29 +1112,6 @@ ${EXPENSE_CATEGORY_HINTS}
       })),
       confidence: parsed.confidence || 0.8,
     };
-  }
-
-  private parseJsonResponse(text: string): any {
-    // Try direct parse first
-    try {
-      return JSON.parse(text);
-    } catch {
-      // Try to extract JSON block from response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        try {
-          return JSON.parse(jsonMatch[0]);
-        } catch {
-          this.logger.error('Failed to parse extracted JSON from response');
-        }
-      }
-
-      this.logger.error(
-        'Failed to parse Claude response as JSON:',
-        text.substring(0, 200),
-      );
-      return { lineItems: [], confidence: 0 };
-    }
   }
 
   private parseDate(value: string): string {

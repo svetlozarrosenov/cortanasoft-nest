@@ -25,6 +25,12 @@ const mockPrisma = {
   expense: { findMany: jest.fn() },
 };
 
+/** Отговорът идва през submit_invoice tool-а, а не като текст */
+const submitInvoice = (input: Record<string, unknown>) => ({
+  stop_reason: 'tool_use',
+  content: [{ type: 'tool_use', name: 'submit_invoice', input }],
+});
+
 describe('DocumentAIService', () => {
   let service: DocumentAIService;
 
@@ -82,9 +88,7 @@ describe('DocumentAIService', () => {
           confidence: 0.95,
         };
 
-        mockCreate.mockResolvedValue({
-          content: [{ type: 'text', text: JSON.stringify(claudeResponse) }],
-        });
+        mockCreate.mockResolvedValue(submitInvoice(claudeResponse));
 
         const result = await service.parseInvoiceFromBase64('c1', 
           'base64imagedata',
@@ -111,17 +115,9 @@ describe('DocumentAIService', () => {
       });
 
       it('should strip data:image prefix from base64', async () => {
-        mockCreate.mockResolvedValue({
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                lineItems: [],
-                confidence: 0.8,
-              }),
-            },
-          ],
-        });
+        mockCreate.mockResolvedValue(
+          submitInvoice({ lineItems: [], confidence: 0.8 }),
+        );
 
         await service.parseInvoiceFromBase64('c1', 
           'data:image/jpeg;base64,actualbase64data',
@@ -146,51 +142,48 @@ describe('DocumentAIService', () => {
         );
       });
 
-      it('should handle JSON wrapped in markdown code fences', async () => {
-        const jsonData = {
-          invoiceNumber: 'F-100',
-          lineItems: [
-            {
-              description: 'Item 1',
-              quantity: 1,
-              unitPrice: 100,
-              totalPrice: 100,
-            },
-          ],
-          confidence: 0.9,
-        };
+      it('should extract the supplier details for a new supplier', async () => {
+        mockCreate.mockResolvedValue(
+          submitInvoice({
+            supplierName: 'Хетих България ООД',
+            supplierEik: 'ЕИК 200224567',
+            supplierVatNumber: 'BG200224567',
+            supplierAddress: 'ул. Тестова 1',
+            supplierCity: 'София',
+            supplierIban: 'BG80BNBG96611020345678',
+            supplierBic: 'BNBGBGSF',
+            supplierBankName: 'ДСК',
+            supplierPhone: '0888123456',
+            supplierEmail: 'office@example.bg',
+            lineItems: [],
+            confidence: 0.9,
+          }),
+        );
 
-        mockCreate.mockResolvedValue({
-          content: [
-            {
-              type: 'text',
-              text: '```json\n' + JSON.stringify(jsonData) + '\n```',
-            },
-          ],
-        });
-
-        const result = await service.parseInvoiceFromBase64('c1', 
+        const result = await service.parseInvoiceFromBase64(
+          'c1',
           'base64data',
           'image/png',
         );
 
-        expect(result.invoiceNumber).toBe('F-100');
-        expect(result.lineItems).toHaveLength(1);
+        // ЕИК се прибира само с цифрите — така се сравнява с базата
+        expect(result.supplierEik).toBe('200224567');
+        expect(result.supplierCity).toBe('София');
+        expect(result.supplierIban).toBe('BG80BNBG96611020345678');
+        expect(result.supplierBic).toBe('BNBGBGSF');
+        expect(result.supplierBankName).toBe('ДСК');
+        expect(result.supplierPhone).toBe('0888123456');
+        expect(result.supplierEmail).toBe('office@example.bg');
       });
 
       it('should parse Bulgarian date format DD.MM.YYYY', async () => {
-        mockCreate.mockResolvedValue({
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                invoiceDate: '15.06.2024',
-                lineItems: [],
-                confidence: 0.85,
-              }),
-            },
-          ],
-        });
+        mockCreate.mockResolvedValue(
+          submitInvoice({
+            invoiceDate: '15.06.2024',
+            lineItems: [],
+            confidence: 0.85,
+          }),
+        );
 
         const result = await service.parseInvoiceFromBase64('c1', 
           'base64data',
@@ -201,20 +194,15 @@ describe('DocumentAIService', () => {
       });
 
       it('should handle missing line item fields gracefully', async () => {
-        mockCreate.mockResolvedValue({
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                lineItems: [
-                  { description: 'Some item' },
-                  { quantity: 5, unitPrice: 10 },
-                ],
-                confidence: 0.7,
-              }),
-            },
-          ],
-        });
+        mockCreate.mockResolvedValue(
+          submitInvoice({
+            lineItems: [
+              { description: 'Some item' },
+              { quantity: 5, unitPrice: 10 },
+            ],
+            confidence: 0.7,
+          }),
+        );
 
         const result = await service.parseInvoiceFromBase64('c1', 
           'base64data',
@@ -238,40 +226,32 @@ describe('DocumentAIService', () => {
         });
       });
 
-      it('should return empty result when response is not parseable', async () => {
+      // Преди отговор без резултат минаваше за успех с празни данни и
+      // формата просто не се променяше — изглеждаше като „не сработи"
+      it('should fail loudly when Claude answers without the tool', async () => {
         mockCreate.mockResolvedValue({
+          stop_reason: 'end_turn',
           content: [
             { type: 'text', text: 'Sorry, I cannot process this image.' },
           ],
         });
 
-        const result = await service.parseInvoiceFromBase64('c1', 
-          'base64data',
-          'image/jpeg',
-        );
-
-        expect(result.lineItems).toHaveLength(0);
-        // When parseJsonResponse returns { lineItems: [], confidence: 0 },
-        // callClaude applies fallback: parsed.confidence || 0.8 → 0.8
-        expect(result.confidence).toBe(0.8);
+        await expect(
+          service.parseInvoiceFromBase64('c1', 'base64data', 'image/jpeg'),
+        ).rejects.toThrow('Cortana не успя да разчете документа');
       });
 
       it('should handle null values from Claude response', async () => {
-        mockCreate.mockResolvedValue({
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                invoiceNumber: null,
-                invoiceDate: null,
-                supplierName: null,
-                totalAmount: null,
-                lineItems: [],
-                confidence: 0.5,
-              }),
-            },
-          ],
-        });
+        mockCreate.mockResolvedValue(
+          submitInvoice({
+            invoiceNumber: null,
+            invoiceDate: null,
+            supplierName: null,
+            totalAmount: null,
+            lineItems: [],
+            confidence: 0.5,
+          }),
+        );
 
         const result = await service.parseInvoiceFromBase64('c1', 
           'base64data',
@@ -285,20 +265,17 @@ describe('DocumentAIService', () => {
       });
 
       it('should call Claude with correct model and parameters', async () => {
-        mockCreate.mockResolvedValue({
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({ lineItems: [], confidence: 0.8 }),
-            },
-          ],
-        });
+        mockCreate.mockResolvedValue(
+          submitInvoice({ lineItems: [], confidence: 0.8 }),
+        );
 
         await service.parseInvoiceFromBase64('c1', 'imagedata', 'image/png');
 
         expect(mockCreate).toHaveBeenCalledWith({
           model: 'claude-haiku-4-5',
           max_tokens: 4096,
+          tools: [expect.objectContaining({ name: 'submit_invoice' })],
+          tool_choice: { type: 'tool', name: 'submit_invoice' },
           messages: [
             {
               role: 'user',
@@ -314,7 +291,7 @@ describe('DocumentAIService', () => {
                 {
                   type: 'text',
                   text: expect.stringContaining(
-                    'Analyze this invoice image and extract the data as JSON',
+                    'submit the data with the submit_invoice tool',
                   ),
                 },
               ],
@@ -341,18 +318,13 @@ describe('DocumentAIService', () => {
           headers: new Map([['content-type', 'image/png']]),
         }) as any;
 
-        mockCreate.mockResolvedValue({
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                invoiceNumber: 'URL-001',
-                lineItems: [],
-                confidence: 0.9,
-              }),
-            },
-          ],
-        });
+        mockCreate.mockResolvedValue(
+          submitInvoice({
+            invoiceNumber: 'URL-001',
+            lineItems: [],
+            confidence: 0.9,
+          }),
+        );
 
         const result = await service.parseInvoice('c1', 
           'https://example.com/invoice.png',
