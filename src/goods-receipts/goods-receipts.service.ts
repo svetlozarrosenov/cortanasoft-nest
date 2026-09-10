@@ -342,6 +342,7 @@ export class GoodsReceiptsService {
       supplierId,
       dateFrom,
       dateTo,
+      dateField = 'receiptDate',
       page = 1,
       limit = 20,
       sortBy = 'createdAt',
@@ -354,12 +355,28 @@ export class GoodsReceiptsService {
       ...(locationId && { locationId }),
       ...(supplierId && { supplierId }),
       ...(dateFrom || dateTo
-        ? {
-            receiptDate: {
-              ...(dateFrom && { gte: new Date(dateFrom + 'T00:00:00.000Z') }),
-              ...(dateTo && { lte: new Date(dateTo + 'T23:59:59.999Z') }),
-            },
-          }
+        ? dateField === 'paidAt'
+          ? {
+              // Доставки с поне едно плащане в периода
+              payments: {
+                some: {
+                  paidAt: {
+                    ...(dateFrom && {
+                      gte: new Date(dateFrom + 'T00:00:00.000Z'),
+                    }),
+                    ...(dateTo && { lte: new Date(dateTo + 'T23:59:59.999Z') }),
+                  },
+                },
+              },
+            }
+          : {
+              receiptDate: {
+                ...(dateFrom && {
+                  gte: new Date(dateFrom + 'T00:00:00.000Z'),
+                }),
+                ...(dateTo && { lte: new Date(dateTo + 'T23:59:59.999Z') }),
+              },
+            }
         : {}),
       ...(search && {
         OR: [
@@ -394,11 +411,17 @@ export class GoodsReceiptsService {
               totalAmount: true,
             },
           },
-          // Само последното плащане — за „кога е платена" в списъка
+          // Плащанията в списъка — за сверяване с банково извлечение
           payments: {
-            select: { paidAt: true },
-            orderBy: { paidAt: 'desc' },
-            take: 1,
+            select: {
+              id: true,
+              paidAt: true,
+              amount: true,
+              method: true,
+              reference: true,
+              currency: { select: { code: true } },
+            },
+            orderBy: { paidAt: 'asc' },
           },
         },
         orderBy: { [sortBy]: sortOrder },
@@ -425,13 +448,12 @@ export class GoodsReceiptsService {
         (sum, item) => sum + Number(item.quantity),
         0,
       );
-      const { items: _items, expenses: _expenses, payments, ...rest } = receipt;
+      const { items: _items, expenses: _expenses, ...rest } = receipt;
       return {
         ...rest,
         totalAmount: totalAmount + totalExpenses,
         totalExpenses,
         totalQuantity,
-        lastPaidAt: payments[0]?.paidAt ?? null,
       };
     });
 

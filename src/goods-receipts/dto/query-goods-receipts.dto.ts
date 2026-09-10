@@ -27,6 +27,13 @@ export class QueryGoodsReceiptsDto {
   @IsOptional()
   dateTo?: string;
 
+  // По коя дата филтрират dateFrom/dateTo: доставка (по подразбиране) или
+  // плащане (за сверяване с банково извлечение)
+  @IsOptional()
+  @IsString()
+  @IsIn(['receiptDate', 'paidAt'])
+  dateField?: 'receiptDate' | 'paidAt';
+
   @Type(() => Number)
   @IsOptional()
   @IsInt()
