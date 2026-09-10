@@ -354,9 +354,12 @@ export class ErpAnalyticsService {
         const unitPrice = Number(item.unitPrice);
         const itemRevenue = quantity * unitPrice;
 
-        // Get cost: 1) linked batch, 2) linked serial, 3) weighted avg from goods receipts, 4) product purchasePrice
+        // Get cost: 0) snapshot on the row (директна доставка), 1) linked batch,
+        // 2) linked serial, 3) weighted avg from goods receipts, 4) product purchasePrice
         let unitCost = 0;
-        if (item.inventoryBatch) {
+        if (item.unitCost != null) {
+          unitCost = Number(item.unitCost);
+        } else if (item.inventoryBatch) {
           unitCost = Number(item.inventoryBatch.unitCost);
         } else if ((item as any).inventorySerial) {
           unitCost = Number((item as any).inventorySerial.unitCost);
@@ -475,7 +478,9 @@ export class ErpAnalyticsService {
         const quantity = Number(item.quantity);
 
         let unitCost = 0;
-        if (item.inventoryBatch) {
+        if (item.unitCost != null) {
+          unitCost = Number(item.unitCost);
+        } else if (item.inventoryBatch) {
           unitCost = Number(item.inventoryBatch.unitCost);
         } else if (item.inventorySerial) {
           unitCost = Number(item.inventorySerial.unitCost);

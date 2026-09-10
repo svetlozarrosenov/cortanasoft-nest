@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -71,6 +72,31 @@ const ORDER_INCLUDE = {
   acceptanceProtocols: {
     where: { status: { not: 'CANCELLED' as const } },
     select: { id: true, documentNumber: true },
+  },
+  // Директни доставки от доставчик за тази продажба (drop-ship) — секцията
+  // „Доставка от доставчик" в прегледа; вижда се само с erp.directDelivery
+  goodsReceipts: {
+    where: { directDelivery: true },
+    orderBy: { createdAt: 'asc' as const },
+    select: {
+      id: true,
+      receiptNumber: true,
+      status: true,
+      receiptDate: true,
+      deliveredAt: true,
+      invoiceNumber: true,
+      totalAmount: true,
+      supplier: { select: { id: true, name: true } },
+      items: {
+        select: {
+          id: true,
+          productId: true,
+          quantity: true,
+          unitPrice: true,
+          product: { select: { name: true, sku: true } },
+        },
+      },
+    },
   },
   // Последната активна товарителница — badge върху иконката „Създай
   // пратка" в списъка с продажби
@@ -188,6 +214,11 @@ export class OrdersService {
       subtotal += itemSubtotal;
       vatAmount += itemVat;
 
+      // Директен ред: никаква връзка със склад (партида/сериен/локация) и
+      // stockDeducted=false от самото начало, за да няма какво да се
+      // „възстановява" при cancel()/подмяна на редове.
+      const directDelivery = item.directDelivery === true;
+
       return {
         productId: item.productId,
         quantity: item.quantity,
@@ -195,9 +226,11 @@ export class OrdersService {
         vatRate: itemVatRate,
         discount: itemDiscount,
         subtotal: itemSubtotal,
-        inventoryBatchId: item.inventoryBatchId,
-        inventorySerialId: item.inventorySerialId,
-        locationId: item.locationId,
+        inventoryBatchId: directDelivery ? undefined : item.inventoryBatchId,
+        inventorySerialId: directDelivery ? undefined : item.inventorySerialId,
+        locationId: directDelivery ? undefined : item.locationId,
+        directDelivery,
+        ...(directDelivery && { stockDeducted: false }),
       };
     });
 
@@ -630,6 +663,7 @@ export class OrdersService {
     const pendingItemWhere: Prisma.OrderItemWhereInput = {
       inventorySerialId: null,
       inventoryBatchId: null,
+      directDelivery: false, // директните редове не чакат наличност
       product: { trackInventory: true },
     };
     const orders = await this.prisma.order.findMany({
@@ -863,9 +897,27 @@ export class OrdersService {
     }
   }
 
-  async update(companyId: string, id: string, dto: UpdateOrderDto) {
+  async update(
+    companyId: string,
+    id: string,
+    dto: UpdateOrderDto,
+    // false = ролята няма erp.directDelivery: може да запази вече съществуващи
+    // директни редове (редовете се пресъздават при всяка редакция), но не и
+    // да добави директен ред към поръчка, която досега не е имала такива.
+    opts: { canDirectDelivery?: boolean } = {},
+  ) {
     const order = await this.findOne(companyId, id);
     this.assertNotManualRefund(dto.paymentStatus);
+
+    if (
+      opts.canDirectDelivery === false &&
+      dto.items?.some((it) => it.directDelivery) &&
+      !order.items.some((it) => it.directDelivery)
+    ) {
+      throw new ForbiddenException(
+        'Нямате право да добавяте редове с директна доставка',
+      );
+    }
 
     // Verify a reassigned customer belongs to this company (cross-tenant IDOR).
     // При смяна на клиента преизчисляваме и партньорския snapshot; undefined =
@@ -920,11 +972,13 @@ export class OrdersService {
       // „Изпратена/Доставена" означава, че стоката физически излиза → всички
       // проследими редове трябва да са изписани преди това: партидните — със
       // stockDeducted, серийните — със закачен сериен номер. Не можеш да
-      // доставиш каквото не си извадил от склада.
+      // доставиш каквото не си извадил от склада. Директните редове не минават
+      // през склад — доставчикът ги праща право при клиента.
       if (dto.status === 'SHIPPED' || dto.status === 'DELIVERED') {
         const unfulfilled = order.items.filter(
           (it) =>
             it.product &&
+            !it.directDelivery &&
             it.product.type !== 'SERVICE' &&
             it.product.trackInventory &&
             (it.product.type === 'SERIAL'
@@ -1040,13 +1094,23 @@ export class OrdersService {
       // product type without an extra DB round-trip.
       const productById = new Map(products.map((p) => [p.id, p]));
 
+      // Складът се пипа само ако поръчката реално държи стока (изписана при
+      // confirm). Преди confirm stockDeducted е DB default (true) без реално
+      // изписване — ако тук връщахме/изписвахме, редакция на чернова щеше да
+      // „връща" стока, която не е излизала (фантомна наличност), и да маркира
+      // серийни номера като продадени, след което confirm() гърми. Същият
+      // критерий като needsRestore в cancel(); при CANCELLED вече е върнато.
+      const stockHeld = ['CONFIRMED', 'PROCESSING', 'SHIPPED'].includes(
+        order.status,
+      );
+
       const updated = await this.prisma.$transaction(async (tx) => {
         // 1. Revert inventory side effects of items that previously consumed
         //    stock. Mirrors cancel()'s restore logic so update() is reversible.
         //    Without this, replacing an item silently leaves the old serial as
         //    SOLD or the old batch decremented forever.
-        for (const oldItem of order.items) {
-          if (!oldItem.stockDeducted) continue;
+        for (const oldItem of stockHeld ? order.items : []) {
+          if (!oldItem.stockDeducted || oldItem.directDelivery) continue;
           const oldProduct = oldItem.product;
           if (
             !oldProduct ||
@@ -1186,11 +1250,13 @@ export class OrdersService {
         //    allocation (inventorySerialId / inventoryBatchId). Items without
         //    allocation stay as backorder. Mirrors confirm()'s SERIAL/BATCH
         //    branches; FIFO auto-allocation is intentionally NOT done here —
-        //    that's confirm()'s responsibility, not update()'s.
-        for (const newItem of updatedOrder.items) {
+        //    that's confirm()'s responsibility, not update()'s. За непотвърдена
+        //    поръчка не се изписва нищо — това ще направи confirm().
+        for (const newItem of stockHeld ? updatedOrder.items : []) {
           const newProduct = productById.get(newItem.productId);
           if (
             !newProduct ||
+            newItem.directDelivery ||
             newProduct.type === 'SERVICE' ||
             !newProduct.trackInventory
           ) {
@@ -1430,7 +1496,12 @@ export class OrdersService {
 
     for (const item of order.items) {
       const product = item.product;
-      if (!product || product.type === 'SERVICE' || !product.trackInventory) {
+      if (
+        !product ||
+        item.directDelivery ||
+        product.type === 'SERVICE' ||
+        !product.trackInventory
+      ) {
         continue;
       }
 
@@ -1540,7 +1611,13 @@ export class OrdersService {
         const product = await tx.product.findUnique({
           where: { id: item.productId },
         });
-        if (!product || product.type === 'SERVICE' || !product.trackInventory) {
+        // Директен ред няма какво да се окомплектова от склад.
+        if (
+          !product ||
+          item.directDelivery ||
+          product.type === 'SERVICE' ||
+          !product.trackInventory
+        ) {
           continue;
         }
 
@@ -1680,6 +1757,16 @@ export class OrdersService {
             product.type === 'SERVICE' ||
             !product.trackInventory
           ) {
+            continue;
+          }
+
+          // Директна доставка: стоката не минава през наш склад — нищо за
+          // изписване, редът не е и backorder (не се показва в „Чакащи").
+          if (item.directDelivery) {
+            await tx.orderItem.update({
+              where: { id: item.id },
+              data: { stockDeducted: false },
+            });
             continue;
           }
 
@@ -1896,7 +1983,8 @@ export class OrdersService {
           }
 
           // Backorder items never had their stock decremented at confirm — nothing to restore.
-          if (!item.stockDeducted) {
+          // Direct-delivery items never touch our stock at all.
+          if (!item.stockDeducted || item.directDelivery) {
             continue;
           }
 

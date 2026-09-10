@@ -10,6 +10,7 @@ import {
   Query,
   Res,
   StreamableFile,
+  ForbiddenException,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { OrdersService } from './orders.service';
@@ -28,10 +29,21 @@ import {
   RequireCreate,
   RequireEdit,
   RequireDelete,
+  checkPermission,
 } from '../common/guards/permissions.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ExportService } from '../common/export/export.service';
 import type { ExportFormat } from '../common/export/export.service';
+
+// Директните редове (drop-ship) са зад отделно право — роля без него не
+// вижда чекбокса в UI-а, а тук отказваме и ръчно пратен payload.
+const canDirectDelivery = (user: any) =>
+  checkPermission(
+    user?.currentRole?.permissions,
+    'erp',
+    'directDelivery',
+    'view',
+  );
 
 @Controller('companies/:companyId/orders')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)
@@ -48,6 +60,14 @@ export class CompanyOrdersController {
     @CurrentUser() user: any,
     @Body() dto: CreateOrderDto,
   ) {
+    if (
+      dto.items?.some((it) => it.directDelivery) &&
+      !canDirectDelivery(user)
+    ) {
+      throw new ForbiddenException(
+        'Нямате право да създавате редове с директна доставка',
+      );
+    }
     return this.ordersService.create(companyId, user.id, dto);
   }
 
@@ -135,9 +155,13 @@ export class CompanyOrdersController {
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
+    @CurrentUser() user: any,
     @Body() dto: UpdateOrderDto,
   ) {
-    return this.ordersService.update(companyId, id, dto);
+    // Без правото могат да се запазят само вече съществуващи директни редове
+    return this.ordersService.update(companyId, id, dto, {
+      canDirectDelivery: canDirectDelivery(user),
+    });
   }
 
   @Post(':id/confirm')

@@ -10,6 +10,7 @@ import { CloudCartService } from '../cloudcart/cloudcart.service';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import {
   CreateGoodsReceiptDto,
+  CreateDirectDeliveryDto,
   UpdateGoodsReceiptDto,
   QueryGoodsReceiptsDto,
 } from './dto';
@@ -25,6 +26,8 @@ const RECEIPT_INCLUDE = {
   location: true,
   supplier: true,
   currency: true,
+  // Продажбата при директна доставка (drop-ship)
+  order: { select: { id: true, orderNumber: true, customerName: true } },
   createdBy: {
     select: { id: true, firstName: true, lastName: true },
   },
@@ -96,7 +99,14 @@ export class GoodsReceiptsService {
     return `${prefix}${nextNumber.toString().padStart(5, '0')}`;
   }
 
-  async create(companyId: string, userId: string, dto: CreateGoodsReceiptDto) {
+  async create(
+    companyId: string,
+    userId: string,
+    dto: Omit<CreateGoodsReceiptDto, 'locationId'> & { locationId?: string },
+    // Директна доставка (drop-ship): без локация, вързана към продажба.
+    // Задава се само от createDirectDelivery(), не от публичния DTO.
+    direct?: { orderId: string },
+  ) {
     // Get company for default currency
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
@@ -105,12 +115,18 @@ export class GoodsReceiptsService {
       throw new NotFoundException(ErrorMessages.goodsReceipts.companyNotFound);
     }
 
-    // Verify location exists and belongs to company
-    const location = await this.prisma.location.findFirst({
-      where: { id: dto.locationId, companyId },
-    });
-    if (!location) {
-      throw new NotFoundException(ErrorMessages.goodsReceipts.locationNotFound);
+    // Verify location exists and belongs to company (складова доставка)
+    if (!direct) {
+      const location = dto.locationId
+        ? await this.prisma.location.findFirst({
+            where: { id: dto.locationId, companyId },
+          })
+        : null;
+      if (!location) {
+        throw new NotFoundException(
+          ErrorMessages.goodsReceipts.locationNotFound,
+        );
+      }
     }
 
     // Verify supplier if provided
@@ -151,7 +167,9 @@ export class GoodsReceiptsService {
       currencyId,
       exchangeRate,
       companyId,
-      locationId: dto.locationId,
+      locationId: direct ? undefined : dto.locationId,
+      directDelivery: !!direct,
+      orderId: direct?.orderId,
       supplierId: dto.supplierId || undefined,
       createdById: userId,
       receiptDate: dto.receiptDate ? new Date(dto.receiptDate) : new Date(),
@@ -210,6 +228,65 @@ export class GoodsReceiptsService {
         include: RECEIPT_INCLUDE,
       });
     });
+  }
+
+  /**
+   * Директна доставка (drop-ship) към продажба: доставчикът праща стоката
+   * право при клиента. Разрешени са само продукти от директните редове на
+   * поръчката — така документът остава „за тази продажба", а не обща покупка.
+   */
+  async createDirectDelivery(
+    companyId: string,
+    userId: string,
+    dto: CreateDirectDeliveryDto,
+  ) {
+    const order = await this.prisma.order.findFirst({
+      where: { id: dto.orderId, companyId },
+      select: {
+        id: true,
+        status: true,
+        items: {
+          where: { directDelivery: true },
+          select: { productId: true },
+        },
+      },
+    });
+    if (!order) {
+      throw new NotFoundException('Поръчката не е намерена');
+    }
+    if (order.status === 'CANCELLED') {
+      throw new BadRequestException(
+        'Не може да добавите доставка към анулирана поръчка',
+      );
+    }
+    if (order.items.length === 0) {
+      throw new BadRequestException(
+        'Поръчката няма редове с директна доставка',
+      );
+    }
+    const directProductIds = new Set(order.items.map((it) => it.productId));
+    if (dto.items.some((it) => !directProductIds.has(it.productId))) {
+      throw new BadRequestException(
+        'Доставката може да съдържа само продукти от директните редове на поръчката',
+      );
+    }
+
+    return this.create(companyId, userId, dto, { orderId: order.id });
+  }
+
+  // Смяна на статус на директна доставка — само през това, за да не може
+  // erp.directDelivery да пипа складови доставки (те са зад warehouse права).
+  async updateDirectDeliveryStatus(
+    companyId: string,
+    id: string,
+    targetStatus: GoodsReceiptStatus,
+    deliveredAt?: string,
+  ) {
+    const receipt = await this.findOne(companyId, id);
+    if (!receipt.directDelivery) {
+      throw new BadRequestException('Това не е директна доставка');
+    }
+    return this.updateStatus(companyId, id, targetStatus, [], deliveredAt);
   }
 
   /**
@@ -473,7 +550,7 @@ export class GoodsReceiptsService {
       }
 
       // Update receipt fields
-      return tx.goodsReceipt.update({
+      await tx.goodsReceipt.update({
         where: { id },
         data: {
           ...(dto.receiptDate && { receiptDate: new Date(dto.receiptDate) }),
@@ -537,6 +614,54 @@ export class GoodsReceiptsService {
     const isCancellingDelivered =
       receipt.status === 'DELIVERED' && targetStatus === 'CANCELLED';
 
+    // Директна доставка (drop-ship): стоката не влиза в наш склад — няма
+    // партиди/серийни номера; при получаване само записваме покупната цена
+    // като себестойност в директните редове на продажбата.
+    if (receipt.directDelivery) {
+      if (isDelivering && (!receipt.items || receipt.items.length === 0)) {
+        throw new BadRequestException(
+          ErrorMessages.goodsReceipts.cannotConfirmWithoutItems,
+        );
+      }
+      return this.prisma.$transaction(async (tx) => {
+        if ((isDelivering || isCancellingDelivered) && receipt.orderId) {
+          for (const item of receipt.items) {
+            const unitCost = isDelivering
+              ? Math.round(
+                  Number(item.unitPrice) * Number(item.exchangeRate || 1) * 100,
+                ) / 100
+              : null;
+            await tx.orderItem.updateMany({
+              where: {
+                orderId: receipt.orderId,
+                productId: item.productId,
+                directDelivery: true,
+              },
+              data: { unitCost },
+            });
+          }
+        }
+        if (targetStatus === 'CANCELLED') {
+          await tx.expense.updateMany({
+            where: { goodsReceiptId: id },
+            data: { status: 'CANCELLED' },
+          });
+        }
+        return tx.goodsReceipt.update({
+          where: { id },
+          data: {
+            status: targetStatus,
+            ...(isDelivering && {
+              deliveredAt: deliveredAtOverride
+                ? new Date(deliveredAtOverride)
+                : new Date(),
+            }),
+          },
+          include: RECEIPT_INCLUDE,
+        });
+      });
+    }
+
     // Validate serial numbers if delivering
     if (isDelivering) {
       if (!receipt.items || receipt.items.length === 0) {
@@ -566,6 +691,14 @@ export class GoodsReceiptsService {
           );
         }
       }
+    }
+
+    // Складова доставка винаги има локация (null е само при directDelivery)
+    const locationId = receipt.locationId;
+    if (!locationId) {
+      throw new BadRequestException(
+        ErrorMessages.goodsReceipts.locationNotFound,
+      );
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -615,7 +748,7 @@ export class GoodsReceiptsService {
                   unitCost: item.unitPrice,
                   companyId,
                   productId: item.productId,
-                  locationId: receipt.locationId,
+                  locationId,
                   goodsReceiptItemId: item.id,
                 },
               });
@@ -651,7 +784,7 @@ export class GoodsReceiptsService {
                 expiryDate,
                 companyId,
                 productId: item.productId,
-                locationId: receipt.locationId,
+                locationId,
                 goodsReceiptItemId: item.id,
               },
             });

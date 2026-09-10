@@ -14,6 +14,8 @@ import { PaymentsService } from '../payments/payments.service';
 import { CreatePaymentDto, UpdatePaymentDto } from '../payments/dto';
 import {
   CreateGoodsReceiptDto,
+  CreateDirectDeliveryDto,
+  UpdateDirectDeliveryStatusDto,
   UpdateGoodsReceiptDto,
   QueryGoodsReceiptsDto,
   UpdateGoodsReceiptStatusDto,
@@ -45,6 +47,37 @@ export class CompanyGoodsReceiptsController {
     @Body() dto: CreateGoodsReceiptDto,
   ) {
     return this.goodsReceiptsService.create(companyId, user.id, dto);
+  }
+
+  // Директна доставка (drop-ship) към продажба — зад erp.directDelivery, не
+  // зад складовите права: създава се и се получава от екрана на поръчката.
+  @Post('direct')
+  @RequireView('erp', 'directDelivery')
+  createDirect(
+    @Param('companyId') companyId: string,
+    @CurrentUser() user: any,
+    @Body() dto: CreateDirectDeliveryDto,
+  ) {
+    return this.goodsReceiptsService.createDirectDelivery(
+      companyId,
+      user.id,
+      dto,
+    );
+  }
+
+  @Patch('direct/:id/status')
+  @RequireView('erp', 'directDelivery')
+  updateDirectStatus(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateDirectDeliveryStatusDto,
+  ) {
+    return this.goodsReceiptsService.updateDirectDeliveryStatus(
+      companyId,
+      id,
+      dto.status,
+      dto.deliveredAt,
+    );
   }
 
   @Get()

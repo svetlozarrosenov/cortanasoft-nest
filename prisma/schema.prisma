@@ -1258,8 +1258,16 @@ model GoodsReceipt {
   supplierId String?
   supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
 
-  locationId String
-  location   Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  // Задължителен за складови доставки; null само при directDelivery.
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  // Директна доставка към клиент (drop-ship): доставката е за конкретна
+  // продажба и при DELIVERED не създава партиди/серийни номера — вместо това
+  // записва покупната цена в директните редове на поръчката (OrderItem.unitCost).
+  directDelivery Boolean @default(false)
+  orderId        String?
+  order          Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
   createdById String?
   createdBy   User?   @relation("GoodsReceiptCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -1271,6 +1279,7 @@ model GoodsReceipt {
 
   @@unique([companyId, receiptNumber])
   @@index([companyId, status])
+  @@index([orderId])
   @@map("goods_receipts")
 }
 
@@ -1835,6 +1844,7 @@ model Order {
   issuedWarranties    IssuedWarranty[]
   payments            Payment[]
   creditApplication   CreditApplication?
+  goodsReceipts       GoodsReceipt[] // директни доставки от доставчик за тази продажба
 
   @@unique([companyId, orderNumber])
   @@unique([companyId, externalId])
@@ -1879,6 +1889,15 @@ model OrderItem {
   // а stock-ът да се "изпише" по-късно когато доставката пристигне.
   // Cancel() възстановява само items с stockDeducted = true.
   stockDeducted Boolean @default(true)
+
+  // Директна доставка (drop-ship): стоката отива от доставчика право при
+  // клиента, без да минава през наш склад. Редът никога не се изписва от
+  // наличности (stockDeducted остава false, но не е backorder) и не блокира
+  // SHIPPED/DELIVERED. Себестойността идва от свързаната директна доставка
+  // (GoodsReceipt.directDelivery + orderId) при получаването ѝ.
+  // Гейт: erp.directDelivery (view).
+  directDelivery Boolean  @default(false)
+  unitCost       Decimal? @db.Decimal(10, 2) // Покупна цена (снапшот) — само за директни редове
 
   invoiceItems InvoiceItem[]
 

@@ -249,6 +249,14 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         actions: ['view'],
       },
       {
+        // Директна доставка (drop-ship): ред от продажба, който не минава през
+        // склад, и „Доставка от доставчик" към поръчката. Без правото нищо от
+        // функционалността не се показва и backend-ът отказва такива редове.
+        key: 'directDelivery',
+        labelKey: 'modules.erp.directDelivery.permission',
+        actions: ['view'],
+      },
+      {
         key: 'credits',
         labelKey: 'modules.erp.credits.title',
         actions: ['view', 'create', 'edit', 'delete'],

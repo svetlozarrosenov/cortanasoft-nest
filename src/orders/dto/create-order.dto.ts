@@ -46,6 +46,12 @@ export class CreateOrderItemDto {
   @IsString()
   @IsOptional()
   locationId?: string;
+
+  // Директна доставка от доставчик към клиента — редът не се изписва от
+  // склад. Изисква право erp.directDelivery (проверява се в контролера).
+  @IsBoolean()
+  @IsOptional()
+  directDelivery?: boolean;
 }
 
 /**
