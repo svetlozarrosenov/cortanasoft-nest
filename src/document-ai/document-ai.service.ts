@@ -56,7 +56,7 @@ export interface DeliveryScanResult {
 // ==================== Съгласуване на банково извлечение ====================
 
 export interface ReconcileRowMatch {
-  type: 'order' | 'invoice' | 'expense';
+  type: 'order' | 'invoice' | 'expense' | 'delivery';
   id: string;
   label: string;
   amount?: number | null;
@@ -97,6 +97,20 @@ export interface ReconcileResult {
     expenseDate: Date;
     status: string;
     paymentMethod: string | null;
+  }[];
+  /**
+   * Плащания по доставки (стокови разписки) в периода на извлечението, за
+   * които няма мачнат ред. Същата логика като при разходите: „в брой" и
+   * наложен платеж не минават през банката и се пропускат.
+   */
+  unmatchedDeliveries: {
+    id: string;
+    receiptNumber: string;
+    invoiceNumber: string | null;
+    supplierName: string | null;
+    amount: number;
+    paidAt: Date;
+    method: string;
   }[];
 }
 
@@ -627,6 +641,18 @@ export class DocumentAIService {
         },
       },
       {
+        name: 'search_deliveries',
+        description:
+          "Search the company's supplier deliveries (goods receipts / purchase invoices) by delivery number, supplier invoice number, supplier name or approximate total. Returns up to 5 with payment status and the recorded payments.",
+        input_schema: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            amount: { type: 'number' },
+          },
+        },
+      },
+      {
         name: 'submit_result',
         description:
           'Submit the final structured reconciliation. Call exactly once, after every statement row has been searched.',
@@ -648,7 +674,7 @@ export class DocumentAIService {
                     properties: {
                       type: {
                         type: 'string',
-                        enum: ['order', 'invoice', 'expense'],
+                        enum: ['order', 'invoice', 'expense', 'delivery'],
                       },
                       id: { type: 'string' },
                       label: { type: 'string' },
@@ -688,7 +714,7 @@ export class DocumentAIService {
             text: `This is a bank statement (likely Bulgarian, any bank format). Reconcile it against the company's records:
 
 1. Extract EVERY transaction row: date, counterparty, payment reference/description, amount (positive number) and direction ('in' = money received, 'out' = money paid out). Skip opening/closing balance lines.
-2. For every row try to find the matching record: incoming money usually matches a sales order or an issued invoice (search_orders / search_invoices — try the amount and any invoice/order number or customer name from the reference); outgoing money usually matches an expense (search_expenses; an expense with paymentMethod CASH or COD did not go through the bank — do not match it to a statement row). Bank fees, interest and card settlements usually have no match — leave match null.
+2. For every row try to find the matching record: incoming money usually matches a sales order or an issued invoice (search_orders / search_invoices — try the amount and any invoice/order number or customer name from the reference); outgoing money usually matches either a supplier delivery (search_deliveries — try the amount, the supplier name or an invoice number from the reference; match type 'delivery') or a standalone expense (search_expenses; match type 'expense'). The bank counterparty is often a marketplace or payment processor (e.g. ALIBABA, PAYPAL, STRIPE) rather than the supplier recorded in the system — when a name search finds nothing, search by amount alone before giving up. A record whose payment method is CASH or COD did not go through the bank — do not match it to a statement row. Bank fees, interest and card settlements usually have no match — leave match null.
 3. Set match only when reasonably sure (confidence 0-1). When unsure, leave match null — a human reviews everything.
 4. Finish by calling submit_result exactly once. Dates in YYYY-MM-DD, amounts as plain positive numbers.`,
           },
@@ -751,6 +777,27 @@ export class DocumentAIService {
   ) {
     const query = (input.query || '').trim();
     const amount = typeof input.amount === 'number' ? input.amount : null;
+    const result = await this.runReconcileSearch(
+      companyId,
+      toolName,
+      query,
+      amount,
+    );
+    // Контрагентът в банката често е платформа/процесор (Alibaba, PayPal,
+    // Stripe), а не доставчикът/клиентът от системата → име + сума дава нула.
+    // Тогава търсим само по сума, за да не се губи очевидното съвпадение.
+    if (result.length === 0 && query && amount != null) {
+      return this.runReconcileSearch(companyId, toolName, '', amount);
+    }
+    return result;
+  }
+
+  private async runReconcileSearch(
+    companyId: string,
+    toolName: string,
+    query: string,
+    amount: number | null,
+  ): Promise<unknown[]> {
     // ±1% толеранс за банкови такси/закръгляния при мачване по сума
     const amountFilter = (field: string) =>
       amount != null
@@ -837,6 +884,54 @@ export class DocumentAIService {
         take: 5,
       });
     }
+    if (toolName === 'search_deliveries') {
+      if (!query && amount == null) return [];
+      const receipts = await this.prisma.goodsReceipt.findMany({
+        where: {
+          companyId,
+          status: { not: 'CANCELLED' },
+          ...amountFilter('totalAmount'),
+          ...(query && {
+            OR: [
+              { receiptNumber: { contains: query, mode: 'insensitive' } },
+              { invoiceNumber: { contains: query, mode: 'insensitive' } },
+              { supplier: { name: { contains: query, mode: 'insensitive' } } },
+            ],
+          }),
+        },
+        select: {
+          id: true,
+          receiptNumber: true,
+          invoiceNumber: true,
+          invoiceDate: true,
+          totalAmount: true,
+          paidAmount: true,
+          paymentStatus: true,
+          supplier: { select: { name: true } },
+          payments: {
+            select: { amount: true, paidAt: true, method: true },
+            orderBy: { paidAt: 'desc' },
+          },
+        },
+        orderBy: { receiptDate: 'desc' },
+        take: 5,
+      });
+      return receipts.map((r) => ({
+        id: r.id,
+        receiptNumber: r.receiptNumber,
+        invoiceNumber: r.invoiceNumber,
+        invoiceDate: r.invoiceDate,
+        supplierName: r.supplier?.name ?? null,
+        totalAmount: Number(r.totalAmount),
+        paidAmount: Number(r.paidAmount),
+        paymentStatus: r.paymentStatus,
+        payments: r.payments.map((p) => ({
+          amount: Number(p.amount),
+          paidAt: p.paidAt,
+          method: p.method,
+        })),
+      }));
+    }
     return [];
   }
 
@@ -894,6 +989,7 @@ export class DocumentAIService {
       .map((r) => (r.date ? new Date(r.date) : null))
       .filter((d): d is Date => !!d && !Number.isNaN(d.getTime()));
     let unmatchedExpenses: ReconcileResult['unmatchedExpenses'] = [];
+    let unmatchedDeliveries: ReconcileResult['unmatchedDeliveries'] = [];
     if (rowDates.length > 0) {
       const from = new Date(Math.min(...rowDates.map((d) => d.getTime())));
       const to = new Date(Math.max(...rowDates.map((d) => d.getTime())));
@@ -941,6 +1037,52 @@ export class DocumentAIService {
           status: e.status,
           paymentMethod: e.paymentMethod,
         }));
+
+      // Същата обратна проверка за доставките: плащане по стокова разписка
+      // (банка/карта) с дата в периода, чиято доставка не е мачната с ред.
+      const matchedDeliveryIds = new Set(
+        rows
+          .filter((r) => r.match?.type === 'delivery')
+          .map((r) => r.match!.id),
+      );
+      const deliveryPayments = await this.prisma.payment.findMany({
+        where: {
+          companyId,
+          goodsReceiptId: { not: null },
+          amount: { gt: 0 },
+          method: { in: ['BANK_TRANSFER', 'CARD'] },
+          paidAt: inPeriod,
+          goodsReceipt: { status: { not: 'CANCELLED' } },
+        },
+        select: {
+          id: true,
+          amount: true,
+          paidAt: true,
+          method: true,
+          goodsReceipt: {
+            select: {
+              id: true,
+              receiptNumber: true,
+              invoiceNumber: true,
+              supplier: { select: { name: true } },
+            },
+          },
+        },
+        orderBy: { paidAt: 'asc' },
+        take: 60,
+      });
+      unmatchedDeliveries = deliveryPayments
+        .filter((p) => p.goodsReceipt && !matchedDeliveryIds.has(p.goodsReceipt.id))
+        .slice(0, 30)
+        .map((p) => ({
+          id: p.goodsReceipt!.id,
+          receiptNumber: p.goodsReceipt!.receiptNumber,
+          invoiceNumber: p.goodsReceipt!.invoiceNumber,
+          supplierName: p.goodsReceipt!.supplier?.name ?? null,
+          amount: Number(p.amount),
+          paidAt: p.paidAt,
+          method: p.method,
+        }));
     }
 
     return {
@@ -957,6 +1099,7 @@ export class DocumentAIService {
           orderDate: o.orderDate,
         })),
       unmatchedExpenses,
+      unmatchedDeliveries,
     };
   }
 

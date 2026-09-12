@@ -23,6 +23,8 @@ const mockPrisma = {
   order: { findMany: jest.fn() },
   invoice: { findMany: jest.fn() },
   expense: { findMany: jest.fn() },
+  goodsReceipt: { findMany: jest.fn() },
+  payment: { findMany: jest.fn() },
 };
 
 /** Отговорът идва през submit_invoice tool-а, а не като текст */
@@ -501,6 +503,8 @@ describe('DocumentAIService', () => {
       });
       mockPrisma.order.findMany.mockResolvedValue([]);
       mockPrisma.expense.findMany.mockResolvedValue([]);
+      mockPrisma.goodsReceipt.findMany.mockResolvedValue([]);
+      mockPrisma.payment.findMany.mockResolvedValue([]);
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           DocumentAIService,
@@ -515,6 +519,7 @@ describe('DocumentAIService', () => {
       mockPrisma.order.findMany.mockResolvedValue([]);
       mockPrisma.invoice.findMany.mockResolvedValue([]);
       mockPrisma.expense.findMany.mockResolvedValue([]);
+      mockPrisma.goodsReceipt.findMany.mockResolvedValue([]);
       mockCreate
         .mockResolvedValueOnce({
           stop_reason: 'tool_use',
@@ -522,6 +527,7 @@ describe('DocumentAIService', () => {
             { type: 'tool_use', id: 't1', name: 'search_orders', input: { amount: 6900 } },
             { type: 'tool_use', id: 't2', name: 'search_invoices', input: { query: 'F-001' } },
             { type: 'tool_use', id: 't3', name: 'search_expenses', input: { amount: 850 } },
+            { type: 'tool_use', id: 't3b', name: 'search_deliveries', input: { amount: 130.39 } },
           ],
         })
         .mockResolvedValueOnce({
@@ -543,6 +549,7 @@ describe('DocumentAIService', () => {
         mockPrisma.order.findMany,
         mockPrisma.invoice.findMany,
         mockPrisma.expense.findMany,
+        mockPrisma.goodsReceipt.findMany,
       ]) {
         expect(mock).toHaveBeenCalledWith(
           expect.objectContaining({
@@ -637,6 +644,148 @@ describe('DocumentAIService', () => {
       expect(period.lte.getTime()).toBeGreaterThanOrEqual(new Date('2026-08-28').getTime());
     });
 
+    it('should expose supplier deliveries with their payments to the model', async () => {
+      mockPrisma.goodsReceipt.findMany.mockResolvedValue([
+        {
+          id: 'gr1',
+          receiptNumber: 'GR-2026-00011',
+          invoiceNumber: 'INV-77',
+          invoiceDate: new Date('2026-07-30'),
+          totalAmount: 130.39,
+          paidAmount: 130.39,
+          paymentStatus: 'PAID',
+          supplier: { name: 'Beijing Chiye' },
+          payments: [{ amount: 130.39, paidAt: new Date('2026-08-03'), method: 'BANK_TRANSFER' }],
+        },
+      ]);
+      mockCreate
+        .mockResolvedValueOnce({
+          stop_reason: 'tool_use',
+          content: [
+            { type: 'tool_use', id: 't1', name: 'search_deliveries', input: { query: 'Chiye', amount: 130.39 } },
+          ],
+        })
+        .mockResolvedValueOnce({
+          stop_reason: 'tool_use',
+          content: [
+            { type: 'tool_use', id: 't2', name: 'submit_result', input: { rows: [], confidence: 0.9 } },
+          ],
+        });
+
+      await service.reconcileBankStatement('c1', 'base64pdf');
+
+      const where = mockPrisma.goodsReceipt.findMany.mock.calls[0][0].where;
+      expect(where.companyId).toBe('c1');
+      expect(where.status).toEqual({ not: 'CANCELLED' });
+      expect(where.totalAmount.gte).toBeCloseTo(130.39 * 0.99 - 0.01, 5);
+      expect(where.OR).toEqual(
+        expect.arrayContaining([
+          { supplier: { name: { contains: 'Chiye', mode: 'insensitive' } } },
+          { invoiceNumber: { contains: 'Chiye', mode: 'insensitive' } },
+        ]),
+      );
+      // Резултатът стига до модела като tool_result с плащанията вътре
+      const secondCall = mockCreate.mock.calls[1][0];
+      const toolResult = secondCall.messages.at(-1).content[0];
+      const payload = JSON.parse(toolResult.content);
+      expect(payload[0]).toMatchObject({
+        id: 'gr1',
+        receiptNumber: 'GR-2026-00011',
+        supplierName: 'Beijing Chiye',
+        totalAmount: 130.39,
+        paymentStatus: 'PAID',
+      });
+      expect(payload[0].payments[0]).toMatchObject({ amount: 130.39, method: 'BANK_TRANSFER' });
+    });
+
+    it('should retry by amount alone when name + amount finds nothing (marketplace counterparty)', async () => {
+      mockPrisma.goodsReceipt.findMany
+        .mockResolvedValueOnce([]) // "ALIBABA" + 130.39 → нищо
+        .mockResolvedValueOnce([
+          {
+            id: 'gr1', receiptNumber: 'GR-2026-00011', invoiceNumber: null, invoiceDate: null,
+            totalAmount: 130.39, paidAmount: 130.39, paymentStatus: 'PAID',
+            supplier: { name: 'Beijing Chiye' }, payments: [],
+          },
+        ]);
+      mockCreate
+        .mockResolvedValueOnce({
+          stop_reason: 'tool_use',
+          content: [
+            { type: 'tool_use', id: 't1', name: 'search_deliveries', input: { query: 'ALIBABA.COM', amount: 130.39 } },
+          ],
+        })
+        .mockResolvedValueOnce({
+          stop_reason: 'tool_use',
+          content: [{ type: 'tool_use', id: 't2', name: 'submit_result', input: { rows: [], confidence: 0.9 } }],
+        });
+
+      await service.reconcileBankStatement('c1', 'base64pdf');
+
+      expect(mockPrisma.goodsReceipt.findMany).toHaveBeenCalledTimes(2);
+      const retryWhere = mockPrisma.goodsReceipt.findMany.mock.calls[1][0].where;
+      expect(retryWhere.OR).toBeUndefined();
+      expect(retryWhere.totalAmount).toBeDefined();
+      const payload = JSON.parse(mockCreate.mock.calls[1][0].messages.at(-1).content[0].content);
+      expect(payload[0].id).toBe('gr1');
+    });
+
+    it('should flag delivery payments that have no row in the statement', async () => {
+      mockCreate.mockResolvedValueOnce({
+        stop_reason: 'tool_use',
+        content: [
+          {
+            type: 'tool_use',
+            id: 't1',
+            name: 'submit_result',
+            input: {
+              rows: [
+                {
+                  date: '2026-08-03',
+                  counterparty: 'Beijing Chiye',
+                  amount: 130.39,
+                  direction: 'out',
+                  match: { type: 'delivery', id: 'gr1', label: 'GR-2026-00011', confidence: 0.95 },
+                },
+                { date: '2026-08-20', counterparty: 'Такса', amount: 2, direction: 'out', match: null },
+              ],
+              confidence: 0.9,
+            },
+          },
+        ],
+      });
+      // gr1 е мачната; gr2 е платена по банка в периода, но липсва в извлечението
+      mockPrisma.payment.findMany.mockResolvedValue([
+        {
+          id: 'p1', amount: 130.39, paidAt: new Date('2026-08-03'), method: 'BANK_TRANSFER',
+          goodsReceipt: { id: 'gr1', receiptNumber: 'GR-2026-00011', invoiceNumber: null, supplier: { name: 'Beijing Chiye' } },
+        },
+        {
+          id: 'p2', amount: 151.86, paidAt: new Date('2026-08-14'), method: 'BANK_TRANSFER',
+          goodsReceipt: { id: 'gr2', receiptNumber: 'GR-2026-00012', invoiceNumber: 'F-12', supplier: { name: 'Coswheel' } },
+        },
+      ]);
+
+      const result = await service.reconcileBankStatement('c1', 'base64pdf');
+
+      expect(result.unmatchedDeliveries).toHaveLength(1);
+      expect(result.unmatchedDeliveries[0]).toMatchObject({
+        id: 'gr2',
+        receiptNumber: 'GR-2026-00012',
+        supplierName: 'Coswheel',
+        amount: 151.86,
+        method: 'BANK_TRANSFER',
+      });
+      // Само банка/карта, само положителни (не връщания), само в периода, само по доставки
+      const where = mockPrisma.payment.findMany.mock.calls.at(-1)![0].where;
+      expect(where.companyId).toBe('c1');
+      expect(where.goodsReceiptId).toEqual({ not: null });
+      expect(where.amount).toEqual({ gt: 0 });
+      expect(where.method).toEqual({ in: ['BANK_TRANSFER', 'CARD'] });
+      expect(where.paidAt.gte).toEqual(new Date('2026-08-03'));
+      expect(where.paidAt.lte.getTime()).toBeGreaterThanOrEqual(new Date('2026-08-20').getTime());
+    });
+
     it('should skip the reverse expense check when no row has a date', async () => {
       mockCreate.mockResolvedValueOnce({
         stop_reason: 'tool_use',
@@ -653,7 +802,9 @@ describe('DocumentAIService', () => {
       const result = await service.reconcileBankStatement('c1', 'base64pdf');
 
       expect(result.unmatchedExpenses).toEqual([]);
+      expect(result.unmatchedDeliveries).toEqual([]);
       expect(mockPrisma.expense.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.payment.findMany).not.toHaveBeenCalled();
     });
 
     it('should reject when the company has no AI key', async () => {
