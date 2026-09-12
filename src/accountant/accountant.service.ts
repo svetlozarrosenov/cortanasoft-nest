@@ -16,6 +16,7 @@ import {
   UpdateAccountantSettingsDto,
   SendToAccountantDto,
 } from './dto';
+import { decodeUploadedFileName } from '../common/utils/upload-filename';
 
 // Етикети за описа (Excel е на български за счетоводителя)
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -781,7 +782,9 @@ export class AccountantService {
       html,
       attachments: [
         {
-          filename: file.originalname || `paket-${vars.year}-${vars.month}.zip`,
+          filename:
+            decodeUploadedFileName(file.originalname) ||
+            `paket-${vars.year}-${vars.month}.zip`,
           content: file.buffer,
           contentType: 'application/zip',
         },

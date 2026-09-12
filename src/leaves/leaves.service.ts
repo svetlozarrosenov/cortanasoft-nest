@@ -29,6 +29,7 @@ import {
   RejectLeaveDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
+import { decodeUploadedFileName } from '../common/utils/upload-filename';
 
 @Injectable()
 export class LeavesService {
@@ -1004,7 +1005,7 @@ export class LeavesService {
     file: Express.Multer.File,
   ): Promise<{ key: string; name: string }> {
     const { key } = await this.uploads.uploadFile(companyId, 'leaves', file);
-    return { key, name: file.originalname };
+    return { key, name: decodeUploadedFileName(file.originalname) };
   }
 
   // Поток към прикачения документ за сваляне/преглед

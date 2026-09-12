@@ -5,6 +5,7 @@ import {
 import { ContractFileKind } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UploadsService } from '../uploads/uploads.service';
+import { decodeUploadedFileName } from '../common/utils/upload-filename';
 
 @Injectable()
 export class ContractFilesService {
@@ -27,7 +28,7 @@ export class ContractFilesService {
 
     return this.prisma.contractFile.create({
       data: {
-        fileName: file.originalname,
+        fileName: decodeUploadedFileName(file.originalname),
         fileUrl: key,
         fileKey: key,
         fileSize: file.size,

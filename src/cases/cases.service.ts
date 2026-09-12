@@ -19,6 +19,7 @@ import {
   QueryCasesDto,
   UpdateCaseDto,
 } from './dto';
+import { decodeUploadedFileName } from '../common/utils/upload-filename';
 
 /**
  * Казуси (Cases) — клиентски тикети на фирмата-наемател.
@@ -381,7 +382,7 @@ export class CasesService {
       data: {
         caseId: existing.id,
         messageId: messageId ?? null,
-        fileName: file.originalname,
+        fileName: decodeUploadedFileName(file.originalname),
         fileKey: key,
         fileSize: file.size,
         mimeType: file.mimetype,

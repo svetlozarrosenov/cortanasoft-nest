@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UploadsService } from '../uploads/uploads.service';
+import { decodeUploadedFileName } from '../common/utils/upload-filename';
 
 const ENTITY_TYPE_MAP = {
   goodsReceipt: 'goodsReceiptId',
@@ -64,7 +65,7 @@ export class DocumentsService {
     // Create document record — fileUrl is the R2 key, proxy URL built by controller
     return this.prisma.document.create({
       data: {
-        fileName: file.originalname,
+        fileName: decodeUploadedFileName(file.originalname),
         fileUrl: key,
         fileKey: key,
         fileSize: file.size,

@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { EmployeeRecordAuditService } from './employee-record-audit.service';
 import { EmployeeDocumentFileKind } from '@prisma/client';
+import { decodeUploadedFileName } from '../common/utils/upload-filename';
 
 // Полиморфна карта: тип родител → FK колона в employee_document_files
 const ENTITY_TYPE_MAP = {
@@ -69,7 +70,7 @@ export class EmployeeDocumentFilesService {
 
     const created = await this.prisma.employeeDocumentFile.create({
       data: {
-        fileName: file.originalname,
+        fileName: decodeUploadedFileName(file.originalname),
         fileUrl: key,
         fileKey: key,
         fileSize: file.size,
