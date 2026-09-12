@@ -56,7 +56,8 @@ export interface DeliveryScanResult {
 // ==================== Съгласуване на банково извлечение ====================
 
 export interface ReconcileRowMatch {
-  type: 'order' | 'invoice' | 'expense' | 'delivery';
+  /** internal / bank_fee = ред без документ по дизайн (id = type) */
+  type: 'order' | 'invoice' | 'expense' | 'delivery' | 'internal' | 'bank_fee';
   id: string;
   label: string;
   amount?: number | null;
@@ -113,6 +114,14 @@ export interface ReconcileResult {
     method: string;
   }[];
 }
+
+// Редове без документ по дизайн — етикет по подразбиране, ако Claude не даде
+const NON_RECORD_MATCH_LABELS: Partial<
+  Record<ReconcileRowMatch['type'], string>
+> = {
+  internal: 'Вътрешен превод — собствена сметка / собственик',
+  bank_fee: 'Банкова такса',
+};
 
 // Описания на категориите за промпта — Claude избира код от списъка
 const EXPENSE_CATEGORY_HINTS = `  DELIVERY: shipping, couriers, transport, fuel for deliveries
@@ -602,6 +611,7 @@ export class DocumentAIService {
     base64Pdf: string,
   ): Promise<ReconcileResult> {
     const { client, model } = await this.getClient(companyId);
+    const companyContext = await this.reconcileCompanyContext(companyId);
 
     const tools: Anthropic.Tool[] = [
       {
@@ -674,7 +684,14 @@ export class DocumentAIService {
                     properties: {
                       type: {
                         type: 'string',
-                        enum: ['order', 'invoice', 'expense', 'delivery'],
+                        enum: [
+                          'order',
+                          'invoice',
+                          'expense',
+                          'delivery',
+                          'internal',
+                          'bank_fee',
+                        ],
                       },
                       id: { type: 'string' },
                       label: { type: 'string' },
@@ -711,10 +728,12 @@ export class DocumentAIService {
           },
           {
             type: 'text',
-            text: `This is a bank statement (likely Bulgarian, any bank format). Reconcile it against the company's records:
+            text: `This is a bank statement (likely Bulgarian, any bank format). Reconcile it against the company's records.
+
+${companyContext}
 
 1. Extract EVERY transaction row: date, counterparty, payment reference/description, amount (positive number) and direction ('in' = money received, 'out' = money paid out). Skip opening/closing balance lines.
-2. For every row try to find the matching record: incoming money usually matches a sales order or an issued invoice (search_orders / search_invoices — try the amount and any invoice/order number or customer name from the reference); outgoing money usually matches either a supplier delivery (search_deliveries — try the amount, the supplier name or an invoice number from the reference; match type 'delivery') or a standalone expense (search_expenses; match type 'expense'). The bank counterparty is often a marketplace or payment processor (e.g. ALIBABA, PAYPAL, STRIPE) rather than the supplier recorded in the system — when a name search finds nothing, search by amount alone before giving up. A record whose payment method is CASH or COD did not go through the bank — do not match it to a statement row. Bank fees, interest and card settlements usually have no match — leave match null.
+2. For every row try to find the matching record: incoming money usually matches a sales order or an issued invoice (search_orders / search_invoices — try the amount and any invoice/order number or customer name from the reference); outgoing money usually matches either a supplier delivery (search_deliveries — try the amount, the supplier name or an invoice number from the reference; match type 'delivery') or a standalone expense (search_expenses; match type 'expense'). The bank counterparty is often a marketplace or payment processor (e.g. ALIBABA, PAYPAL, STRIPE) rather than the supplier recorded in the system — when a name search finds nothing, search by amount alone before giving up. A record whose payment method is CASH or COD did not go through the bank — do not match it to a statement row. Two kinds of rows have no document by design — classify them instead of leaving them unmatched: transfers where the counterparty is the company itself, its manager/owner (МОЛ) or one of its users (own accounts, owner deposits and withdrawals) → match {type:'internal', id:'internal'}; bank service fees, interest, card-acquiring settlements and similar bank charges → match {type:'bank_fee', id:'bank_fee'}. Everything else without a record → leave match null.
 3. Set match only when reasonably sure (confidence 0-1). When unsure, leave match null — a human reviews everything.
 4. Finish by calling submit_result exactly once. Dates in YYYY-MM-DD, amounts as plain positive numbers.`,
           },
@@ -767,6 +786,40 @@ export class DocumentAIService {
     throw new BadRequestException(
       'AI съгласуването не успя да завърши. Опитайте отново.',
     );
+  }
+
+  /**
+   * Кои сме „ние" — за да разпознае Cortana вътрешните преводи (собствена
+   * сметка, собственик/МОЛ, потребители на фирмата) вместо да ги брои за
+   * плащания без документ.
+   */
+  private async reconcileCompanyContext(companyId: string): Promise<string> {
+    const [company, members] = await Promise.all([
+      this.prisma.company.findUnique({
+        where: { id: companyId },
+        select: { name: true, molName: true, iban: true, bankName: true },
+      }),
+      this.prisma.userCompany.findMany({
+        where: { companyId },
+        select: { user: { select: { firstName: true, lastName: true } } },
+      }),
+    ]);
+    const people = Array.from(
+      new Set(
+        members
+          .map((m) => `${m.user.firstName} ${m.user.lastName}`.trim())
+          .filter(Boolean),
+      ),
+    );
+    const lines = [
+      `Company context (this statement belongs to this company):`,
+      `- Company name: ${company?.name || 'unknown'}`,
+      `- Manager/owner (МОЛ): ${company?.molName || 'unknown'}`,
+      `- Own bank account: ${company?.iban || 'unknown'}${company?.bankName ? ` (${company.bankName})` : ''}`,
+      `- People who use the system for this company: ${people.length ? people.join(', ') : 'unknown'}`,
+      `Names may appear transliterated in Latin letters on the statement (e.g. "Svetlozar" for "Светлозар").`,
+    ];
+    return lines.join('\n');
   }
 
   // Съгласувателните tool-ове — ВИНАГИ ограничени до companyId
@@ -940,24 +993,45 @@ export class DocumentAIService {
     companyId: string,
     raw: { rows?: ReconcileRow[]; confidence?: number },
   ): Promise<ReconcileResult> {
-    const rows: ReconcileRow[] = (raw.rows || []).map((row) => ({
-      date: row.date || null,
-      counterparty: row.counterparty || null,
-      description: row.description || null,
-      amount: Math.abs(Number(row.amount) || 0),
-      direction: row.direction === 'out' ? 'out' : 'in',
-      match: row.match?.id
-        ? {
-            type: row.match.type,
-            id: row.match.id,
-            label: row.match.label || '',
-            amount: row.match.amount ?? null,
-            confidence: row.match.confidence ?? 0,
-          }
-        : null,
-    }));
+    const rows: ReconcileRow[] = (raw.rows || []).map((row) => {
+      const nonRecordLabel = row.match
+        ? NON_RECORD_MATCH_LABELS[row.match.type]
+        : undefined;
+      const match: ReconcileRowMatch | null =
+        row.match && (row.match.id || nonRecordLabel)
+          ? {
+              type: row.match.type,
+              // Редове „без документ по дизайн" нямат запис → id = типът
+              id: nonRecordLabel ? row.match.type : row.match.id,
+              label: row.match.label || nonRecordLabel || '',
+              amount: row.match.amount ?? null,
+              confidence: row.match.confidence ?? 0,
+            }
+          : null;
+      return {
+        date: row.date || null,
+        counterparty: row.counterparty || null,
+        description: row.description || null,
+        amount: Math.abs(Number(row.amount) || 0),
+        direction: row.direction === 'out' ? 'out' : 'in',
+        match,
+      };
+    });
 
-    // Потвърдени+ поръчки без пълно плащане, невидени в извлечението
+    // Периодът на извлечението = min–max дата от разчетените редове
+    const rowDates = rows
+      .map((r) => (r.date ? new Date(r.date) : null))
+      .filter((d): d is Date => !!d && !Number.isNaN(d.getTime()));
+    const periodEnd =
+      rowDates.length > 0
+        ? new Date(Math.max(...rowDates.map((d) => d.getTime())))
+        : null;
+    if (periodEnd) periodEnd.setHours(23, 59, 59, 999);
+
+    // Потвърдени+ поръчки без пълно плащане, невидени в извлечението.
+    // Само с банков превод — наложен платеж, в брой, карта и пощенски
+    // превод не идват като отделен ред по банка. И само създадени преди
+    // края на извлечението — по-нови няма как да са в него.
     const matchedOrderIds = new Set(
       rows.filter((r) => r.match?.type === 'order').map((r) => r.match!.id),
     );
@@ -966,6 +1040,8 @@ export class DocumentAIService {
         companyId,
         status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
         paymentStatus: { in: ['PENDING', 'PARTIAL'] },
+        paymentMethod: 'BANK_TRANSFER',
+        ...(periodEnd && { orderDate: { lte: periodEnd } }),
       },
       select: {
         id: true,
@@ -980,20 +1056,16 @@ export class DocumentAIService {
     });
 
     // Обратната проверка: разходи в периода на извлечението без ред в него.
-    // Периодът = min–max дата от разчетените редове; без дати няма как да се
-    // прецени кой разход е „трябвало" да е вътре → пропуска се.
+    // Без дати няма как да се прецени кой разход е „трябвало" да е вътре →
+    // пропуска се.
     const matchedExpenseIds = new Set(
       rows.filter((r) => r.match?.type === 'expense').map((r) => r.match!.id),
     );
-    const rowDates = rows
-      .map((r) => (r.date ? new Date(r.date) : null))
-      .filter((d): d is Date => !!d && !Number.isNaN(d.getTime()));
     let unmatchedExpenses: ReconcileResult['unmatchedExpenses'] = [];
     let unmatchedDeliveries: ReconcileResult['unmatchedDeliveries'] = [];
-    if (rowDates.length > 0) {
+    if (periodEnd) {
       const from = new Date(Math.min(...rowDates.map((d) => d.getTime())));
-      const to = new Date(Math.max(...rowDates.map((d) => d.getTime())));
-      to.setHours(23, 59, 59, 999);
+      const to = periodEnd;
       const inPeriod = { gte: from, lte: to };
       const candidates = await this.prisma.expense.findMany({
         where: {
@@ -1072,7 +1144,9 @@ export class DocumentAIService {
         take: 60,
       });
       unmatchedDeliveries = deliveryPayments
-        .filter((p) => p.goodsReceipt && !matchedDeliveryIds.has(p.goodsReceipt.id))
+        .filter(
+          (p) => p.goodsReceipt && !matchedDeliveryIds.has(p.goodsReceipt.id),
+        )
         .slice(0, 30)
         .map((p) => ({
           id: p.goodsReceipt!.id,
