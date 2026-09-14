@@ -4,8 +4,9 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 
 // Публични регистрови данни за фирма по ЕИК — за „Попълни по ЕИК" във
-// формите за клиент/лийд. Само влязъл потребител на компанията; самите
-// форми са зад правата на съответния модул.
+// формите за клиент/лийд, доставчик (Доставчици, Доставки, Разходи) и
+// фирма-клиент в Администрация. Само влязъл потребител на компанията;
+// самите форми са зад правата на съответния модул.
 @Controller('companies/:companyId/company-lookup')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard)
 export class CompanyLookupController {

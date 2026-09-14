@@ -1,0 +1,73 @@
+{
+  "deedStatus": 1,
+  "companyName": "Електрик експрес",
+  "uic": "207510146",
+  "legalForm": 10,
+  "fullName": "\"Електрик експрес\" ЕООД",
+  "sections": [
+    {
+      "nameCode": "CR_GL_GENERAL_STATUS_L",
+      "subDeeds": [
+        {
+          "subDeedIsClosed": false,
+          "groups": [
+            {
+              "nameCode": "CR_GL_MAIN_CIRCUMSTANCES_L",
+              "fields": [
+                {
+                  "nameCode": "CR_F_1_L",
+                  "htmlData": "<div class='record-container record-container--preview'><p class='field-text'>207510146</p></div>"
+                },
+                {
+                  "nameCode": "CR_F_2_L",
+                  "htmlData": "<div class='record-container record-container--preview'><p class='field-text'>Електрик експрес</p></div>"
+                },
+                {
+                  "nameCode": "CR_F_3_L",
+                  "htmlData": "<div class='record-container record-container--preview'><p class='field-text'>Еднолично дружество с ограничена отговорност</p></div>"
+                },
+                {
+                  "nameCode": "CR_F_4_L",
+                  "htmlData": "<div class='record-container record-container--preview'><p class='field-text'>‘Electric express’ S. P. Ltd.</p></div>"
+                },
+                {
+                  "nameCode": "CR_F_5_L",
+                  "htmlData": "<div class='record-container record-container--preview'><p class='field-text'>Държава: БЪЛГАРИЯ<br/>Област: София (столица), Община: Столична<br />Населено място: гр. София, п.к. 1700<br />р-н Витоша<br/>бул./ул. Леа Иванова № 2, вх. Б, ет. 5, ап. 12 Адрес на електронна поща: <a style=\"text-decoration:underline;color:black\" href=\"mailto:office@example.bg\">office@example.bg</a></p></div>"
+                },
+                {
+                  "nameCode": "CR_F_6_L",
+                  "htmlData": "<div class='record-container record-container--preview'><p class='field-text'>Внос и износ на стоки в България, страни-членки на Европейския съюз и трети страни; електронна търговия, дейност, свързана с управление на онлайн магазин; покупко-продажба на стоки на едро и дребно; както и всяка друга дейност, позволена от закона.</p></div>"
+                },
+                {
+                  "nameCode": "CR_F_6a_L",
+                  "htmlData": "<div class='record-container record-container--preview'><p class='field-text'>Група по НКИД: 47.91<br/>Клас по НКИД: Търговия на дребно чрез поръчки по пощата, телефона или Интернет</p></div>"
+                },
+                {
+                  "nameCode": "CR_F_7_L",
+                  "htmlData": "<div class='record-container record-container--preview'><p class='field-text'>Иван Петров Иванов, Държава: БЪЛГАРИЯ</p></div>"
+                },
+                {
+                  "nameCode": "CR_F_23_L",
+                  "htmlData": "<div class='record-container record-container--preview'><p class='field-text'>Иван Петров Иванов, Държава: БЪЛГАРИЯ</p></div>"
+                }
+              ]
+            },
+            {
+              "nameCode": "CR_GL_FUND_L",
+              "fields": [
+                {
+                  "nameCode": "CR_F_31_L",
+                  "htmlData": "<div class='record-container record-container--preview'><p class='field-text'>12.27 €</p></div>"
+                },
+                {
+                  "nameCode": "CR_F_32_L",
+                  "htmlData": "<div class='record-container record-container--preview'><p class='field-text'>12.27 €</p></div>"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
