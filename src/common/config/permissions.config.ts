@@ -181,6 +181,8 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
               { key: 'createdAt', labelKey: 'modules.erp.createdAt' },
               { key: 'category', labelKey: 'modules.erp.category' },
               { key: 'price', labelKey: 'modules.erp.price' },
+              // Последна доставна стойност (с разходите) — чувствителна колона
+              { key: 'landedCost', labelKey: 'modules.erp.lastLandedCost' },
               { key: 'stock', labelKey: 'modules.erp.stock' },
               { key: 'status', labelKey: 'common.status' },
               { key: 'createdBy', labelKey: 'modules.erp.createdBy' },
@@ -454,6 +456,9 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
               { key: 'quantity', labelKey: 'modules.erp.quantity' },
               { key: 'reserved', labelKey: 'modules.erp.reserved' },
               { key: 'available', labelKey: 'modules.erp.available' },
+              // Себестойност на партида/сериен номер и стойност на наличността —
+              // чувствителна колона, може да се скрие за складовия персонал
+              { key: 'unitCost', labelKey: 'modules.erp.costPrice' },
             ],
           },
         ],

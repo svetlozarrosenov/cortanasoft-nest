@@ -17,11 +17,11 @@ import {
 import { Prisma, GoodsReceiptStatus } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
 import {
+  computeUnitCosts,
   generateReceiptNumber,
   recalcReceiptState,
   RECEIPT_INCLUDE,
 } from './receipt-helpers';
-
 
 // Valid delivery-status transitions (payment is tracked separately via the
 // payment ledger, mirroring orders).
@@ -165,6 +165,8 @@ export class GoodsReceiptsService {
               supplierId: dto.supplierId || undefined,
               createdById: userId,
               goodsReceiptId: receipt.id,
+              includeInStockCost: !!exp.includeInStockCost,
+              stockCostAllocation: exp.stockCostAllocation ?? undefined,
             },
           });
         }
@@ -325,7 +327,9 @@ export class GoodsReceiptsService {
           supplier: true,
           currency: true,
           // Продажбата при дропшип — етикет + линк в списъка
-          order: { select: { id: true, orderNumber: true, customerName: true } },
+          order: {
+            select: { id: true, orderNumber: true, customerName: true },
+          },
           createdBy: {
             select: { id: true, firstName: true, lastName: true },
           },
@@ -505,6 +509,8 @@ export class GoodsReceiptsService {
                 companyId,
                 supplierId: dto.supplierId ?? receipt.supplierId ?? undefined,
                 goodsReceiptId: id,
+                includeInStockCost: !!exp.includeInStockCost,
+                stockCostAllocation: exp.stockCostAllocation ?? undefined,
               },
             });
           }
@@ -587,11 +593,20 @@ export class GoodsReceiptsService {
       }
       return this.prisma.$transaction(async (tx) => {
         if ((isDelivering || isCancellingDelivered) && receipt.orderId) {
+          // Себестойност във валутата на компанията, с дела от разходите
+          // към доставката, които влизат в стойността на стоката
+          const unitCosts = computeUnitCosts(receipt.items, receipt.expenses);
+          if (isDelivering) {
+            await this.updateLastLandedCosts(
+              tx,
+              receipt.items,
+              unitCosts,
+              deliveredAtOverride ? new Date(deliveredAtOverride) : new Date(),
+            );
+          }
           for (const item of receipt.items) {
             const unitCost = isDelivering
-              ? Math.round(
-                  Number(item.unitPrice) * Number(item.exchangeRate || 1) * 100,
-                ) / 100
+              ? (unitCosts.get(item.id) ?? 0)
               : null;
             await tx.orderItem.updateMany({
               where: {
@@ -674,12 +689,24 @@ export class GoodsReceiptsService {
           );
         });
 
+        // Себестойност на единица ВЪВ ВАЛУТАТА НА КОМПАНИЯТА (цена × курс
+        // на реда) плюс дела от разходите към доставката с includeInStockCost.
+        // Дропшип пътят по-горе прави същото за OrderItem.unitCost.
+        const unitCosts = computeUnitCosts(receipt.items, receipt.expenses);
+        await this.updateLastLandedCosts(
+          tx,
+          receipt.items,
+          unitCosts,
+          deliveredAtOverride ? new Date(deliveredAtOverride) : new Date(),
+        );
+
         for (const item of receipt.items) {
           const product = await tx.product.findUnique({
             where: { id: item.productId },
           });
 
           if (!product || product.type === 'SERVICE') continue;
+          const unitCost = unitCosts.get(item.id) ?? 0;
 
           if (product.type === 'SERIAL') {
             const provided = serialsMap.get(item.id) ?? [];
@@ -707,7 +734,7 @@ export class GoodsReceiptsService {
                 data: {
                   serialNumber,
                   status: 'IN_STOCK',
-                  unitCost: item.unitPrice,
+                  unitCost,
                   companyId,
                   productId: item.productId,
                   locationId,
@@ -741,7 +768,7 @@ export class GoodsReceiptsService {
                 batchNumber,
                 quantity: item.quantity,
                 initialQty: item.quantity,
-                unitCost: item.unitPrice,
+                unitCost,
                 manufacturingDate,
                 expiryDate,
                 companyId,
@@ -847,6 +874,40 @@ export class GoodsReceiptsService {
   // Build the `stock.changed` event payload for a batch of products and
   // hand it off to the webhook dispatcher. Reads current inventory from
   // InventoryBatch totals so subscribers get the post-update number.
+  /**
+   * „Последна доставна стойност" в картона на продукта: при потвърдена
+   * доставка Product.lastLandedCost става доставната стойност за единица (с
+   * дела от разходите, във валутата на компанията). Справочна колона в
+   * Продукти. Покупната цена (purchasePrice) НЕ се пипа — тя е цената към
+   * доставчика и предпопълва следващата доставка. Складът си пази стойността
+   * на всяка доставка (FIFO). Услугите се пропускат; при отмяна не се връща.
+   */
+  private async updateLastLandedCosts(
+    tx: Prisma.TransactionClient,
+    items: {
+      id: string;
+      productId: string;
+      product?: { type: string } | null;
+    }[],
+    unitCosts: Map<string, number>,
+    at: Date,
+  ) {
+    // При няколко реда с един продукт последният ред печели
+    const byProduct = new Map<string, number>();
+    for (const item of items) {
+      if (item.product?.type === 'SERVICE') continue;
+      const cost = unitCosts.get(item.id);
+      if (cost == null || cost <= 0) continue;
+      byProduct.set(item.productId, cost);
+    }
+    for (const [productId, lastLandedCost] of byProduct) {
+      await tx.product.update({
+        where: { id: productId },
+        data: { lastLandedCost, lastLandedCostAt: at },
+      });
+    }
+  }
+
   private async dispatchStockChanged(
     companyId: string,
     productIds: string[],

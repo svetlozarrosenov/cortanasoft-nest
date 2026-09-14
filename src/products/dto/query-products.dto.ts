@@ -44,7 +44,16 @@ export class QueryProductsDto {
 
   // Бял списък — sortBy отива директно в Prisma orderBy
   @IsOptional()
-  @IsIn(['createdAt', 'updatedAt', 'name', 'sku', 'salePrice', 'purchasePrice', 'type'])
+  @IsIn([
+    'createdAt',
+    'updatedAt',
+    'name',
+    'sku',
+    'salePrice',
+    'purchasePrice',
+    'lastLandedCost',
+    'type',
+  ])
   sortBy?: string = 'createdAt';
 
   @IsOptional()

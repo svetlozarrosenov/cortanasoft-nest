@@ -138,6 +138,20 @@ export class InventoryService {
       this.prisma.inventoryBatch.count({ where }),
     ]);
 
+    // Стойност на наличността по филтъра (всички страници): Σ количество ×
+    // себестойност. Празните партиди дават 0 сами по себе си.
+    const valueRows = await this.prisma.inventoryBatch.findMany({
+      where,
+      select: { quantity: true, unitCost: true },
+    });
+    const totalValue =
+      Math.round(
+        valueRows.reduce(
+          (s, b) => s + Number(b.quantity) * Number(b.unitCost),
+          0,
+        ) * 100,
+      ) / 100;
+
     return {
       data,
       meta: {
@@ -145,6 +159,7 @@ export class InventoryService {
         page,
         limit,
         totalPages: Math.ceil(total / limit),
+        totalValue,
       },
     };
   }
@@ -480,6 +495,7 @@ export class InventoryService {
           select: {
             id: true,
             quantity: true,
+            unitCost: true,
             locationId: true,
             location: {
               select: {
@@ -497,6 +513,7 @@ export class InventoryService {
           },
           select: {
             id: true,
+            unitCost: true,
             locationId: true,
             location: {
               select: {
@@ -524,10 +541,18 @@ export class InventoryService {
       >();
 
       let totalQuantity: number;
+      // Стойност на наличността на продукта (Σ количество × себестойност) и
+      // средна претеглена себестойност — за обикновени продукти това е
+      // мястото, където се вижда доставната стойност след заприходяване
+      let stockValue = 0;
 
       if (product.type === 'SERIAL') {
         // For SERIAL products: count InventorySerial records with IN_STOCK status
         totalQuantity = product.inventorySerials.length;
+        stockValue = product.inventorySerials.reduce(
+          (sum, s) => sum + Number(s.unitCost),
+          0,
+        );
 
         for (const serial of product.inventorySerials) {
           const existing = locationMap.get(serial.locationId);
@@ -544,6 +569,10 @@ export class InventoryService {
         // For PRODUCT, BATCH — sum batch quantities
         totalQuantity = product.inventoryBatches.reduce(
           (sum, batch) => sum + Number(batch.quantity),
+          0,
+        );
+        stockValue = product.inventoryBatches.reduce(
+          (sum, batch) => sum + Number(batch.quantity) * Number(batch.unitCost),
           0,
         );
 
@@ -588,6 +617,11 @@ export class InventoryService {
           product.type === 'SERIAL'
             ? product.inventorySerials.length
             : product.inventoryBatches.length,
+        stockValue: Math.round(stockValue * 100) / 100,
+        avgUnitCost:
+          totalQuantity > 0
+            ? Math.round((stockValue / totalQuantity) * 100) / 100
+            : null,
       };
     });
 
@@ -611,6 +645,37 @@ export class InventoryService {
       ? filtered.slice((page - 1) * limit, page * limit)
       : filtered;
 
+    // Обща стойност на наличността по филтъра за продукти/локация, независимо
+    // от страницата: партиди (qty × себестойност) + серийни номера в склада
+    const [batchRows, serialAgg] = await Promise.all([
+      this.prisma.inventoryBatch.findMany({
+        where: {
+          companyId,
+          product: productWhere,
+          ...(locationId && { locationId }),
+        },
+        select: { quantity: true, unitCost: true },
+      }),
+      this.prisma.inventorySerial.aggregate({
+        where: {
+          companyId,
+          status: 'IN_STOCK',
+          product: productWhere,
+          ...(locationId && { locationId }),
+        },
+        _sum: { unitCost: true },
+      }),
+    ]);
+    const totalValue =
+      Math.round(
+        (batchRows.reduce(
+          (sum, b) => sum + Number(b.quantity) * Number(b.unitCost),
+          0,
+        ) +
+          Number(serialAgg._sum.unitCost || 0)) *
+          100,
+      ) / 100;
+
     return {
       data: paginatedData,
       meta: {
@@ -618,6 +683,7 @@ export class InventoryService {
         page,
         limit,
         totalPages: Math.ceil(total / limit),
+        totalValue,
       },
     };
   }
@@ -701,6 +767,14 @@ export class InventoryService {
       this.prisma.inventorySerial.count({ where }),
     ]);
 
+    // Стойност на наличността: само серийните номера, които са в склада
+    const valueAgg = await this.prisma.inventorySerial.aggregate({
+      where: { ...where, status: 'IN_STOCK' },
+      _sum: { unitCost: true },
+    });
+    const totalValue =
+      Math.round(Number(valueAgg._sum.unitCost || 0) * 100) / 100;
+
     return {
       data,
       meta: {
@@ -708,6 +782,7 @@ export class InventoryService {
         page,
         limit,
         totalPages: Math.ceil(total / limit),
+        totalValue,
       },
     };
   }

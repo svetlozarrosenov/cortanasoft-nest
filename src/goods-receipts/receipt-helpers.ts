@@ -49,6 +49,71 @@ export const RECEIPT_INCLUDE = {
   _count: { select: { items: true } },
 };
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+export interface UnitCostItem {
+  id: string;
+  quantity: Prisma.Decimal | number;
+  unitPrice: Prisma.Decimal | number;
+  exchangeRate: Prisma.Decimal | number | null;
+  product?: { type: string } | null;
+}
+export interface UnitCostExpense {
+  totalAmount: Prisma.Decimal | number;
+  includeInStockCost: boolean;
+  /** VALUE (по подразбиране) или QUANTITY */
+  stockCostAllocation?: string | null;
+}
+
+/**
+ * Себестойност на единица за всеки ред от доставката, ВЪВ ВАЛУТАТА НА
+ * КОМПАНИЯТА:
+ *   база на реда   = количество × покупна цена × курс на реда
+ *   landed cost    = Σ разходи към доставката с includeInStockCost, всеки
+ *                    със свой метод: VALUE — дял ∝ база на реда (при нулева
+ *                    обща база — по количество); QUANTITY — дял ∝ количество
+ *   unitCost       = (база + дял) / количество, закръглено до стотинка
+ * Услугите не влизат в склада и не поемат дял от разходите.
+ */
+export function computeUnitCosts(
+  items: UnitCostItem[],
+  expenses: UnitCostExpense[],
+): Map<string, number> {
+  let landedByValue = 0;
+  let landedByQty = 0;
+  for (const e of expenses) {
+    if (!e.includeInStockCost) continue;
+    if (e.stockCostAllocation === 'QUANTITY') landedByQty += Number(e.totalAmount);
+    else landedByValue += Number(e.totalAmount);
+  }
+  const base = (it: UnitCostItem) =>
+    Number(it.quantity) * Number(it.unitPrice) * Number(it.exchangeRate || 1);
+  const stockItems = items.filter((it) => it.product?.type !== 'SERVICE');
+  const totalBase = stockItems.reduce((s, it) => s + base(it), 0);
+  const totalQty = stockItems.reduce((s, it) => s + Number(it.quantity), 0);
+  // Разход „по стойност" при безплатна стока няма база → пада по количество
+  if (totalBase <= 0) {
+    landedByQty += landedByValue;
+    landedByValue = 0;
+  }
+
+  const out = new Map<string, number>();
+  for (const it of items) {
+    const qty = Number(it.quantity);
+    const lineBase = base(it);
+    let share = 0;
+    if (it.product?.type !== 'SERVICE') {
+      if (landedByValue > 0 && totalBase > 0) {
+        share += (landedByValue * lineBase) / totalBase;
+      }
+      if (landedByQty > 0 && totalQty > 0) {
+        share += (landedByQty * qty) / totalQty;
+      }
+    }
+    out.set(it.id, qty > 0 ? round2((lineBase + share) / qty) : 0);
+  }
+  return out;
+}
 
 /** Следващ номер GR-YYYY-NNNNN за компанията (викай вътре в транзакция). */
 export async function generateReceiptNumber(
@@ -85,7 +150,12 @@ export async function recalcReceiptState(
 ): Promise<void> {
   const items = await tx.goodsReceiptItem.findMany({
     where: { goodsReceiptId: receiptId },
-    select: { quantity: true, unitPrice: true, exchangeRate: true, vatRate: true },
+    select: {
+      quantity: true,
+      unitPrice: true,
+      exchangeRate: true,
+      vatRate: true,
+    },
   });
   const itemsTotal = items.reduce((sum, it) => {
     const base =
@@ -99,7 +169,9 @@ export async function recalcReceiptState(
   const total =
     Math.round((itemsTotal + Number(expAgg._sum.totalAmount || 0)) * 100) / 100;
 
-  const { paid, hasRefund } = await sumPayments(tx, { goodsReceiptId: receiptId });
+  const { paid, hasRefund } = await sumPayments(tx, {
+    goodsReceiptId: receiptId,
+  });
   const paymentStatus = derivePaymentStatus(paid, total, hasRefund);
 
   await tx.goodsReceipt.update({

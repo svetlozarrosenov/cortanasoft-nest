@@ -9,9 +9,10 @@ import {
   Min,
   IsNotEmpty,
   IsEnum,
+  IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ExpenseCategory } from '@prisma/client';
+import { ExpenseCategory, StockCostAllocation } from '@prisma/client';
 
 export class CreateGoodsReceiptItemDto {
   @IsString()
@@ -39,7 +40,6 @@ export class CreateGoodsReceiptItemDto {
   @IsOptional()
   @Min(0.000001)
   exchangeRate?: number;
-
 }
 
 export class CreateGoodsReceiptExpenseDto {
@@ -62,6 +62,16 @@ export class CreateGoodsReceiptExpenseDto {
   @IsOptional()
   @Min(0.000001)
   exchangeRate?: number;
+
+  // Влиза ли в себестойността на стоката (виж Expense.includeInStockCost)
+  @IsBoolean()
+  @IsOptional()
+  includeInStockCost?: boolean;
+
+  // По стойност (по подразбиране) или по количество
+  @IsEnum(StockCostAllocation)
+  @IsOptional()
+  stockCostAllocation?: StockCostAllocation;
 }
 
 export class CreateGoodsReceiptDto {
@@ -118,4 +128,3 @@ export class CreateGoodsReceiptDto {
   @Type(() => CreateGoodsReceiptExpenseDto)
   expenses?: CreateGoodsReceiptExpenseDto[];
 }
-
