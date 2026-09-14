@@ -116,6 +116,11 @@ export class CreateGoodsReceiptDto {
   @IsOptional()
   attachmentUrl?: string;
 
+  // ВОП: фактурата е без ДДС — сървърът нулира ставката на всички редове
+  @IsBoolean()
+  @IsOptional()
+  reverseChargeVat?: boolean;
+
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

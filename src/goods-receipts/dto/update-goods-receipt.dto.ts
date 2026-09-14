@@ -6,9 +6,13 @@ import {
   IsArray,
   ValidateNested,
   Min,
+  IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CreateGoodsReceiptItemDto, CreateGoodsReceiptExpenseDto } from './create-goods-receipt.dto';
+import {
+  CreateGoodsReceiptItemDto,
+  CreateGoodsReceiptExpenseDto,
+} from './create-goods-receipt.dto';
 
 export class UpdateGoodsReceiptDto {
   @IsDateString()
@@ -47,6 +51,10 @@ export class UpdateGoodsReceiptDto {
   @IsString()
   @IsOptional()
   attachmentUrl?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  reverseChargeVat?: boolean;
 
   @IsArray()
   @IsOptional()

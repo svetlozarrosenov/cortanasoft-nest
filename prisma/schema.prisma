@@ -1252,6 +1252,10 @@ model GoodsReceipt {
   invoiceDate   DateTime? // Дата на фактура
   exchangeRate  Decimal            @default(1) @db.Decimal(10, 6) // Курс към валутата на компанията
   attachmentUrl String? // URL към сканирана фактура (Firebase Storage)
+  // Доставка от ЕС без ДДС (ВОП, самоначисляване с протокол от счетоводството):
+  // фактурата е нетна, ДДС по всички редове е 0 и общата сума = платеното.
+  // Не е за внос от трета страна — там ДДС/мито са разход по доставката.
+  reverseChargeVat Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -123,12 +123,16 @@ export class GoodsReceiptsService {
       supplierId: dto.supplierId || undefined,
       createdById: userId,
       receiptDate: dto.receiptDate ? new Date(dto.receiptDate) : new Date(),
+      reverseChargeVat: !!dto.reverseChargeVat,
       items: {
         create: dto.items.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          vatRate: item.vatRate ?? (company.vatNumber ? 20 : 0),
+          // ВОП: без ДДС по редовете, независимо какво е пратил клиентът
+          vatRate: dto.reverseChargeVat
+            ? 0
+            : (item.vatRate ?? (company.vatNumber ? 20 : 0)),
           currencyId: item.currencyId || currencyId,
           exchangeRate: item.exchangeRate ?? 1,
         })),
@@ -460,6 +464,7 @@ export class GoodsReceiptsService {
         }
 
         const currencyId = dto.currencyId || receipt.currencyId;
+        const reverseCharge = dto.reverseChargeVat ?? receipt.reverseChargeVat;
 
         // Delete existing items
         await tx.goodsReceiptItem.deleteMany({
@@ -474,7 +479,9 @@ export class GoodsReceiptsService {
               productId: item.productId,
               quantity: item.quantity,
               unitPrice: item.unitPrice,
-              vatRate: item.vatRate ?? (company?.vatNumber ? 20 : 0),
+              vatRate: reverseCharge
+                ? 0
+                : (item.vatRate ?? (company?.vatNumber ? 20 : 0)),
               currencyId: item.currencyId || currencyId,
               exchangeRate: item.exchangeRate ?? 1,
             },
@@ -540,8 +547,18 @@ export class GoodsReceiptsService {
           ...(dto.exchangeRate !== undefined && {
             exchangeRate: dto.exchangeRate,
           }),
+          ...(dto.reverseChargeVat !== undefined && {
+            reverseChargeVat: dto.reverseChargeVat,
+          }),
         },
       });
+      // ВОП включен без нови редове → нулираме ДДС на съществуващите
+      if (dto.reverseChargeVat === true && !(dto.items && dto.items.length)) {
+        await tx.goodsReceiptItem.updateMany({
+          where: { goodsReceiptId: id },
+          data: { vatRate: 0 },
+        });
+      }
 
       // Items/expenses may have changed → refresh totalAmount + payment status.
       await this.recalcReceiptState(tx, id);
