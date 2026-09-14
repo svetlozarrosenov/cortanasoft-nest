@@ -4,9 +4,10 @@ import { CompanyOrdersController } from './company-orders.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { WarrantiesModule } from '../warranties/warranties.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { DirectDeliveriesModule } from '../goods-receipts/direct-deliveries.module';
 
 @Module({
-  imports: [PrismaModule, WarrantiesModule, PaymentsModule],
+  imports: [PrismaModule, WarrantiesModule, PaymentsModule, DirectDeliveriesModule],
   controllers: [CompanyOrdersController],
   providers: [OrdersService],
   exports: [OrdersService],

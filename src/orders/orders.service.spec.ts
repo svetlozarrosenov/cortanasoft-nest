@@ -6,6 +6,7 @@ import { WarrantiesService } from '../warranties/warranties.service';
 import { PaymentsService } from '../payments/payments.service';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import { PushNotificationsService } from '../push-notifications/push-notifications.service';
+import { DirectDeliveriesService } from '../goods-receipts/direct-deliveries.service';
 
 // Collaborator services — no-op мокове; тестовете покриват ядрото на OrdersService
 const mockWarranties = {
@@ -84,6 +85,10 @@ describe('OrdersService', () => {
         { provide: PaymentsService, useValue: mockPayments },
         { provide: WebhookDispatcherService, useValue: mockWebhooks },
         { provide: PushNotificationsService, useValue: mockPush },
+        {
+          provide: DirectDeliveriesService,
+          useValue: { ensureForOrder: jest.fn(), cancelUnsentForOrder: jest.fn() },
+        },
       ],
     }).compile();
     service = module.get<OrdersService>(OrdersService);

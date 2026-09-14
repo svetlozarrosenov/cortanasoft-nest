@@ -1268,6 +1268,9 @@ model GoodsReceipt {
   directDelivery Boolean @default(false)
   orderId        String?
   order          Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  // Кога заявката е изпратена на доставчика (само при directDelivery).
+  // null = още е „заявка" (чака доставчик/цени); стъпка 2 от 3 в UI.
+  sentToSupplierAt DateTime?
 
   createdById String?
   createdBy   User?   @relation("GoodsReceiptCreator", fields: [createdById], references: [id], onDelete: SetNull)

@@ -10,12 +10,17 @@ import {
   Query,
 } from '@nestjs/common';
 import { GoodsReceiptsService } from './goods-receipts.service';
+import { DirectDeliveriesService } from './direct-deliveries.service';
 import { PaymentsService } from '../payments/payments.service';
 import { CreatePaymentDto, UpdatePaymentDto } from '../payments/dto';
 import {
   CreateGoodsReceiptDto,
   CreateDirectDeliveryDto,
   UpdateDirectDeliveryStatusDto,
+  UpdateDirectDeliveryDto,
+  SetDirectDeliverySentDto,
+  SplitDirectDeliveryDto,
+  EnsureDirectDeliveryDto,
   UpdateGoodsReceiptDto,
   QueryGoodsReceiptsDto,
   UpdateGoodsReceiptStatusDto,
@@ -28,6 +33,7 @@ import {
   RequireCreate,
   RequireEdit,
   RequireDelete,
+  RequireAnyPermission,
 } from '../common/guards/permissions.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
@@ -37,6 +43,7 @@ export class CompanyGoodsReceiptsController {
   constructor(
     private readonly goodsReceiptsService: GoodsReceiptsService,
     private readonly paymentsService: PaymentsService,
+    private readonly directDeliveries: DirectDeliveriesService,
   ) {}
 
   @Post()
@@ -65,8 +72,66 @@ export class CompanyGoodsReceiptsController {
     );
   }
 
+  // Дропшип заявка (Склад > Доставки или екранът на продажбата): складът я
+  // обработва с правото за доставки, продавачът я вижда с erp.directDelivery.
+  @Post('direct/ensure')
+  @RequireAnyPermission(
+    { module: 'warehouse', page: 'goodsReceipts', action: 'create' },
+    { module: 'erp', page: 'directDelivery', action: 'view' },
+  )
+  ensureDirect(
+    @Param('companyId') companyId: string,
+    @CurrentUser() user: any,
+    @Body() dto: EnsureDirectDeliveryDto,
+  ) {
+    return this.directDeliveries.ensureForOrder(companyId, dto.orderId, user.id);
+  }
+
+  @Patch('direct/:id')
+  @RequireAnyPermission(
+    { module: 'warehouse', page: 'goodsReceipts', action: 'edit' },
+    { module: 'erp', page: 'directDelivery', action: 'view' },
+  )
+  updateDirect(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateDirectDeliveryDto,
+  ) {
+    return this.directDeliveries.update(companyId, id, dto);
+  }
+
+  @Patch('direct/:id/sent')
+  @RequireAnyPermission(
+    { module: 'warehouse', page: 'goodsReceipts', action: 'edit' },
+    { module: 'erp', page: 'directDelivery', action: 'view' },
+  )
+  setDirectSent(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() dto: SetDirectDeliverySentDto,
+  ) {
+    return this.directDeliveries.setSent(companyId, id, dto.sent);
+  }
+
+  @Post('direct/:id/split')
+  @RequireAnyPermission(
+    { module: 'warehouse', page: 'goodsReceipts', action: 'edit' },
+    { module: 'erp', page: 'directDelivery', action: 'view' },
+  )
+  splitDirect(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+    @Body() dto: SplitDirectDeliveryDto,
+  ) {
+    return this.directDeliveries.split(companyId, id, dto.productIds, user.id);
+  }
+
   @Patch('direct/:id/status')
-  @RequireView('erp', 'directDelivery')
+  @RequireAnyPermission(
+    { module: 'warehouse', page: 'goodsReceipts', action: 'edit' },
+    { module: 'erp', page: 'directDelivery', action: 'view' },
+  )
   updateDirectStatus(
     @Param('companyId') companyId: string,
     @Param('id') id: string,

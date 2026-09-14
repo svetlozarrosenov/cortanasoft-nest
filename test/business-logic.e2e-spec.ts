@@ -23,6 +23,7 @@ const ordersService = new OrdersService(
   { syncPaymentsFromStatus: noop } as any,
   { emitOrderChanged: noop } as any,
   {} as any,
+  { ensureForOrder: noop, cancelUnsentForOrder: noop } as any,
 );
 
 // Уникален prefix за тестовите данни, за да не конфликтуват

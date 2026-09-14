@@ -1,5 +1,5 @@
-import { IsString, IsOptional, IsEnum, IsDateString, IsInt, Min, Max, IsIn } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsString, IsOptional, IsEnum, IsDateString, IsInt, Min, Max, IsIn, IsBoolean } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 import { GoodsReceiptStatus } from '@prisma/client';
 
 export class QueryGoodsReceiptsDto {
@@ -18,6 +18,18 @@ export class QueryGoodsReceiptsDto {
   @IsString()
   @IsOptional()
   supplierId?: string;
+
+  // Тип на доставката: складова / дропшип (към продажба) / всички
+  @IsOptional()
+  @IsString()
+  @IsIn(['warehouse', 'direct'])
+  type?: 'warehouse' | 'direct';
+
+  // Само дропшип заявки без доставчик (чакат обработка)
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  awaitingSupplier?: boolean;
 
   @IsDateString()
   @IsOptional()

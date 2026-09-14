@@ -45,6 +45,25 @@ const canDirectDelivery = (user: any) =>
     'view',
   );
 
+// Дропшип заявките (доставчик, покупни цени) в отговора на поръчката са само
+// за роли с erp.directDelivery — останалите получават поръчката без тях.
+function stripDirectDeliveries<T>(user: any, result: T): T {
+  if (canDirectDelivery(user) || !result || typeof result !== 'object') {
+    return result;
+  }
+  const strip = (o: any) => {
+    if (o && typeof o === 'object' && 'goodsReceipts' in o) {
+      const { goodsReceipts: _omit, ...rest } = o;
+      void _omit;
+      return rest;
+    }
+    return o;
+  };
+  const r: any = result;
+  if (Array.isArray(r.data)) return { ...r, data: r.data.map(strip) };
+  return strip(r);
+}
+
 @Controller('companies/:companyId/orders')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)
 export class CompanyOrdersController {
@@ -68,7 +87,9 @@ export class CompanyOrdersController {
         'Нямате право да създавате редове с директна доставка',
       );
     }
-    return this.ordersService.create(companyId, user.id, dto);
+    return this.ordersService
+      .create(companyId, user.id, dto)
+      .then((o) => stripDirectDeliveries(user, o));
   }
 
   @Get()
@@ -76,8 +97,11 @@ export class CompanyOrdersController {
   findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryOrdersDto,
+    @CurrentUser() user: any
   ) {
-    return this.ordersService.findAll(companyId, query);
+    return this.ordersService
+      .findAll(companyId, query)
+      .then((r) => stripDirectDeliveries(user, r));
   }
 
   // Бройки за табовете над списъка (Отворени / За изпращане / Неплатени / Всички)
@@ -146,8 +170,14 @@ export class CompanyOrdersController {
 
   @Get(':id')
   @RequireView('erp', 'orders')
-  findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.ordersService.findOne(companyId, id);
+  findOne(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.ordersService
+      .findOne(companyId, id)
+      .then((o) => stripDirectDeliveries(user, o));
   }
 
   @Patch(':id')
@@ -159,27 +189,47 @@ export class CompanyOrdersController {
     @Body() dto: UpdateOrderDto,
   ) {
     // Без правото могат да се запазят само вече съществуващи директни редове
-    return this.ordersService.update(companyId, id, dto, {
+    return this.ordersService
+      .update(companyId, id, dto, {
       canDirectDelivery: canDirectDelivery(user),
-    });
+      })
+      .then((o) => stripDirectDeliveries(user, o));
   }
 
   @Post(':id/confirm')
   @RequireEdit('erp', 'orders')
-  confirm(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.ordersService.confirm(companyId, id);
+  confirm(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.ordersService
+      .confirm(companyId, id)
+      .then((o) => stripDirectDeliveries(user, o));
   }
 
   @Post(':id/cancel')
   @RequireEdit('erp', 'orders')
-  cancel(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.ordersService.cancel(companyId, id);
+  cancel(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.ordersService
+      .cancel(companyId, id)
+      .then((o) => stripDirectDeliveries(user, o));
   }
 
   @Post(':id/reopen')
   @RequireEdit('erp', 'orders')
-  reopen(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.ordersService.reopen(companyId, id);
+  reopen(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.ordersService
+      .reopen(companyId, id)
+      .then((o) => stripDirectDeliveries(user, o));
   }
 
   @Post(':id/issue-expedition')

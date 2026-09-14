@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -19,6 +20,7 @@ import { WarrantiesService } from '../warranties/warranties.service';
 import { PaymentsService } from '../payments/payments.service';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import { PushNotificationsService } from '../push-notifications/push-notifications.service';
+import { DirectDeliveriesService } from '../goods-receipts/direct-deliveries.service';
 
 /** Round a number to 2 decimal places to avoid floating-point drift */
 function round2(n: number): number {
@@ -84,8 +86,12 @@ const ORDER_INCLUDE = {
       status: true,
       receiptDate: true,
       deliveredAt: true,
+      sentToSupplierAt: true,
       invoiceNumber: true,
       totalAmount: true,
+      paidAmount: true,
+      paymentStatus: true,
+      supplierId: true,
       supplier: { select: { id: true, name: true } },
       items: {
         select: {
@@ -149,12 +155,14 @@ function computeDeliveryStatus(order: OrderForStatus): 'NONE' | 'FULL' {
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
   constructor(
     private prisma: PrismaService,
     private warrantiesService: WarrantiesService,
     private paymentsService: PaymentsService,
     private webhookDispatcher: WebhookDispatcherService,
     private pushNotifications: PushNotificationsService,
+    private directDeliveries: DirectDeliveriesService,
   ) {}
 
   private async generateOrderNumber(
@@ -1339,6 +1347,12 @@ export class OrdersService {
         });
       });
       await this.webhookDispatcher.emitOrderChanged(companyId, id);
+      if (stockHeld && (await this.syncDirectDeliveries(companyId, id))) {
+        return this.prisma.order.findUniqueOrThrow({
+          where: { id },
+          include: ORDER_INCLUDE,
+        });
+      }
       return updated;
     }
 
@@ -1723,6 +1737,30 @@ export class OrdersService {
     return result;
   }
 
+  /**
+   * Дропшип: след потвърждаване/редакция на продажба с директни редове
+   * заявката към доставчик се създава/синхронизира в Склад > Доставки.
+   * Не спира операцията при грешка — има ръчен бутон като резерва.
+   */
+  private async syncDirectDeliveries(
+    companyId: string,
+    orderId: string,
+  ): Promise<boolean> {
+    try {
+      const receipts = await this.directDeliveries.ensureForOrder(
+        companyId,
+        orderId,
+      );
+      // null/undefined = продажбата няма директни редове → нищо за презареждане
+      return receipts != null;
+    } catch (e) {
+      this.logger.warn(
+        `Дропшип заявка за поръчка ${orderId}: ${(e as Error).message}`,
+      );
+      return false;
+    }
+  }
+
   async confirm(companyId: string, id: string) {
     const order = await this.findOne(companyId, id);
 
@@ -1931,6 +1969,14 @@ export class OrdersService {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
     await this.webhookDispatcher.emitOrderChanged(companyId, id);
+    // Дропшип заявката се създава след транзакцията → презареждаме, за да я
+    // има в отговора (секцията в прегледа на продажбата)
+    if (await this.syncDirectDeliveries(companyId, id)) {
+      return this.prisma.order.findUniqueOrThrow({
+        where: { id },
+        include: ORDER_INCLUDE,
+      });
+    }
     return result;
   }
 
@@ -2054,6 +2100,7 @@ export class OrdersService {
         include: ORDER_INCLUDE,
       });
     });
+    await this.directDeliveries.cancelUnsentForOrder(companyId, id);
     await this.webhookDispatcher.emitOrderChanged(companyId, id);
     return result;
   }

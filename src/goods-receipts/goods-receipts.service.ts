@@ -17,41 +17,11 @@ import {
 import { Prisma, GoodsReceiptStatus } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
 import {
-  derivePaymentStatus,
-  sumPayments,
-} from '../payments/payment-status.util';
+  generateReceiptNumber,
+  recalcReceiptState,
+  RECEIPT_INCLUDE,
+} from './receipt-helpers';
 
-// Standard include for goods receipt queries
-const RECEIPT_INCLUDE = {
-  location: true,
-  supplier: true,
-  currency: true,
-  // Продажбата при директна доставка (drop-ship)
-  order: { select: { id: true, orderNumber: true, customerName: true } },
-  createdBy: {
-    select: { id: true, firstName: true, lastName: true },
-  },
-  items: {
-    include: {
-      product: true,
-      currency: true,
-    },
-  },
-  expenses: {
-    include: {
-      supplier: true,
-      currency: true,
-    },
-  },
-  payments: {
-    include: {
-      currency: { select: { id: true, code: true, symbol: true } },
-      createdBy: { select: { id: true, firstName: true, lastName: true } },
-    },
-    orderBy: { paidAt: 'desc' as const },
-  },
-  _count: { select: { items: true } },
-};
 
 // Valid delivery-status transitions (payment is tracked separately via the
 // payment ledger, mirroring orders).
@@ -72,31 +42,11 @@ export class GoodsReceiptsService {
     private webhookDispatcher: WebhookDispatcherService,
   ) {}
 
-  private async generateReceiptNumber(
+  private generateReceiptNumber(
     companyId: string,
     tx?: Prisma.TransactionClient,
   ): Promise<string> {
-    const client = tx || this.prisma;
-    const year = new Date().getFullYear();
-    const prefix = `GR-${year}-`;
-
-    const lastReceipt = await client.goodsReceipt.findFirst({
-      where: {
-        companyId,
-        receiptNumber: { startsWith: prefix },
-      },
-      orderBy: { receiptNumber: 'desc' },
-    });
-
-    let nextNumber = 1;
-    if (lastReceipt) {
-      const lastNumber = parseInt(
-        lastReceipt.receiptNumber.split('-').pop() || '0',
-      );
-      nextNumber = lastNumber + 1;
-    }
-
-    return `${prefix}${nextNumber.toString().padStart(5, '0')}`;
+    return generateReceiptNumber(tx || this.prisma, companyId);
   }
 
   async create(
@@ -297,41 +247,11 @@ export class GoodsReceiptsService {
    *   paymentStatus = derivePaymentStatus() — винаги изчислен
    * Self-contained so it can run inside the receipt create/update transactions.
    */
-  private async recalcReceiptState(
+  private recalcReceiptState(
     tx: Prisma.TransactionClient,
     receiptId: string,
   ): Promise<void> {
-    const items = await tx.goodsReceiptItem.findMany({
-      where: { goodsReceiptId: receiptId },
-      select: {
-        quantity: true,
-        unitPrice: true,
-        exchangeRate: true,
-        vatRate: true,
-      },
-    });
-    const itemsTotal = items.reduce((sum, it) => {
-      const base =
-        Number(it.quantity) * Number(it.unitPrice) * Number(it.exchangeRate);
-      return sum + base + base * (Number(it.vatRate) / 100);
-    }, 0);
-    const expAgg = await tx.expense.aggregate({
-      where: { goodsReceiptId: receiptId },
-      _sum: { totalAmount: true },
-    });
-    const total =
-      Math.round((itemsTotal + Number(expAgg._sum.totalAmount || 0)) * 100) /
-      100;
-
-    const { paid, hasRefund } = await sumPayments(tx, {
-      goodsReceiptId: receiptId,
-    });
-    const paymentStatus = derivePaymentStatus(paid, total, hasRefund);
-
-    await tx.goodsReceipt.update({
-      where: { id: receiptId },
-      data: { totalAmount: total, paidAmount: paid, paymentStatus },
-    });
+    return recalcReceiptState(tx, receiptId);
   }
 
   async findAll(companyId: string, query: QueryGoodsReceiptsDto) {
@@ -340,6 +260,8 @@ export class GoodsReceiptsService {
       status,
       locationId,
       supplierId,
+      type,
+      awaitingSupplier,
       dateFrom,
       dateTo,
       dateField = 'receiptDate',
@@ -354,6 +276,15 @@ export class GoodsReceiptsService {
       ...(status && { status }),
       ...(locationId && { locationId }),
       ...(supplierId && { supplierId }),
+      // Тип: складова (през локация) / дропшип (към продажба, без локация)
+      ...(type === 'direct' && { directDelivery: true }),
+      ...(type === 'warehouse' && { directDelivery: false }),
+      // Дропшип заявки, които още нямат доставчик — „светят" в списъка
+      ...(awaitingSupplier && {
+        directDelivery: true,
+        status: 'EXPECTED' as const,
+        supplierId: null,
+      }),
       ...(dateFrom || dateTo
         ? dateField === 'paidAt'
           ? {
@@ -393,6 +324,8 @@ export class GoodsReceiptsService {
           location: true,
           supplier: true,
           currency: true,
+          // Продажбата при дропшип — етикет + линк в списъка
+          order: { select: { id: true, orderNumber: true, customerName: true } },
           createdBy: {
             select: { id: true, firstName: true, lastName: true },
           },

@@ -5,9 +5,10 @@ import { CompanyGoodsReceiptsController } from './company-goods-receipts.control
 import { WordPressModule } from '../wordpress/wordpress.module';
 import { CloudCartModule } from '../cloudcart/cloudcart.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { DirectDeliveriesModule } from './direct-deliveries.module';
 
 @Module({
-  imports: [WordPressModule, CloudCartModule, PaymentsModule],
+  imports: [WordPressModule, CloudCartModule, PaymentsModule, DirectDeliveriesModule],
   controllers: [GoodsReceiptsController, CompanyGoodsReceiptsController],
   providers: [GoodsReceiptsService],
   exports: [GoodsReceiptsService],
