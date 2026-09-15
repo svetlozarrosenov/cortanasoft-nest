@@ -54,6 +54,17 @@ export class CreateGoodsReceiptExpenseDto {
   @Min(0)
   amount: number;
 
+  // Количество × единична цена (по подразбиране 1 × amount)
+  @IsNumber()
+  @IsOptional()
+  @Min(0.001)
+  quantity?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  unitPrice?: number;
+
   @IsString()
   @IsOptional()
   currencyId?: string;
@@ -63,7 +74,14 @@ export class CreateGoodsReceiptExpenseDto {
   @Min(0.000001)
   exchangeRate?: number;
 
-  // Влиза ли в себестойността на стоката (виж Expense.includeInStockCost)
+  // ДДС ставка на разхода (фактурата на спедитора е с ДДС); доставната
+  // стойност взима само нетната сума
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  vatRate?: number;
+
+  // Влиза ли в себестойността на стоката (виж ExpenseItem.includeInStockCost)
   @IsBoolean()
   @IsOptional()
   includeInStockCost?: boolean;

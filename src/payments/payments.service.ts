@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { syncReceiptExpenses } from '../goods-receipts/receipt-helpers';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import { CreatePaymentDto, UpdatePaymentDto, QueryPaymentsDto } from './dto';
 import { derivePaymentStatus, sumPayments } from './payment-status.util';
@@ -236,11 +237,9 @@ export class PaymentsService {
       data: { paidAmount: paid, paymentStatus: newStatus },
     });
 
-    // Attached expenses follow the receipt's payment status (not cancelled ones).
-    await tx.expense.updateMany({
-      where: { goodsReceiptId, status: { not: 'CANCELLED' } },
-      data: { status: newStatus === 'PAID' ? 'PAID' : 'PENDING' },
-    });
+    // Разходният документ на доставката следва доставката (платена →
+    // платен; доставена → одобрен; върнато плащане → назад)
+    await syncReceiptExpenses(tx, goodsReceiptId);
   }
 
   async update(companyId: string, id: string, dto: UpdatePaymentDto) {

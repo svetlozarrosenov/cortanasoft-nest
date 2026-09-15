@@ -14,6 +14,10 @@ export interface InvoiceLineItem {
   unitPrice: number;
   totalPrice: number;
   productCode?: string;
+  /** Категория на реда (фактура с 10 разхода → 10 реда с различни категории) */
+  category?: ExpenseCategory;
+  /** ДДС ставка на реда в %, когато фактурата я показва (смесени ставки) */
+  vatRate?: number;
 }
 
 // ==================== Сканиране на доставка (tool use) ====================
@@ -23,6 +27,10 @@ export interface DeliveryScanItem {
   quantity: number;
   unitPrice: number;
   productCode?: string | null;
+  /** goods = стока за склада; cost = транспорт/мито/такса → допълнителен разход по доставката */
+  kind?: 'goods' | 'cost' | null;
+  /** Категория на разхода при kind = cost */
+  costCategory?: ExpenseCategory | null;
   /** Намерен съществуващ продукт на компанията (AI-ят търси с tool) */
   matchedProductId?: string | null;
   matchedProductName?: string | null;
@@ -41,6 +49,8 @@ export interface DeliveryScanResult {
   invoiceDate?: string | null;
   totalAmount?: number | null;
   vatAmount?: number | null;
+  /** ДДС ставка на фактурата в % (за редовете-разходи) */
+  vatRate?: number | null;
   supplier: {
     matchedSupplierId?: string | null;
     matchedSupplierName?: string | null;
@@ -479,6 +489,10 @@ export class DocumentAIService {
             },
             totalAmount: { type: ['number', 'null'] },
             vatAmount: { type: ['number', 'null'] },
+            vatRate: {
+              type: ['number', 'null'],
+              description: 'VAT percentage applied on the invoice (20, 9 or 0)',
+            },
             supplier: {
               type: 'object',
               properties: {
@@ -498,6 +512,17 @@ export class DocumentAIService {
                   quantity: { type: 'number' },
                   unitPrice: { type: 'number' },
                   productCode: { type: ['string', 'null'] },
+                  kind: {
+                    type: ['string', 'null'],
+                    enum: ['goods', 'cost', null],
+                    description:
+                      'goods = a physical product entering stock; cost = a service/charge that is not stock (transport, shipping, freight, delivery, customs duty, packaging, handling, insurance, fees)',
+                  },
+                  costCategory: {
+                    type: ['string', 'null'],
+                    enum: [...EXPENSE_CATEGORY_CODES, null],
+                    description: 'Only for kind = cost',
+                  },
                   matchedProductId: { type: ['string', 'null'] },
                   matchedProductName: { type: ['string', 'null'] },
                   matchConfidence: { type: ['number', 'null'] },
@@ -550,8 +575,10 @@ export class DocumentAIService {
             text: `This is a supplier invoice for a goods delivery. Extract the data and match it against the company's records:
 
 1. Use search_suppliers to find the supplier (try the name and the VAT number).
-2. For EVERY line item use search_products to find an existing product. Product names may be in Bulgarian — try translated or simplified queries. Only set matchedProductId when you are reasonably sure it is the same product (set matchConfidence 0-1). If nothing matches, propose newProduct with a sensible Bulgarian name, the SKU/code from the invoice if present, a unit from the allowed list and the purchase price.
-3. Finish by calling submit_result exactly once with everything. Dates in YYYY-MM-DD. Prices as plain numbers in the invoice currency.`,
+2. Classify every line: kind "goods" for physical products that enter the warehouse; kind "cost" for services and charges that are NOT stock — transport, shipping, freight, delivery, customs duty, packaging, handling, insurance, bank/service fees. For cost lines set costCategory (DELIVERY for transport/shipping/freight/couriers, TAXES for customs duties, INSURANCE for insurance, OTHER otherwise), do NOT search products and do NOT propose newProduct.
+3. For EVERY goods line use search_products to find an existing product. Product names may be in Bulgarian — try translated or simplified queries. Only set matchedProductId when you are reasonably sure it is the same product (set matchConfidence 0-1). If nothing matches, propose newProduct with a sensible Bulgarian name, the SKU/code from the invoice if present, a unit from the allowed list and the purchase price.
+4. vatRate: the VAT percentage the invoice applies (20, 9 or 0); null if not visible.
+5. Finish by calling submit_result exactly once with everything. Dates in YYYY-MM-DD. Prices as plain numbers in the invoice currency, without VAT.`,
           },
         ],
       },
@@ -1229,12 +1256,21 @@ ${companyContext}
       invoiceDate: raw.invoiceDate ? this.parseDate(raw.invoiceDate) : null,
       totalAmount: raw.totalAmount ?? null,
       vatAmount: raw.vatAmount ?? null,
+      vatRate: typeof raw.vatRate === 'number' ? raw.vatRate : null,
       supplier: raw.supplier || {},
       items: (raw.items || []).map((item) => ({
         description: item.description || '',
         quantity: Number(item.quantity) || 1,
         unitPrice: Number(item.unitPrice) || 0,
         productCode: item.productCode || null,
+        kind: item.kind === 'cost' ? 'cost' : 'goods',
+        costCategory:
+          item.kind === 'cost' &&
+          EXPENSE_CATEGORY_CODES.includes(item.costCategory as string)
+            ? (item.costCategory as ExpenseCategory)
+            : item.kind === 'cost'
+              ? 'DELIVERY'
+              : null,
         matchedProductId: item.matchedProductId || null,
         matchedProductName: item.matchedProductName || null,
         matchConfidence: item.matchConfidence ?? null,
@@ -1322,6 +1358,16 @@ ${companyContext}
                 unitPrice: { type: 'number' },
                 totalPrice: { type: 'number' },
                 productCode: { type: ['string', 'null'] },
+                category: {
+                  type: ['string', 'null'],
+                  enum: [...EXPENSE_CATEGORY_CODES, null],
+                  description: 'Expense category of THIS line',
+                },
+                vatRate: {
+                  type: ['number', 'null'],
+                  description:
+                    'VAT percentage applied to this line (20, 9 or 0)',
+                },
               },
               required: ['description', 'quantity', 'unitPrice'],
             },
@@ -1361,7 +1407,8 @@ ${EXPENSE_CATEGORY_HINTS}
 - paymentMethod: only if the invoice states how it is paid ("Начин на плащане", "Плащане", "payment method"): "по банков път"/"банков превод"/"по сметка" → BANK_TRANSFER, "в брой" → CASH, "с карта"/"ПОС" → CARD, "наложен платеж" → COD. Otherwise null
 - If a value is not found, use null
 - confidence: your estimate of extraction accuracy (0-1)
-- For line items: calculate missing totalPrice = quantity * unitPrice if possible
+- For line items: calculate missing totalPrice = quantity * unitPrice if possible; totalPrice is WITHOUT VAT
+- For each line item set category (same meanings as expenseCategory — lines of one invoice may differ, e.g. tyres → MAINTENANCE and a vignette → TAXES) and vatRate (the VAT % applied to that line: 20, 9 or 0; null if the invoice does not show it)
 - The invoice may be in Bulgarian or any other language - extract data regardless of language`,
               },
             ],
@@ -1418,6 +1465,10 @@ ${EXPENSE_CATEGORY_HINTS}
         unitPrice: item.unitPrice || 0,
         totalPrice: item.totalPrice || 0,
         productCode: item.productCode || undefined,
+        category: EXPENSE_CATEGORY_CODES.includes(item.category)
+          ? (item.category as ExpenseCategory)
+          : undefined,
+        vatRate: typeof item.vatRate === 'number' ? item.vatRate : undefined,
       })),
       confidence: parsed.confidence || 0.8,
     };

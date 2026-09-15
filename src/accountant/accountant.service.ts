@@ -186,6 +186,11 @@ export class AccountantService {
           receiptDate: true,
           totalAmount: true,
           attachmentUrl: true,
+          // Фактурите, прикачени през панела „Документи" (не само сканът)
+          documents: {
+            select: { fileKey: true, fileName: true },
+            orderBy: { createdAt: 'asc' as const },
+          },
           supplier: { select: { name: true, eik: true, vatNumber: true } },
           currency: { select: { code: true, symbol: true } },
           ...AccountantService.RECEIPT_BREAKDOWN_SELECT,
@@ -208,6 +213,10 @@ export class AccountantService {
           vatAmount: true,
           totalAmount: true,
           attachmentUrl: true,
+          documents: {
+            select: { fileKey: true, fileName: true },
+            orderBy: { createdAt: 'asc' as const },
+          },
           supplier: { select: { name: true, eik: true, vatNumber: true } },
           currency: { select: { code: true, symbol: true } },
         },
@@ -227,8 +236,17 @@ export class AccountantService {
       vat: number;
       total: number;
       fileUrl: string | null;
+      /** Всички файлове по документа: сканът (attachmentUrl) + прикачените документи */
+      files: { key: string; name: string | null }[];
       currencyCode: string | null;
     };
+    const filesOf = (
+      attachmentUrl: string | null,
+      docs: { fileKey: string; fileName: string }[],
+    ) => [
+      ...(attachmentUrl ? [{ key: attachmentUrl, name: null }] : []),
+      ...docs.map((d) => ({ key: d.fileKey, name: d.fileName })),
+    ];
 
     const rows: Row[] = [
       ...receipts.map((r) => {
@@ -244,7 +262,8 @@ export class AccountantService {
           base,
           vat,
           total: Number(r.totalAmount),
-          fileUrl: r.attachmentUrl || null,
+          fileUrl: r.attachmentUrl || r.documents[0]?.fileKey || null,
+          files: filesOf(r.attachmentUrl, r.documents),
           // totalAmount на доставка е конвертиран (редове × курс) → базова валута.
           currencyCode: baseCurrency,
         };
@@ -261,7 +280,8 @@ export class AccountantService {
         base: Number(e.amount),
         vat: Number(e.vatAmount),
         total: Number(e.totalAmount),
-        fileUrl: e.attachmentUrl || null,
+        fileUrl: e.attachmentUrl || e.documents[0]?.fileKey || null,
+        files: filesOf(e.attachmentUrl, e.documents),
         currencyCode: e.currency?.code || baseCurrency,
       })),
     ].sort((a, b) => a.date.getTime() - b.date.getTime());
@@ -724,7 +744,11 @@ export class AccountantService {
       buffer,
     );
 
-    return { success: true, sentTo: settings.accountantEmail, attachments: attachments.length };
+    return {
+      success: true,
+      sentTo: settings.accountantEmail,
+      attachments: attachments.length,
+    };
   }
 
   /**
@@ -800,7 +824,11 @@ export class AccountantService {
   // ===== Архив на изпратените пакети =====
 
   /** Брой документи по вид за периода (за архивния запис и прегледа). */
-  private async countsForPeriod(companyId: string, year: number, month: number) {
+  private async countsForPeriod(
+    companyId: string,
+    year: number,
+    month: number,
+  ) {
     const { start, end } = this.periodRange(year, month);
     const [income, receipts, expenses, statement] = await Promise.all([
       this.prisma.invoice.count({

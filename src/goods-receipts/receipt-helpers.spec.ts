@@ -20,8 +20,8 @@ describe('computeUnitCosts', () => {
     const m = computeUnitCosts(
       [item('a', 10, 10), item('b', 5, 60)],
       [
-        { totalAmount: 40, includeInStockCost: true },
-        { totalAmount: 999, includeInStockCost: false },
+        { amount: 40, includeInStockCost: true },
+        { amount: 999, includeInStockCost: false },
       ],
     );
     expect(m.get('a')).toBe(11); // (100 + 10) / 10
@@ -34,7 +34,7 @@ describe('computeUnitCosts', () => {
       [item('a', 2, 3000), item('b', 8, 300)],
       [
         {
-          totalAmount: 100,
+          amount: 100,
           includeInStockCost: true,
           stockCostAllocation: 'QUANTITY',
         },
@@ -51,12 +51,12 @@ describe('computeUnitCosts', () => {
       [item('a', 10, 10), item('b', 10, 30)],
       [
         {
-          totalAmount: 40,
+          amount: 40,
           includeInStockCost: true,
           stockCostAllocation: 'VALUE',
         },
         {
-          totalAmount: 20,
+          amount: 20,
           includeInStockCost: true,
           stockCostAllocation: 'QUANTITY',
         },
@@ -69,7 +69,7 @@ describe('computeUnitCosts', () => {
   it('leaves the cost untouched when no expense is included', () => {
     const m = computeUnitCosts(
       [item('a', 10, 10)],
-      [{ totalAmount: 40, includeInStockCost: false }],
+      [{ amount: 40, includeInStockCost: false }],
     );
     expect(m.get('a')).toBe(10);
   });
@@ -77,7 +77,7 @@ describe('computeUnitCosts', () => {
   it('does not charge services and excludes them from the base', () => {
     const m = computeUnitCosts(
       [item('a', 10, 10), item('svc', 1, 50, 1, 'SERVICE')],
-      [{ totalAmount: 20, includeInStockCost: true }],
+      [{ amount: 20, includeInStockCost: true }],
     );
     expect(m.get('a')).toBe(12); // всичките 20 отиват при стоката
     expect(m.get('svc')).toBe(50);
@@ -86,7 +86,7 @@ describe('computeUnitCosts', () => {
   it('falls back to quantity when the goods are free', () => {
     const m = computeUnitCosts(
       [item('a', 3, 0), item('b', 1, 0)],
-      [{ totalAmount: 8, includeInStockCost: true }],
+      [{ amount: 8, includeInStockCost: true }],
     );
     expect(m.get('a')).toBe(2);
     expect(m.get('b')).toBe(2);

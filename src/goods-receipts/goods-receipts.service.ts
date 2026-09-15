@@ -9,6 +9,7 @@ import { WordPressService } from '../wordpress/wordpress.service';
 import { CloudCartService } from '../cloudcart/cloudcart.service';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import {
+  CreateGoodsReceiptExpenseDto,
   CreateGoodsReceiptDto,
   CreateDirectDeliveryDto,
   UpdateGoodsReceiptDto,
@@ -16,8 +17,11 @@ import {
 } from './dto';
 import { Prisma, GoodsReceiptStatus } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
+import { ExpensesService } from '../expenses/expenses.service';
 import {
   computeUnitCosts,
+  landedCostLines,
+  syncReceiptExpenses,
   generateReceiptNumber,
   recalcReceiptState,
   RECEIPT_INCLUDE,
@@ -149,31 +153,16 @@ export class GoodsReceiptsService {
         include: RECEIPT_INCLUDE,
       });
 
-      // Create expense records if provided
+      // Разходите по доставката = ЕДИН разход с N реда (създава се само оттук)
       if (dto.expenses && dto.expenses.length > 0) {
-        for (const exp of dto.expenses) {
-          const rate = exp.exchangeRate ?? 1;
-          const convertedAmount = exp.amount * rate;
-          await tx.expense.create({
-            data: {
-              description: exp.description,
-              category: exp.category,
-              amount: exp.amount,
-              vatAmount: 0,
-              totalAmount: convertedAmount,
-              currencyId: exp.currencyId || currencyId,
-              exchangeRate: rate,
-              expenseDate: receipt.receiptDate,
-              status: 'PENDING',
-              companyId,
-              supplierId: dto.supplierId || undefined,
-              createdById: userId,
-              goodsReceiptId: receipt.id,
-              includeInStockCost: !!exp.includeInStockCost,
-              stockCostAllocation: exp.stockCostAllocation ?? undefined,
-            },
-          });
-        }
+        await tx.expense.create({
+          data: this.receiptExpenseData(
+            companyId,
+            userId,
+            receipt,
+            dto.expenses,
+          ),
+        });
       }
 
       // Store totalAmount (items + expenses) + derive payment status.
@@ -253,6 +242,100 @@ export class GoodsReceiptsService {
    *   paymentStatus = derivePaymentStatus() — винаги изчислен
    * Self-contained so it can run inside the receipt create/update transactions.
    */
+  /**
+   * Данните за разходния документ на доставката: хедър с доставчика, номера
+   * и датата на доставката + редовете (категория, сума, валута/курс, дали
+   * влиза в доставната стойност). Хедърът е във валутата на компанията.
+   */
+  private receiptExpenseData(
+    companyId: string,
+    userId: string | undefined,
+    receipt: {
+      id: string;
+      receiptNumber: string;
+      receiptDate: Date;
+      invoiceNumber?: string | null;
+      invoiceDate?: Date | null;
+      attachmentUrl?: string | null;
+      supplierId?: string | null;
+      currencyId?: string | null;
+    },
+    rows: CreateGoodsReceiptExpenseDto[],
+  ): Prisma.ExpenseUncheckedCreateInput {
+    const receiptId = receipt.id;
+    const receiptNumber = receipt.receiptNumber;
+    const supplierId = receipt.supplierId ?? undefined;
+    const currencyId = receipt.currencyId ?? undefined;
+    const lines = ExpensesService.linesFromDto({
+      items: rows.map((r) => ({
+        description: r.description,
+        category: r.category,
+        amount: r.amount,
+        quantity: r.quantity,
+        unitPrice: r.unitPrice,
+        vatRate: r.vatRate ?? 0,
+        vatAmount: Math.round(r.amount * (r.vatRate ?? 0)) / 100,
+        currencyId: r.currencyId || currencyId,
+        exchangeRate: r.exchangeRate ?? 1,
+        includeInStockCost: !!r.includeInStockCost,
+        stockCostAllocation: r.stockCostAllocation,
+      })),
+    });
+    return {
+      description: `Разходи по доставка ${receiptNumber}`,
+      category: lines.category,
+      amount: lines.amount,
+      vatAmount: lines.vatAmount,
+      totalAmount: lines.totalAmount,
+      currencyId: currencyId ?? null,
+      exchangeRate: 1,
+      // Хедърът е фактурата на доставчика: номер, дата, сканираният файл
+      expenseDate: receipt.invoiceDate ?? receipt.receiptDate,
+      invoiceNumber: receipt.invoiceNumber ?? null,
+      attachmentUrl: receipt.attachmentUrl ?? null,
+      notes: `Доставка ${receiptNumber}`,
+      status: 'PENDING',
+      companyId,
+      supplierId: supplierId ?? null,
+      createdById: userId ?? null,
+      goodsReceiptId: receiptId,
+      items: { create: lines.items },
+    };
+  }
+
+  /**
+   * Хедърът на разходния документ следва хедъра на доставката (номер и
+   * дата на фактурата, файл, доставчик, валута) — при редакция на доставката
+   * без промяна по редовете-разходи.
+   */
+  private async syncReceiptExpenseHeader(
+    tx: Prisma.TransactionClient,
+    receiptId: string,
+  ) {
+    const r = await tx.goodsReceipt.findUnique({
+      where: { id: receiptId },
+      select: {
+        receiptDate: true,
+        invoiceNumber: true,
+        invoiceDate: true,
+        attachmentUrl: true,
+        supplierId: true,
+        currencyId: true,
+      },
+    });
+    if (!r) return;
+    await tx.expense.updateMany({
+      where: { goodsReceiptId: receiptId },
+      data: {
+        expenseDate: r.invoiceDate ?? r.receiptDate,
+        invoiceNumber: r.invoiceNumber,
+        attachmentUrl: r.attachmentUrl,
+        supplierId: r.supplierId,
+        currencyId: r.currencyId,
+      },
+    });
+  }
+
   private recalcReceiptState(
     tx: Prisma.TransactionClient,
     receiptId: string,
@@ -489,38 +572,39 @@ export class GoodsReceiptsService {
         }
       }
 
-      // If expenses are provided, replace all linked expenses
+      // If expenses are provided, replace the receipt's expense document
       if (dto.expenses !== undefined) {
-        // Delete old expenses linked to this receipt
         await tx.expense.deleteMany({
           where: { goodsReceiptId: id },
         });
-
-        // Create new expenses
         if (dto.expenses && dto.expenses.length > 0) {
-          const receiptCurrencyId = dto.currencyId || receipt.currencyId;
-          for (const exp of dto.expenses) {
-            const rate = exp.exchangeRate ?? 1;
-            const convertedAmount = exp.amount * rate;
-            await tx.expense.create({
-              data: {
-                description: exp.description,
-                category: exp.category,
-                amount: exp.amount,
-                vatAmount: 0,
-                totalAmount: convertedAmount,
-                currencyId: exp.currencyId || receiptCurrencyId || undefined,
-                exchangeRate: rate,
-                expenseDate: receipt.receiptDate,
-                status: 'PENDING',
-                companyId,
-                supplierId: dto.supplierId ?? receipt.supplierId ?? undefined,
-                goodsReceiptId: id,
-                includeInStockCost: !!exp.includeInStockCost,
-                stockCostAllocation: exp.stockCostAllocation ?? undefined,
+          await tx.expense.create({
+            data: this.receiptExpenseData(
+              companyId,
+              receipt.createdById ?? undefined,
+              {
+                id,
+                receiptNumber: receipt.receiptNumber,
+                receiptDate: dto.receiptDate
+                  ? new Date(dto.receiptDate)
+                  : receipt.receiptDate,
+                invoiceNumber: dto.invoiceNumber ?? receipt.invoiceNumber,
+                invoiceDate:
+                  dto.invoiceDate !== undefined
+                    ? dto.invoiceDate
+                      ? new Date(dto.invoiceDate)
+                      : null
+                    : receipt.invoiceDate,
+                attachmentUrl:
+                  dto.attachmentUrl !== undefined
+                    ? dto.attachmentUrl || null
+                    : receipt.attachmentUrl,
+                supplierId: dto.supplierId ?? receipt.supplierId,
+                currencyId: dto.currencyId || receipt.currencyId,
               },
-            });
-          }
+              dto.expenses,
+            ),
+          });
         }
       }
 
@@ -559,6 +643,9 @@ export class GoodsReceiptsService {
           data: { vatRate: 0 },
         });
       }
+
+      // Хедърът на разхода по доставката следва хедъра на доставката
+      await this.syncReceiptExpenseHeader(tx, id);
 
       // Items/expenses may have changed → refresh totalAmount + payment status.
       await this.recalcReceiptState(tx, id);
@@ -612,7 +699,10 @@ export class GoodsReceiptsService {
         if ((isDelivering || isCancellingDelivered) && receipt.orderId) {
           // Себестойност във валутата на компанията, с дела от разходите
           // към доставката, които влизат в стойността на стоката
-          const unitCosts = computeUnitCosts(receipt.items, receipt.expenses);
+          const unitCosts = computeUnitCosts(
+            receipt.items,
+            landedCostLines(receipt.expenses),
+          );
           if (isDelivering) {
             await this.updateLastLandedCosts(
               tx,
@@ -635,13 +725,7 @@ export class GoodsReceiptsService {
             });
           }
         }
-        if (targetStatus === 'CANCELLED') {
-          await tx.expense.updateMany({
-            where: { goodsReceiptId: id },
-            data: { status: 'CANCELLED' },
-          });
-        }
-        return tx.goodsReceipt.update({
+        const updated = await tx.goodsReceipt.update({
           where: { id },
           data: {
             status: targetStatus,
@@ -653,6 +737,10 @@ export class GoodsReceiptsService {
           },
           include: RECEIPT_INCLUDE,
         });
+        // Разходите на доставката следват статуса ѝ (доставена → одобрен,
+        // анулирана → анулиран)
+        await syncReceiptExpenses(tx, id);
+        return updated;
       });
     }
 
@@ -709,7 +797,10 @@ export class GoodsReceiptsService {
         // Себестойност на единица ВЪВ ВАЛУТАТА НА КОМПАНИЯТА (цена × курс
         // на реда) плюс дела от разходите към доставката с includeInStockCost.
         // Дропшип пътят по-горе прави същото за OrderItem.unitCost.
-        const unitCosts = computeUnitCosts(receipt.items, receipt.expenses);
+        const unitCosts = computeUnitCosts(
+          receipt.items,
+          landedCostLines(receipt.expenses),
+        );
         await this.updateLastLandedCosts(
           tx,
           receipt.items,
@@ -843,14 +934,8 @@ export class GoodsReceiptsService {
       }
 
       // === Cancel attached expenses when the receipt is cancelled ===
-      // (Expense payment now follows the receipt's payment ledger, not its
-      // delivery status — see PaymentsService.recalculateGoodsReceiptState.)
-      if (targetStatus === 'CANCELLED') {
-        await tx.expense.updateMany({
-          where: { goodsReceiptId: id },
-          data: { status: 'CANCELLED' },
-        });
-      }
+      // Разходният документ на доставката следва статуса ѝ — синхронизира се
+      // след записа на новия статус по-долу (syncReceiptExpenses).
 
       // === Update receipt status ===
       // При EXPECTED → DELIVERED записваме реалната дата на доставка.
@@ -863,11 +948,13 @@ export class GoodsReceiptsService {
           ? new Date(deliveredAtOverride)
           : new Date();
       }
-      return tx.goodsReceipt.update({
+      const updated = await tx.goodsReceipt.update({
         where: { id },
         data: receiptUpdateData,
         include: RECEIPT_INCLUDE,
       });
+      await syncReceiptExpenses(tx, id);
+      return updated;
     });
 
     // Sync inventory to integrations (fire-and-forget). Each provider is

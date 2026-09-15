@@ -1,12 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateExpenseDto,
   UpdateExpenseDto,
   QueryExpensesDto,
   MarkExpensePaidDto,
+  ExpenseItemDto,
 } from './dto';
-import { Prisma } from '@prisma/client';
+import { Prisma, ExpenseCategory } from '@prisma/client';
 
 @Injectable()
 export class ExpensesService {
@@ -23,10 +28,82 @@ export class ExpensesService {
     }
   }
 
+  /**
+   * Редовете на разхода от DTO-то: `items` или (стари клиенти) един ред от
+   * category/amount/vatAmount. Връща и сборовете за хедъра във валутата на
+   * компанията (amount × курс на реда).
+   */
+  static linesFromDto(dto: {
+    items?: ExpenseItemDto[];
+    description?: string;
+    category?: ExpenseCategory;
+    amount?: number;
+    vatAmount?: number;
+  }) {
+    const rows: ExpenseItemDto[] =
+      dto.items && dto.items.length > 0
+        ? dto.items
+        : [
+            {
+              description: dto.description || '',
+              category: dto.category || 'OTHER',
+              amount: dto.amount || 0,
+              vatAmount: dto.vatAmount || 0,
+              vatRate:
+                dto.amount && dto.amount > 0
+                  ? Math.round(((dto.vatAmount || 0) / dto.amount) * 10000) /
+                    100
+                  : 0,
+            },
+          ];
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const items = rows.map((r, i) => {
+      const vatRate = r.vatRate ?? 0;
+      const quantity = r.quantity ?? 1;
+      const unitPrice = r.unitPrice ?? r.amount;
+      // Сумата на реда е количество × ед. цена; amount от клиента е резерва
+      const amount = round2(r.unitPrice != null ? quantity * r.unitPrice : r.amount);
+      const vatAmount = r.vatAmount ?? round2((amount * vatRate) / 100);
+      return {
+        description: r.description,
+        category: r.category,
+        quantity,
+        unitPrice: round2(unitPrice),
+        amount,
+        vatRate,
+        vatAmount: round2(vatAmount),
+        currencyId: r.currencyId ?? null,
+        exchangeRate: r.exchangeRate ?? 1,
+        includeInStockCost: !!r.includeInStockCost,
+        stockCostAllocation: r.stockCostAllocation ?? 'VALUE',
+        sortOrder: i,
+      };
+    });
+    const amount = round2(
+      items.reduce((s, it) => s + it.amount * it.exchangeRate, 0),
+    );
+    const vatAmount = round2(
+      items.reduce((s, it) => s + it.vatAmount * it.exchangeRate, 0),
+    );
+    return {
+      items,
+      amount,
+      vatAmount,
+      totalAmount: round2(amount + vatAmount),
+      category: items[0]?.category ?? 'OTHER',
+    };
+  }
+
   async create(companyId: string, userId: string, dto: CreateExpenseDto) {
-    const amount = dto.amount;
-    const vatAmount = dto.vatAmount || 0;
-    const totalAmount = amount + vatAmount;
+    const lines = ExpensesService.linesFromDto(dto);
+    if (
+      lines.items.length === 0 ||
+      lines.items.some((it) => !it.description.trim())
+    ) {
+      throw new BadRequestException(
+        'Разходът трябва да има поне един ред с описание',
+      );
+    }
 
     if (dto.siteId) {
       await this.assertSiteInCompany(companyId, dto.siteId);
@@ -34,11 +111,12 @@ export class ExpensesService {
 
     return this.prisma.expense.create({
       data: {
-        description: dto.description,
-        category: dto.category,
-        amount,
-        vatAmount,
-        totalAmount,
+        description: dto.description?.trim() || lines.items[0].description,
+        category: lines.category,
+        amount: lines.amount,
+        vatAmount: lines.vatAmount,
+        totalAmount: lines.totalAmount,
+        items: { create: lines.items },
         expenseDate: dto.expenseDate ? new Date(dto.expenseDate) : new Date(),
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         invoiceNumber: dto.invoiceNumber,
@@ -55,6 +133,7 @@ export class ExpensesService {
         createdById: userId,
       },
       include: {
+        items: { orderBy: { sortOrder: 'asc' as const } },
         supplier: true,
         site: { select: { id: true, name: true } },
         createdBy: {
@@ -138,6 +217,7 @@ export class ExpensesService {
         take: limit,
         orderBy,
         include: {
+          items: { orderBy: { sortOrder: 'asc' as const } },
           supplier: true,
           site: { select: { id: true, name: true } },
           createdBy: {
@@ -185,6 +265,7 @@ export class ExpensesService {
         companyId,
       },
       include: {
+        items: { orderBy: { sortOrder: 'asc' as const } },
         supplier: true,
         site: { select: { id: true, name: true } },
         createdBy: {
@@ -214,7 +295,16 @@ export class ExpensesService {
   }
 
   async update(companyId: string, id: string, dto: UpdateExpenseDto) {
-    await this.findOne(companyId, id);
+    const current = await this.findOne(companyId, id);
+
+    // Разходът към доставка се редактира в доставката — иначе сумите му и
+    // доставната стойност на вече заприходената стока се разминават.
+    // Статус/плащане минават през approve/markAsPaid/cancel, не оттук.
+    if (current.goodsReceiptId) {
+      throw new BadRequestException(
+        'Разходът е част от доставка и се редактира от нея',
+      );
+    }
 
     const updateData: Prisma.ExpenseUpdateInput = {};
 
@@ -244,13 +334,52 @@ export class ExpensesService {
       updateData.paidAt = dto.paidAt ? new Date(dto.paidAt) : null;
     }
 
-    if (dto.amount !== undefined || dto.vatAmount !== undefined) {
-      const currentExpense = await this.findOne(companyId, id);
-      const amount = dto.amount ?? Number(currentExpense.amount);
-      const vatAmount = dto.vatAmount ?? Number(currentExpense.vatAmount);
+    if (dto.items !== undefined) {
+      // Замяна на всички редове + сборове на хедъра
+      const lines = ExpensesService.linesFromDto({
+        items: dto.items,
+        description: dto.description ?? current.description,
+      });
+      if (
+        lines.items.length === 0 ||
+        lines.items.some((it) => !it.description.trim())
+      ) {
+        throw new BadRequestException(
+          'Разходът трябва да има поне един ред с описание',
+        );
+      }
+      updateData.items = { deleteMany: {}, create: lines.items };
+      updateData.amount = lines.amount;
+      updateData.vatAmount = lines.vatAmount;
+      updateData.totalAmount = lines.totalAmount;
+      updateData.category = lines.category;
+      if (dto.description === undefined) {
+        updateData.description = lines.items[0].description;
+      }
+    } else if (dto.amount !== undefined || dto.vatAmount !== undefined) {
+      // Стар клиент без редове: сумите на хедъра + единственият ред
+      const amount = dto.amount ?? Number(current.amount);
+      const vatAmount = dto.vatAmount ?? Number(current.vatAmount);
       updateData.amount = amount;
       updateData.vatAmount = vatAmount;
       updateData.totalAmount = amount + vatAmount;
+      if (current.items.length === 1) {
+        updateData.items = {
+          update: {
+            where: { id: current.items[0].id },
+            data: {
+              amount,
+              vatAmount,
+              vatRate:
+                amount > 0 ? Math.round((vatAmount / amount) * 10000) / 100 : 0,
+              ...(dto.category !== undefined && { category: dto.category }),
+              ...(dto.description !== undefined && {
+                description: dto.description,
+              }),
+            },
+          },
+        };
+      }
     }
 
     if (dto.supplierId !== undefined) {
@@ -281,6 +410,7 @@ export class ExpensesService {
       where: { id },
       data: updateData,
       include: {
+        items: { orderBy: { sortOrder: 'asc' as const } },
         supplier: true,
         site: { select: { id: true, name: true } },
         createdBy: {
@@ -314,6 +444,7 @@ export class ExpensesService {
         approvedAt: new Date(),
       },
       include: {
+        items: { orderBy: { sortOrder: 'asc' as const } },
         supplier: true,
         createdBy: {
           select: {
@@ -347,6 +478,7 @@ export class ExpensesService {
         ...(dto?.paymentMethod ? { paymentMethod: dto.paymentMethod } : {}),
       },
       include: {
+        items: { orderBy: { sortOrder: 'asc' as const } },
         supplier: true,
         createdBy: {
           select: {
@@ -377,6 +509,7 @@ export class ExpensesService {
         status: 'CANCELLED',
       },
       include: {
+        items: { orderBy: { sortOrder: 'asc' as const } },
         supplier: true,
         createdBy: {
           select: {
@@ -407,11 +540,7 @@ export class ExpensesService {
   }
 
   // Get expenses summary for analytics
-  async getExpensesSummary(
-    companyId: string,
-    dateFrom: Date,
-    dateTo: Date,
-  ) {
+  async getExpensesSummary(companyId: string, dateFrom: Date, dateTo: Date) {
     const expenses = await this.prisma.expense.findMany({
       where: {
         companyId,
@@ -440,10 +569,12 @@ export class ExpensesService {
     return {
       totalExpenses,
       expenseCount: expenses.length,
-      byCategory: Array.from(byCategory.entries()).map(([category, amount]) => ({
-        category,
-        amount,
-      })).sort((a, b) => b.amount - a.amount),
+      byCategory: Array.from(byCategory.entries())
+        .map(([category, amount]) => ({
+          category,
+          amount,
+        }))
+        .sort((a, b) => b.amount - a.amount),
     };
   }
 }
