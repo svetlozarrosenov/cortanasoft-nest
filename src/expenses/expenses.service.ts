@@ -62,7 +62,9 @@ export class ExpensesService {
       const quantity = r.quantity ?? 1;
       const unitPrice = r.unitPrice ?? r.amount;
       // Сумата на реда е количество × ед. цена; amount от клиента е резерва
-      const amount = round2(r.unitPrice != null ? quantity * r.unitPrice : r.amount);
+      const amount = round2(
+        r.unitPrice != null ? quantity * r.unitPrice : r.amount,
+      );
       const vatAmount = r.vatAmount ?? round2((amount * vatRate) / 100);
       return {
         description: r.description,
@@ -540,6 +542,13 @@ export class ExpensesService {
   }
 
   // Get expenses summary for analytics
+  /**
+   * Разходи за периода по категория — за отчета „Продажби" (нетна печалба).
+   * Смята се по РЕДОВЕТЕ (фактура с 10 разхода → 10 категории), не по хедъра.
+   * Редовете „в доставната стойност" се пропускат: те вече са в
+   * себестойността на стоката и влизат в печалбата през COGS при продажбата —
+   * иначе транспортът се брои два пъти.
+   */
   async getExpensesSummary(companyId: string, dateFrom: Date, dateTo: Date) {
     const expenses = await this.prisma.expense.findMany({
       where: {
@@ -552,6 +561,20 @@ export class ExpensesService {
           in: ['APPROVED', 'PAID'],
         },
       },
+      select: {
+        id: true,
+        category: true,
+        totalAmount: true,
+        items: {
+          select: {
+            category: true,
+            amount: true,
+            vatAmount: true,
+            exchangeRate: true,
+            includeInStockCost: true,
+          },
+        },
+      },
     });
 
     // Group by category
@@ -559,12 +582,29 @@ export class ExpensesService {
     let totalExpenses = 0;
 
     for (const expense of expenses) {
-      const amount = Number(expense.totalAmount);
-      totalExpenses += amount;
-
-      const existing = byCategory.get(expense.category) || 0;
-      byCategory.set(expense.category, existing + amount);
+      if (expense.items.length === 0) {
+        // Стар запис без редове (не би трябвало след миграцията)
+        const amount = Number(expense.totalAmount);
+        totalExpenses += amount;
+        byCategory.set(
+          expense.category,
+          (byCategory.get(expense.category) || 0) + amount,
+        );
+        continue;
+      }
+      for (const it of expense.items) {
+        if (it.includeInStockCost) continue;
+        const amount =
+          (Number(it.amount) + Number(it.vatAmount)) *
+          Number(it.exchangeRate || 1);
+        totalExpenses += amount;
+        byCategory.set(
+          it.category,
+          (byCategory.get(it.category) || 0) + amount,
+        );
+      }
     }
+    totalExpenses = Math.round(totalExpenses * 100) / 100;
 
     return {
       totalExpenses,
@@ -572,7 +612,7 @@ export class ExpensesService {
       byCategory: Array.from(byCategory.entries())
         .map(([category, amount]) => ({
           category,
-          amount,
+          amount: Math.round(amount * 100) / 100,
         }))
         .sort((a, b) => b.amount - a.amount),
     };
