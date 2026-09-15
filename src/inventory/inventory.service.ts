@@ -485,6 +485,8 @@ export class InventoryService {
         dimensionsL: true,
         dimensionsW: true,
         dimensionsH: true,
+        lastLandedCost: true,
+        lastLandedCostAt: true,
         category: {
           select: { id: true, name: true },
         },
@@ -606,6 +608,9 @@ export class InventoryService {
           dimensionsW: product.dimensionsW,
           dimensionsH: product.dimensionsH,
           category: product.category,
+          // Последна доставна стойност — до средната показва посоката на цените
+          lastLandedCost: product.lastLandedCost,
+          lastLandedCostAt: product.lastLandedCostAt,
         },
         totalQuantity,
         minStock: product.minStock ? Number(product.minStock) : null,
