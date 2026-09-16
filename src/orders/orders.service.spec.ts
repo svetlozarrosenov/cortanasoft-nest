@@ -295,13 +295,25 @@ describe('OrdersService', () => {
       expect(mockPrisma.inventoryBatch.findMany).not.toHaveBeenCalled();
     });
 
-    it('should skip inventory deduction for non-tracked products', async () => {
+    // trackInventory = само известие за ниска наличност в Таблото; складът
+    // се изписва независимо от флага (2026-09-16, тест на Демо ООД)
+    it('should deduct inventory even when low-stock alerts are off (trackInventory=false)', async () => {
       mockPrisma.order.findFirst.mockResolvedValue(makeOrder());
-      mockPrisma.product.findUnique.mockResolvedValue({ id: 'p1', type: 'PRODUCT', trackInventory: false });
-      mockPrisma.order.update.mockResolvedValue({ status: 'CONFIRMED' });
+      mockPrisma.product.findUnique.mockResolvedValue({ id: 'p1', name: 'A', type: 'PRODUCT', trackInventory: false });
+      mockPrisma.inventoryBatch.findFirst.mockResolvedValue({ id: 'b1', quantity: 100, batchNumber: 'B-001' });
+      mockPrisma.inventoryBatch.update.mockResolvedValue({});
+      mockPrisma.order.update.mockResolvedValue({ ...makeOrder(), status: 'CONFIRMED' });
 
       await service.confirm('c1', 'o1');
-      expect(mockPrisma.inventoryBatch.update).not.toHaveBeenCalled();
+
+      expect(mockPrisma.inventoryBatch.update).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { quantity: { decrement: 30 } },
+      });
+      expect(mockPrisma.orderItem.update).toHaveBeenCalledWith({
+        where: { id: 'i1' },
+        data: { stockDeducted: true },
+      });
     });
 
     it('should throw when specific batch not found', async () => {

@@ -1381,7 +1381,7 @@ export class ErpAnalyticsService {
 
     let noMovementCount = 0;
     for (const product of products) {
-      if (product.trackInventory && !recentSoldProductIds.has(product.id)) {
+      if (!recentSoldProductIds.has(product.id)) {
         const stock = productStockMap.get(product.id);
         if (stock && stock.currentStock > 0) {
           noMovementCount++;

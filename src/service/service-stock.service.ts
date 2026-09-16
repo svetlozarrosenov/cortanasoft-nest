@@ -20,7 +20,7 @@ export class ServiceStockService {
 
     for (const part of parts) {
       const product = part.product;
-      if (!product || product.type === 'SERVICE' || !product.trackInventory) {
+      if (!product || product.type === 'SERVICE') {
         continue;
       }
 

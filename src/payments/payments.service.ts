@@ -353,6 +353,13 @@ export class PaymentsService {
       orderBy: { createdAt: 'asc' },
     });
 
+    // Дата на плащане на фактурата = последното получено плащане по поръчката
+    const lastPayment = await tx.payment.findFirst({
+      where: { orderId, amount: { gt: 0 } },
+      orderBy: { paidAt: 'desc' },
+      select: { paidAt: true },
+    });
+
     let remainingPaid = Math.max(0, paid);
     for (const inv of invoices) {
       const invTotal = Number(inv.total);
@@ -367,7 +374,13 @@ export class PaymentsService {
       }
       await tx.invoice.update({
         where: { id: inv.id },
-        data: { paidAmount: allocated, status: invStatus },
+        data: {
+          paidAmount: allocated,
+          status: invStatus,
+          ...(invStatus !== 'DRAFT' && {
+            paymentDate: invStatus === 'PAID' ? (lastPayment?.paidAt ?? null) : null,
+          }),
+        },
       });
     }
   }

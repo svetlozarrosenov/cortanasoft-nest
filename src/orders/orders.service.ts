@@ -666,13 +666,16 @@ export class OrdersService {
     companyId: string,
     query: QueryUnfulfilledDto = {},
   ) {
-    // Само редове без разпределение по продукт с проследяване на наличност —
+    // Само стокови редове без разпределение (услугите нямат склад) —
     // филтрира се в БД, за да не теглим всички редове на отворените поръчки.
     const pendingItemWhere: Prisma.OrderItemWhereInput = {
       inventorySerialId: null,
       inventoryBatchId: null,
+      // FIFO изписването пише само batchAllocations (inventoryBatchId остава
+      // null) — иначе вече изписани редове излизат като „готови".
+      batchAllocations: { none: {} },
       directDelivery: false, // директните редове не чакат наличност
-      product: { trackInventory: true },
+      product: { type: { not: 'SERVICE' } },
     };
     const orders = await this.prisma.order.findMany({
       where: {
@@ -718,7 +721,7 @@ export class OrdersService {
     const productIds = new Set<string>();
     for (const o of orders) {
       for (const it of o.items) {
-        if (it.product.trackInventory) productIds.add(it.product.id);
+        productIds.add(it.product.id);
       }
     }
 
@@ -787,9 +790,8 @@ export class OrdersService {
 
     for (const o of orders) {
       for (const it of o.items) {
-        // Items whose product doesn't track inventory (services etc.)
-        // don't belong in the dashboard.
-        if (!it.product.trackInventory) continue;
+        // Услугите нямат склад и не чакат изписване.
+        if (it.product.type === 'SERVICE') continue;
 
         const hasAllocation = Boolean(
           it.inventorySerialId || it.inventoryBatchId,
@@ -988,7 +990,6 @@ export class OrdersService {
             it.product &&
             !it.directDelivery &&
             it.product.type !== 'SERVICE' &&
-            it.product.trackInventory &&
             (it.product.type === 'SERIAL'
               ? !it.inventorySerialId
               : !it.stockDeducted),
@@ -1122,8 +1123,7 @@ export class OrdersService {
           const oldProduct = oldItem.product;
           if (
             !oldProduct ||
-            oldProduct.type === 'SERVICE' ||
-            !oldProduct.trackInventory
+            oldProduct.type === 'SERVICE'
           ) {
             continue;
           }
@@ -1265,8 +1265,7 @@ export class OrdersService {
           if (
             !newProduct ||
             newItem.directDelivery ||
-            newProduct.type === 'SERVICE' ||
-            !newProduct.trackInventory
+            newProduct.type === 'SERVICE'
           ) {
             continue;
           }
@@ -1513,8 +1512,7 @@ export class OrdersService {
       if (
         !product ||
         item.directDelivery ||
-        product.type === 'SERVICE' ||
-        !product.trackInventory
+        product.type === 'SERVICE'
       ) {
         continue;
       }
@@ -1629,8 +1627,7 @@ export class OrdersService {
         if (
           !product ||
           item.directDelivery ||
-          product.type === 'SERVICE' ||
-          !product.trackInventory
+          product.type === 'SERVICE'
         ) {
           continue;
         }
@@ -1792,8 +1789,7 @@ export class OrdersService {
           // Skip inventory deduction for services
           if (
             !product ||
-            product.type === 'SERVICE' ||
-            !product.trackInventory
+            product.type === 'SERVICE'
           ) {
             continue;
           }
@@ -2022,8 +2018,7 @@ export class OrdersService {
           // Skip for services or non-tracked products
           if (
             !product ||
-            product.type === 'SERVICE' ||
-            !product.trackInventory
+            product.type === 'SERVICE'
           ) {
             continue;
           }
