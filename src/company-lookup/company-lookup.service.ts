@@ -235,8 +235,8 @@ export class CompanyLookupService {
         ...base,
         ...addr,
         found: true,
-        fullName: vies.name,
-        name: vies.name,
+        fullName: this.cleanName(vies.name),
+        name: this.cleanName(vies.name),
         source: 'vies',
       };
     }
@@ -371,7 +371,7 @@ export class CompanyLookupService {
             if (f.htmlData && !fields.has(f.nameCode))
               fields.set(f.nameCode, stripHtml(f.htmlData));
     }
-    const name = fields.get('CR_F_2_L') || deed.companyName || null;
+    const name = this.cleanName(fields.get('CR_F_2_L') || deed.companyName);
     const seat = fields.get('CR_F_5_L') || '';
     const addr = this.parseSeat(seat);
     const nkidRaw = fields.get('CR_F_6a_L') || '';
@@ -379,9 +379,9 @@ export class CompanyLookupService {
       ? (nkidRaw.match(/Група по НКИД:\s*([\d.]+)/)?.[1] ?? null)
       : null;
     return {
-      fullName: (deed.fullName || '').trim() || name,
+      fullName: this.cleanName(deed.fullName) || name,
       name,
-      latinName: this.cleanLatin(fields.get('CR_F_4_L') || null),
+      latinName: this.cleanName(fields.get('CR_F_4_L')),
       legalForm: fields.get('CR_F_3_L') || null,
       ...addr,
       manager: this.parseManagers(fields.get('CR_F_7_L') || ''),
@@ -421,8 +421,17 @@ export class CompanyLookupService {
     return 'inactive';
   }
 
-  private cleanLatin(v: string | null) {
-    return v ? v.replace(/[‘’'"„“]/g, '').trim() || null : null;
+  /** Регистърът връща името както е вписано — при част от фирмите с кавички
+   *  („"ЕМ ДЖИ Поултри" ООД"). Кавичките не са част от идентификацията
+   *  (ЕИК е), а разбъркват сортирането и документите, затова падат. */
+  private cleanName(v: string | null | undefined): string | null {
+    if (!v) return null;
+    return (
+      v
+        .replace(/[‘’'"„“”«»]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim() || null
+    );
   }
 
   /**

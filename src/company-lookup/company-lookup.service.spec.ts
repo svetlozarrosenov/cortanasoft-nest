@@ -71,7 +71,9 @@ describe('CompanyLookupService parsers', () => {
   it('parses a real active deed', () => {
     const r = service.parseDeed(activeDeed);
     expect(r.name).toBe('Електрик експрес');
-    expect(r.fullName).toBe('"Електрик експрес" ЕООД');
+    // кавичките от регистъра падат (както при латинското име)
+    expect(r.fullName).toBe('Електрик експрес ЕООД');
+    expect(r.name).toBe('Електрик експрес');
     expect(r.latinName).toBe('Electric express S. P. Ltd.');
     expect(r.legalForm).toBe('Еднолично дружество с ограничена отговорност');
     expect(r.region).toBe('София (столица)');
