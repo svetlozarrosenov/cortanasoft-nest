@@ -7,7 +7,10 @@ import {
   IsEmail,
   Matches,
   Length,
+  IsInt,
+  Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { CompanyRole } from '@prisma/client';
 
 export class CreateCompanyDto {
@@ -119,6 +122,13 @@ export class CreateCompanyDto {
   @IsString()
   @IsOptional()
   invoiceTemplateKey?: string;
+
+  // Номер на първата фактура (по подразбиране 1)
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  invoiceDefaultStartNumber?: number;
 
   @IsString()
   @IsOptional()

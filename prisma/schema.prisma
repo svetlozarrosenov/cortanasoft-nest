@@ -151,6 +151,10 @@ model Company {
   stockReceiptTemplateKey          String?
   acceptanceProtocolTemplateKey    String?
   ascertainmentProtocolTemplateKey String?
+
+  // Номер на първата фактура на компанията (Администрация > Компании). Ползва се
+  // само докато няма издадени фактури — за клиент, който продължава номерация.
+  invoiceDefaultStartNumber Int @default(1)
   serviceProtocolTemplateKey       String?
 
   // Контакти

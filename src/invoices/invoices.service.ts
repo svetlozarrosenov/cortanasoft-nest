@@ -23,34 +23,31 @@ export class InvoicesService {
     private paymentsService: PaymentsService,
   ) {}
 
+  // Една обща номерация за всички фактури на компанията (обикновени, авансови,
+  // окончателни): последният номер + 1, 10 цифри с водещи нули.
   private async generateInvoiceNumber(
     companyId: string,
-    typePrefix: string = 'INV',
-    tx?: any,
+    tx?: Prisma.TransactionClient,
   ): Promise<string> {
     const db = tx || this.prisma;
-
-    if (typePrefix !== 'INV') {
-      const prefix = `${typePrefix}-`;
-      const last = await db.invoice.findFirst({
-        where: { companyId, invoiceNumber: { startsWith: prefix } },
-        orderBy: { invoiceNumber: 'desc' },
-        select: { invoiceNumber: true },
-      });
-      const lastNum = last
-        ? parseInt(last.invoiceNumber.slice(prefix.length), 10)
-        : 0;
-      const next = Number.isFinite(lastNum) ? lastNum + 1 : 1;
-      return `${prefix}${next.toString().padStart(10, '0')}`;
-    }
-
     const last = await db.invoice.findFirst({
-      where: { companyId, invoiceNumber: { not: { contains: '-' } } },
+      where: { companyId },
       orderBy: { invoiceNumber: 'desc' },
       select: { invoiceNumber: true },
     });
-    const lastNum = last ? parseInt(last.invoiceNumber, 10) : 0;
-    const next = Number.isFinite(lastNum) ? lastNum + 1 : 1;
+
+    let next: number;
+    if (last) {
+      const lastNum = parseInt(last.invoiceNumber, 10);
+      next = Number.isFinite(lastNum) ? lastNum + 1 : 1;
+    } else {
+      // Първа фактура: номерът, зададен за компанията в Администрация (по подразбиране 1)
+      const company = await db.company.findUnique({
+        where: { id: companyId },
+        select: { invoiceDefaultStartNumber: true },
+      });
+      next = company?.invoiceDefaultStartNumber ?? 1;
+    }
     return next.toString().padStart(10, '0');
   }
 
@@ -236,7 +233,7 @@ export class InvoicesService {
 
     // Generate number + create in a transaction to prevent duplicates
     return this.prisma.$transaction(async (tx) => {
-      const invoiceNumber = await this.generateInvoiceNumber(companyId, 'INV', tx);
+      const invoiceNumber = await this.generateInvoiceNumber(companyId, tx);
 
       const orderPaid = Number(order.paidAmount);
       // Pro-rata allocated paid amount for this slice (FIFO: each invoice claims up to its own total)
@@ -372,7 +369,7 @@ export class InvoicesService {
     const effectiveVatRate = this.effectiveVatRateForOrder(order);
 
     return this.prisma.$transaction(async (tx) => {
-      const invoiceNumber = await this.generateInvoiceNumber(companyId, 'INV', tx);
+      const invoiceNumber = await this.generateInvoiceNumber(companyId, tx);
 
       const invoice = await tx.invoice.create({
         data: {
@@ -528,7 +525,7 @@ export class InvoicesService {
     }));
 
     const created = await this.prisma.$transaction(async (tx) => {
-      const invoiceNumber = await this.generateInvoiceNumber(companyId, 'INV', tx);
+      const invoiceNumber = await this.generateInvoiceNumber(companyId, tx);
 
       // Inherit paid amount from advances (they're already paid in real money)
       const inheritedPaid = advances.reduce(
