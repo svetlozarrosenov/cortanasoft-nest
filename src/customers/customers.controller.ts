@@ -32,37 +32,19 @@ import type { ExportFormat } from '../common/export/export.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CustomerStage, CustomerSource } from '@prisma/client';
 
-// Партньорски scope: потребител с UserCompany.partnerCustomerId вижда/пипа
-// само своя партньорски картон + доведените от него клиенти. null = пълен
-// достъп (обикновен потребител).
-const partnerScopeOf = (user: any): string | null =>
-  user?.partnerCustomerId ?? null;
-
-// Право за управление на партньорските полета (isPartner / referredById) —
-// дава се от Администрация > Компании > Роли > CRM > Партньори (редакция)
-const canManagePartnersOf = (user: any): boolean =>
-  checkPermission(user?.currentRole?.permissions, 'crm', 'partners', 'edit');
-
-// Customers and Leads are the same entity (leads = customers with stage LEAD)
-// served by these endpoints. Allow either the 'customers' or the 'contacts'
-// (= Leads) permission, so a leads-only role can use them too. The frontend
-// decides which menu (Customers / Leads) is shown per permission.
-const crmCustomersOrLeads = (action: 'view' | 'create' | 'edit' | 'delete') =>
-  RequireAnyPermission(
-    { module: 'crm', page: 'customers', action },
-    { module: 'crm', page: 'contacts', action },
-  );
-
 @Controller('companies/:companyId/customers')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard, PermissionsGuard)
-export class CompanyCustomersController {
+export class CustomersController {
   constructor(
     private readonly customersService: CustomersService,
     private readonly exportService: ExportService,
   ) {}
 
   @Post()
-  @crmCustomersOrLeads('create')
+  @RequireAnyPermission(
+    { module: 'crm', page: 'customers', action: 'create' },
+    { module: 'crm', page: 'contacts', action: 'create' },
+  )
   create(
     @Param('companyId') companyId: string,
     @Body() dto: CreateCustomerDto,
@@ -71,8 +53,13 @@ export class CompanyCustomersController {
     return this.customersService.create(
       companyId,
       dto,
-      partnerScopeOf(user),
-      canManagePartnersOf(user),
+      user?.partnerCustomerId ?? null,
+      checkPermission(
+        user?.currentRole?.permissions,
+        'crm',
+        'partners',
+        'edit',
+      ),
     );
   }
 
@@ -88,7 +75,10 @@ export class CompanyCustomersController {
   }
 
   @Get()
-  @crmCustomersOrLeads('view')
+  @RequireAnyPermission(
+    { module: 'crm', page: 'customers', action: 'view' },
+    { module: 'crm', page: 'contacts', action: 'view' },
+  )
   async findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryCustomersDto,
@@ -97,12 +87,15 @@ export class CompanyCustomersController {
     return await this.customersService.findAll(
       companyId,
       query,
-      partnerScopeOf(user),
+      user?.partnerCustomerId ?? null,
     );
   }
 
   @Get('export')
-  @crmCustomersOrLeads('view')
+  @RequireAnyPermission(
+    { module: 'crm', page: 'customers', action: 'view' },
+    { module: 'crm', page: 'contacts', action: 'view' },
+  )
   async export(
     @Param('companyId') companyId: string,
     @Query() query: QueryCustomersDto,
@@ -113,7 +106,7 @@ export class CompanyCustomersController {
     const { data } = await this.customersService.findAll(
       companyId,
       { ...query, page: 1, limit: 100000 } as any,
-      partnerScopeOf(user),
+      user?.partnerCustomerId ?? null,
     );
     const columns = [
       { header: 'Company Name', key: 'companyName', width: 25 },
@@ -128,39 +121,63 @@ export class CompanyCustomersController {
       { header: 'Stage', key: 'stage', width: 12 },
       { header: 'Active', key: 'isActive', width: 10 },
     ];
-    const buffer = await this.exportService.generateFile(columns, data, format, 'Customers');
+    const buffer = await this.exportService.generateFile(
+      columns,
+      data,
+      format,
+      'Customers',
+    );
     const ext = format === 'csv' ? 'csv' : 'xlsx';
     res.set({
-      'Content-Type': format === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        format === 'csv'
+          ? 'text/csv'
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="customers-${new Date().toISOString().slice(0, 10)}.${ext}"`,
     });
     return new StreamableFile(buffer);
   }
 
   @Get('stages')
-  @crmCustomersOrLeads('view')
+  @RequireAnyPermission(
+    { module: 'crm', page: 'customers', action: 'view' },
+    { module: 'crm', page: 'contacts', action: 'view' },
+  )
   getStages() {
     return Object.values(CustomerStage);
   }
 
   @Get('sources')
-  @crmCustomersOrLeads('view')
+  @RequireAnyPermission(
+    { module: 'crm', page: 'customers', action: 'view' },
+    { module: 'crm', page: 'contacts', action: 'view' },
+  )
   getSources() {
     return Object.values(CustomerSource);
   }
 
   @Get(':id')
-  @crmCustomersOrLeads('view')
+  @RequireAnyPermission(
+    { module: 'crm', page: 'customers', action: 'view' },
+    { module: 'crm', page: 'contacts', action: 'view' },
+  )
   findOne(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
     @CurrentUser() user: any,
   ) {
-    return this.customersService.findOne(companyId, id, partnerScopeOf(user));
+    return this.customersService.findOne(
+      companyId,
+      id,
+      user?.partnerCustomerId ?? null,
+    );
   }
 
   @Patch(':id')
-  @crmCustomersOrLeads('edit')
+  @RequireAnyPermission(
+    { module: 'crm', page: 'customers', action: 'edit' },
+    { module: 'crm', page: 'contacts', action: 'edit' },
+  )
   update(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
@@ -171,18 +188,30 @@ export class CompanyCustomersController {
       companyId,
       id,
       dto,
-      partnerScopeOf(user),
-      canManagePartnersOf(user),
+      user?.partnerCustomerId ?? null,
+      checkPermission(
+        user?.currentRole?.permissions,
+        'crm',
+        'partners',
+        'edit',
+      ),
     );
   }
 
   @Delete(':id')
-  @crmCustomersOrLeads('delete')
+  @RequireAnyPermission(
+    { module: 'crm', page: 'customers', action: 'delete' },
+    { module: 'crm', page: 'contacts', action: 'delete' },
+  )
   remove(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
     @CurrentUser() user: any,
   ) {
-    return this.customersService.remove(companyId, id, partnerScopeOf(user));
+    return this.customersService.remove(
+      companyId,
+      id,
+      user?.partnerCustomerId ?? null,
+    );
   }
 }

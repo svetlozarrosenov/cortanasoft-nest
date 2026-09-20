@@ -9,6 +9,7 @@ import {
   Min,
   Max,
   ValidateIf,
+  IsNotEmpty,
 } from 'class-validator';
 import {
   CustomerType,
@@ -18,15 +19,16 @@ import {
   CompanySize,
 } from '@prisma/client';
 import { Type } from 'class-transformer';
+import { ErrorMessages } from '../../common/constants/error-messages';
 
 export class CreateCustomerDto {
   @IsEnum(CustomerType)
-  @IsOptional()
-  type?: CustomerType;
+  type: CustomerType;
 
-  // Company info
+  // Company info — името е задължително за клиент-фирма
+  @ValidateIf((o) => o.type === CustomerType.COMPANY)
+  @IsNotEmpty({ message: ErrorMessages.customers.companyNameRequired })
   @IsString()
-  @IsOptional()
   companyName?: string;
 
   @IsString()
@@ -41,13 +43,15 @@ export class CreateCustomerDto {
   @IsOptional()
   molName?: string;
 
-  // Individual info
+  // Individual info — поне едно от име/фамилия е задължително за физическо лице
+  @ValidateIf((o) => o.type === CustomerType.INDIVIDUAL && !o.lastName)
+  @IsNotEmpty({ message: ErrorMessages.customers.personalNameRequired })
   @IsString()
-  @IsOptional()
   firstName?: string;
 
+  @ValidateIf((o) => o.type === CustomerType.INDIVIDUAL && !o.firstName)
+  @IsNotEmpty({ message: ErrorMessages.customers.personalNameRequired })
   @IsString()
-  @IsOptional()
   lastName?: string;
 
   // Contact info

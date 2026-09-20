@@ -65,24 +65,15 @@ export class CustomersService {
     partnerScopeId?: string | null,
     canManagePartners = false,
   ) {
-    // Validate based on type
-    const type = dto.type || CustomerType.INDIVIDUAL;
-
-    if (type === CustomerType.COMPANY && !dto.companyName) {
-      throw new BadRequestException(ErrorMessages.customers.companyNameRequired);
-    }
-
-    if (type === CustomerType.INDIVIDUAL && !dto.firstName && !dto.lastName) {
-      throw new BadRequestException(ErrorMessages.customers.personalNameRequired);
-    }
-
     // Check for duplicate email within the same company
     if (dto.email) {
       const existingByEmail = await this.prisma.customer.findFirst({
         where: { companyId, email: dto.email },
       });
       if (existingByEmail) {
-        throw new BadRequestException('Клиент с този имейл вече съществува в тази компания.');
+        throw new BadRequestException(
+          'Клиент с този имейл вече съществува в тази компания.',
+        );
       }
     }
 
@@ -120,11 +111,14 @@ export class CustomersService {
         'Нямате право да управлявате партньори. Изисква се право „Партньори (редакция)" в CRM.',
       );
     }
-    await this.validatePartnerInvariants(companyId, { isPartner, referredById });
+    await this.validatePartnerInvariants(companyId, {
+      isPartner,
+      referredById,
+    });
 
     const customer = await this.prisma.customer.create({
       data: {
-        type,
+        type: dto.type,
         companyName: dto.companyName,
         eik: dto.eik,
         vatNumber: dto.vatNumber,
@@ -162,7 +156,13 @@ export class CustomersService {
         country: true,
         assignedTo: { select: { id: true, firstName: true, lastName: true } },
         referredBy: {
-          select: { id: true, type: true, companyName: true, firstName: true, lastName: true },
+          select: {
+            id: true,
+            type: true,
+            companyName: true,
+            firstName: true,
+            lastName: true,
+          },
         },
         _count: { select: { orders: true, referrals: true } },
       },
@@ -236,7 +236,13 @@ export class CustomersService {
           country: true,
           assignedTo: { select: { id: true, firstName: true, lastName: true } },
           referredBy: {
-            select: { id: true, type: true, companyName: true, firstName: true, lastName: true },
+            select: {
+              id: true,
+              type: true,
+              companyName: true,
+              firstName: true,
+              lastName: true,
+            },
           },
           _count: { select: { orders: true, referrals: true } },
         },
@@ -272,7 +278,13 @@ export class CustomersService {
         country: true,
         assignedTo: { select: { id: true, firstName: true, lastName: true } },
         referredBy: {
-          select: { id: true, type: true, companyName: true, firstName: true, lastName: true },
+          select: {
+            id: true,
+            type: true,
+            companyName: true,
+            firstName: true,
+            lastName: true,
+          },
         },
         orders: {
           take: 10,
@@ -378,7 +390,9 @@ export class CustomersService {
         where: { companyId, email: dto.email, NOT: { id } },
       });
       if (existingByEmail) {
-        throw new BadRequestException('Клиент с този имейл вече съществува в тази компания.');
+        throw new BadRequestException(
+          'Клиент с този имейл вече съществува в тази компания.',
+        );
       }
     }
 
@@ -433,8 +447,12 @@ export class CustomersService {
         ...(dto.website !== undefined && { website: dto.website }),
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.tags !== undefined && { tags: dto.tags }),
-        ...(dto.searchTerms !== undefined && { searchTerms: dto.searchTerms || null }),
-        ...(dto.assignedToId !== undefined && { assignedToId: dto.assignedToId }),
+        ...(dto.searchTerms !== undefined && {
+          searchTerms: dto.searchTerms || null,
+        }),
+        ...(dto.assignedToId !== undefined && {
+          assignedToId: dto.assignedToId,
+        }),
         ...(dto.isPartner !== undefined && { isPartner: dto.isPartner }),
         ...(dto.referredById !== undefined && {
           referredById: dto.referredById || null,
@@ -443,7 +461,13 @@ export class CustomersService {
       include: {
         country: true,
         referredBy: {
-          select: { id: true, type: true, companyName: true, firstName: true, lastName: true },
+          select: {
+            id: true,
+            type: true,
+            companyName: true,
+            firstName: true,
+            lastName: true,
+          },
         },
         _count: { select: { orders: true, referrals: true } },
       },
@@ -455,7 +479,9 @@ export class CustomersService {
 
     // Check if customer has orders
     if (customer._count.orders > 0) {
-      throw new BadRequestException(ErrorMessages.customers.cannotDeleteWithOrders);
+      throw new BadRequestException(
+        ErrorMessages.customers.cannotDeleteWithOrders,
+      );
     }
 
     // Партньор с доведени клиенти, асоциирани акаунти или исторически оборот
