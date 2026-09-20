@@ -164,6 +164,27 @@ describe('OrdersService', () => {
       expect(result.vatAmount).toBe(90);
     });
 
+    it('пази описанието на реда (trim), а при празно — snapshot на името на продукта', async () => {
+      const dto = {
+        customerName: 'Client',
+        items: [
+          { productId: 'p1', quantity: 1, unitPrice: 100, description: '  Монтаж на климатик, 3 ет.  ' },
+          { productId: 'p1', quantity: 1, unitPrice: 100, description: '   ' },
+          { productId: 'p1', quantity: 1, unitPrice: 100 },
+        ],
+      };
+      mockPrisma.company.findUnique.mockResolvedValue({ id: 'c1', vatNumber: 'BG123', currencyId: 'cur1' });
+      mockPrisma.product.findMany.mockResolvedValue([{ id: 'p1', name: 'Монтаж', vatRate: 20 }]);
+      mockPrisma.order.findFirst.mockResolvedValue(null);
+      mockPrisma.order.create.mockImplementation(({ data }) => Promise.resolve({ id: '1', ...data }));
+
+      const result = await service.create('c1', 'u1', dto as any);
+      const rows = (result as any).items.create;
+      expect(rows[0].description).toBe('Монтаж на климатик, 3 ет.');
+      expect(rows[1].description).toBe('Монтаж');
+      expect(rows[2].description).toBe('Монтаж');
+    });
+
     it('should generate order number correctly', async () => {
       mockPrisma.company.findUnique.mockResolvedValue({ id: 'c1', vatNumber: null, currencyId: 'cur1' });
       mockPrisma.product.findMany.mockResolvedValue([{ id: 'p1', vatRate: 0 }]);
@@ -527,6 +548,22 @@ describe('OrdersService', () => {
       expect(mockPrisma.orderItem.deleteMany).toHaveBeenCalledWith({
         where: { orderId: 'o1' },
       });
+    });
+
+    it('при редакция новите редове получават описание — текст на потребителя или името на продукта', async () => {
+      mockPrisma.order.findFirst
+        .mockResolvedValueOnce(makeOrder('PENDING'))
+        .mockResolvedValueOnce({ id: 'o1', status: 'PENDING', items: [] });
+
+      await service.update('c1', 'o1', {
+        items: [
+          { productId: 'p1', quantity: 1, unitPrice: 100, description: ' Сериен с гравиране ' },
+          { productId: 'p1', quantity: 1, unitPrice: 100 },
+        ],
+      } as any);
+
+      const rows = mockPrisma.order.update.mock.calls[0][0].data.items.create;
+      expect(rows.map((r: any) => r.description)).toEqual(['Сериен с гравиране', 'Serial product']);
     });
 
     it('should revert old serial and consume new one on a CONFIRMED order', async () => {

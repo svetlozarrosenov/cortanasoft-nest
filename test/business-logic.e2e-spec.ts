@@ -312,6 +312,7 @@ async function testInventoryDecreaseOnSale(
         create: [
           {
             productId: product.id,
+            description: product.name,
             quantity: 30,
             unitPrice: 20.0,
             vatRate: 20,
@@ -380,6 +381,7 @@ async function testInventoryRestoreOnCancel(product: any, batch: any) {
         create: [
           {
             productId: product.id,
+            description: product.name,
             quantity: 10,
             unitPrice: 20.0,
             vatRate: 20,

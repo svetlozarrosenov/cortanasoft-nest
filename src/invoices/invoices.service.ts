@@ -249,7 +249,7 @@ export class InvoicesService {
       const items = isFullFirstInvoice
         ? order.items.map((item) => ({
             productId: item.productId,
-            description: item.product?.name || 'Артикул',
+            description: item.description || item.product?.name || 'Артикул',
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             vatRate: item.vatRate,
@@ -503,7 +503,7 @@ export class InvoicesService {
     // Order line items + one negative line per advance deducted
     const orderLineItems = order.items.map((item) => ({
       productId: item.productId,
-      description: item.product?.name || 'Артикул',
+      description: item.description || item.product?.name || 'Артикул',
       quantity: item.quantity,
       unitPrice: item.unitPrice,
       vatRate: item.vatRate,

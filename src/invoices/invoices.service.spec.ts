@@ -85,6 +85,23 @@ describe('InvoicesService', () => {
       expect(result.status).toBe('DRAFT');
     });
 
+    it.each([
+      ['Монтаж на климатик, 3 ет.', 'Монтаж на климатик, 3 ет.'],
+      [null, 'Product'],
+    ])('редът на фактурата взима описанието от реда на продажбата (%s), иначе името на продукта', async (description, expected) => {
+      // Пълна първа фактура (сумата = тоталът на поръчката) → редовете се копират 1:1
+      const order = makeOrder('CONFIRMED');
+      order.items = [{ ...order.items[0], description }] as any;
+      Object.assign(order, { invoicedAmount: 0, paidAmount: 0 });
+      mockPrisma.order.findFirst.mockResolvedValue(order);
+      mockPrisma.invoice.findFirst.mockResolvedValue(null);
+      mockPrisma.invoice.create.mockImplementation(({ data }) => Promise.resolve({ id: 'inv1', status: 'DRAFT', ...data }));
+
+      await service.createFromOrder('c1', 'u1', { orderId: 'ord1' } as any);
+      const rows = mockPrisma.invoice.create.mock.calls[0][0].data.items.create;
+      expect(rows[0].description).toBe(expected);
+    });
+
     it('should throw NotFoundException when order not found', async () => {
       mockPrisma.order.findFirst.mockResolvedValue(null);
       await expect(

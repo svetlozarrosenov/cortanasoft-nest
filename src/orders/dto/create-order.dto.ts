@@ -10,6 +10,7 @@ import {
   IsBoolean,
   IsIn,
   IsDateString,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaymentMethod } from '@prisma/client';
@@ -17,6 +18,12 @@ import { PaymentMethod } from '@prisma/client';
 export class CreateOrderItemDto {
   @IsString()
   productId: string;
+
+  // Описание на реда за документите; празно = името на продукта
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  description?: string;
 
   @IsNumber()
   @Min(0.001)

@@ -1890,6 +1890,11 @@ model OrderItem {
   productId String
   product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
 
+  // Описание на реда за документите — snapshot към момента на записа (както
+  // InvoiceItem.description): името на продукта или текст на потребителя
+  // („Монтаж на климатик, 3 ет."). Отчетите остават по productId.
+  description String
+
   // От коя партида е взето (само за BATCH продукти)
   inventoryBatchId String?
   inventoryBatch   InventoryBatch? @relation(fields: [inventoryBatchId], references: [id], onDelete: SetNull)

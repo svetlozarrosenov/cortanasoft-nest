@@ -614,7 +614,7 @@ export class CustomWebsiteService {
     const skuList = shopOrder.items.map((i) => i.sku).filter(Boolean);
     const products = await this.prisma.product.findMany({
       where: { companyId, sku: { in: skuList } },
-      select: { id: true, sku: true, vatRate: true },
+      select: { id: true, sku: true, name: true, vatRate: true },
     });
     const productBySku = new Map(products.map((p) => [p.sku, p]));
 
@@ -630,6 +630,7 @@ export class CustomWebsiteService {
         const subtotal = unitNet * i.quantity;
         return {
           productId: product.id,
+          description: product.name,
           quantity: i.quantity,
           unitPrice: Number(unitNet.toFixed(2)),
           vatRate,

@@ -194,7 +194,7 @@ export class OrdersService {
 
   private calculateItemTotals(
     items: CreateOrderDto['items'],
-    products: { id: string; vatRate: any }[],
+    products: { id: string; name: string; vatRate: any }[],
     defaultVatRate: number,
   ) {
     let subtotal = 0;
@@ -229,6 +229,10 @@ export class OrdersService {
 
       return {
         productId: item.productId,
+        // Snapshot като при фактурите: текстът на потребителя или името на
+        // продукта към момента на записа. Преименуване на продукта после не
+        // променя издадени продажби.
+        description: item.description?.trim() || product?.name || '',
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         vatRate: itemVatRate,
