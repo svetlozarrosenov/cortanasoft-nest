@@ -4,6 +4,8 @@ import { Prisma } from '@prisma/client';
 import { QueryProfitAnalyticsDto, QueryCustomerReceivablesDto } from './dto';
 import { ExpensesService } from '../expenses/expenses.service';
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 export interface ProductProfitData {
   productId: string;
   productName: string;
@@ -37,7 +39,11 @@ export interface PeriodComparison {
 
 export interface ProfitAnalyticsResult {
   summary: {
+    /** Приходи без ДДС, след отстъпки (данъчна основа на продажбите) */
     totalRevenue: number;
+    /** Σ Order.total (с ДДС и доставка) — само за коефициента на събираемост */
+    totalGross: number;
+    /** Реално получени пари (с ДДС) */
     totalPaid: number;
     totalCost: number;
     grossProfit: number;
@@ -96,21 +102,51 @@ export interface PayrollSummary {
 
 // ==================== Sales Report ====================
 
+/** Ред от групирания отчет „Продажби" (по продукт / клиент / месец / обект) */
+export interface SalesGroupRow {
+  key: string;
+  name: string;
+  /** Втори ред под името — SKU, брой поръчки и т.н. */
+  sub?: string;
+  quantity: number;
+  orderCount: number;
+  /** Приход без ДДС, след отстъпки */
+  revenue: number;
+  /** Себестойност от доставките */
+  cost: number;
+  profit: number;
+  /** Марж % от прихода */
+  margin: number;
+}
+
+export type SalesGroupBy = 'product' | 'customer' | 'month' | 'site';
+
 export interface SalesReportResult {
   revenue: number;
   paid: number;
+  cost: number;
+  grossProfit: number;
+  grossMargin: number;
   orderCount: number;
+  itemsSold: number;
   avgOrderValue: number;
   periodComparison?: {
     previousRevenue: number;
     previousPaid: number;
+    previousCost: number;
+    previousProfit: number;
     previousOrderCount: number;
     previousAvgOrderValue: number;
     revenueGrowth: number;
     paidGrowth: number;
+    profitGrowth: number;
     orderGrowth: number;
     avgOrderValueGrowth: number;
   };
+  byProduct: SalesGroupRow[];
+  byCustomer: SalesGroupRow[];
+  byMonth: SalesGroupRow[];
+  bySite: SalesGroupRow[];
   topProducts: Array<{
     productId: string;
     productName: string;
@@ -124,7 +160,7 @@ export interface SalesReportResult {
     orderCount: number;
     totalSpent: number;
   }>;
-  trend: Array<{ date: string; revenue: number; orderCount: number }>;
+  trend: Array<{ date: string; revenue: number; cost: number; profit: number; orderCount: number }>;
 }
 
 // ==================== Customers Report ====================
@@ -229,9 +265,12 @@ export interface FinancialSummaryResult {
   netMargin: number;
 
   // Касова нетна печалба (cash-basis — пропорционално на събраното)
-  // netProfitCash = paid − (cost × paid/revenue) − totalOperatingExpenses
+  // netProfitCash = cashRevenue − cashCostOfGoods − totalOperatingExpenses
   netProfitCash: number;
   netMarginCash: number;
+  /** Събраната част от нетните приходи / себестойността (за касовия P&L) */
+  cashRevenue: number;
+  cashCostOfGoods: number;
 
   // Допълнителни данни
   totalPurchases: number;
@@ -249,6 +288,94 @@ export class ErpAnalyticsService {
     private expensesService: ExpensesService,
   ) {}
 
+  // ---- Общи правила за приходи и себестойност -------------------------------
+  // Приход = без ДДС, след отстъпката на реда и на документа (данъчната основа).
+  // Себестойност = САМО от доставки: изписаните партиди (FIFO), партида/сериен
+  // номер на реда, snapshot при директна доставка, последна доставна стойност на
+  // продукта. Без доставка себестойността е 0 — покупната цена от картона не се
+  // ползва, тя е само за предпопълване на нова доставка.
+
+  /** Стойност на реда без ДДС след отстъпката на реда */
+  private lineNet(item: {
+    quantity: any;
+    unitPrice: any;
+    subtotal?: any;
+  }): number {
+    return item.subtotal != null
+      ? Number(item.subtotal)
+      : Number(item.quantity) * Number(item.unitPrice);
+  }
+
+  /** Приход на поръчката без ДДС и след отстъпката на документа */
+  private orderNet(order: {
+    subtotal?: any;
+    discount?: any;
+    items: any[];
+  }): number {
+    const subtotal =
+      order.subtotal != null
+        ? Number(order.subtotal)
+        : order.items.reduce((sum, it) => sum + this.lineNet(it), 0);
+    return Math.max(0, subtotal - Number(order.discount || 0));
+  }
+
+  /** Коефициент, с който отстъпката на документа се разпределя по редовете */
+  private lineFactor(order: {
+    subtotal?: any;
+    discount?: any;
+    items: any[];
+  }): number {
+    const subtotal =
+      order.subtotal != null
+        ? Number(order.subtotal)
+        : order.items.reduce((sum, it) => sum + this.lineNet(it), 0);
+    return subtotal > 0 ? this.orderNet(order) / subtotal : 1;
+  }
+
+  /** Себестойност на реда — само от доставки (виж коментара горе) */
+  private lineCost(item: {
+    quantity: any;
+    unitCost?: any;
+    batchAllocations?:
+      | { quantity: any; inventoryBatch?: { unitCost: any } | null }[]
+      | null;
+    inventoryBatch?: { unitCost: any } | null;
+    inventorySerial?: { unitCost: any } | null;
+    product?: { lastLandedCost?: any } | null;
+  }): number {
+    const qty = Number(item.quantity);
+    // 0) директна доставка — snapshot на реда
+    if (item.unitCost != null) return qty * Number(item.unitCost);
+    const landed =
+      item.product?.lastLandedCost != null
+        ? Number(item.product.lastLandedCost)
+        : 0;
+    // 1) FIFO изписване по партиди (обикновени и партидни продукти)
+    const allocations = item.batchAllocations || [];
+    if (allocations.length > 0) {
+      let cost = 0;
+      let allocated = 0;
+      for (const a of allocations) {
+        const aq = Number(a.quantity);
+        allocated += aq;
+        cost +=
+          aq *
+          (a.inventoryBatch?.unitCost != null
+            ? Number(a.inventoryBatch.unitCost)
+            : landed);
+      }
+      const remaining = qty - allocated;
+      if (remaining > 0.0005) cost += remaining * landed;
+      return cost;
+    }
+    // 2) избрана партида / сериен номер на реда
+    if (item.inventoryBatch) return qty * Number(item.inventoryBatch.unitCost);
+    if (item.inventorySerial)
+      return qty * Number(item.inventorySerial.unitCost);
+    // 3) последна доставна стойност на продукта (от последната доставка)
+    return qty * landed;
+  }
+
   async getProfitAnalytics(
     companyId: string,
     query: QueryProfitAnalyticsDto,
@@ -259,7 +386,15 @@ export class ErpAnalyticsService {
       : new Date(now.getFullYear(), now.getMonth(), 1); // Start of current month
     const dateTo = query.dateTo
       ? new Date(query.dateTo + 'T23:59:59.999Z')
-      : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999); // Today end
+      : new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          23,
+          59,
+          59,
+          999,
+        ); // Today end
 
     // Calculate previous period for comparison
     const periodLength = dateTo.getTime() - dateFrom.getTime();
@@ -295,6 +430,9 @@ export class ErpAnalyticsService {
             },
             inventoryBatch: true,
             inventorySerial: true,
+            batchAllocations: {
+              include: { inventoryBatch: { select: { unitCost: true } } },
+            },
           },
           ...(query.productId && {
             where: { productId: query.productId },
@@ -303,79 +441,29 @@ export class ErpAnalyticsService {
       },
     });
 
-    // Pre-load weighted average cost per product from goods receipts
-    // This handles cases where order items don't have a direct inventoryBatchId (FIFO deduction)
-    const productIds = new Set<string>();
-    for (const order of orders) {
-      for (const item of order.items) {
-        productIds.add(item.productId);
-      }
-    }
-
-    const avgCostMap = new Map<string, number>();
-    if (productIds.size > 0) {
-      // Calculate weighted average cost from delivered goods receipt items
-      const receiptItems = await this.prisma.goodsReceiptItem.findMany({
-        where: {
-          productId: { in: Array.from(productIds) },
-          goodsReceipt: {
-            companyId,
-            status: 'DELIVERED',
-          },
-        },
-        select: {
-          productId: true,
-          quantity: true,
-          unitPrice: true,
-          exchangeRate: true,
-        },
-      });
-
-      // Group by product and calculate weighted average
-      const productCosts = new Map<string, { totalCost: number; totalQty: number }>();
-      for (const ri of receiptItems) {
-        const qty = Number(ri.quantity);
-        const cost = qty * Number(ri.unitPrice) * (Number(ri.exchangeRate) || 1);
-        const existing = productCosts.get(ri.productId);
-        if (existing) {
-          existing.totalCost += cost;
-          existing.totalQty += qty;
-        } else {
-          productCosts.set(ri.productId, { totalCost: cost, totalQty: qty });
-        }
-      }
-
-      for (const [productId, { totalCost: tc, totalQty: tq }] of productCosts) {
-        if (tq > 0) {
-          avgCostMap.set(productId, tc / tq);
-        }
-      }
-    }
-
     // Calculate product-level profits
     const productMap = new Map<string, ProductProfitData>();
 
     let totalRevenue = 0;
+    let totalGross = 0;
     let totalPaid = 0;
     let totalCost = 0;
     let totalItemsSold = 0;
 
     for (const order of orders) {
-      // Top-level revenue uses Order.total so it matches the Dashboard
-      // "Продажби за месеца" KPI (which sums order.total too). Per-product
-      // revenue below stays at the net item level because there is no
-      // sane way to allocate shipping / VAT / order-level discounts to
-      // individual products.
-      // Skip when a category filter is active and the order has no
-      // matching items, otherwise the totals would include unrelated
-      // orders' shipping.
-      const hasMatchingItem = !query.categoryId
-        || order.items.some((it) => it.product.categoryId === query.categoryId);
+      // Приходът е данъчната основа на поръчката (без ДДС, след отстъпки), за
+      // да е съпоставим със себестойността. Доставката и ДДС не са приход.
+      // При филтър по категория поръчка без ред от нея не влиза изобщо.
+      const hasMatchingItem =
+        !query.categoryId ||
+        order.items.some((it) => it.product.categoryId === query.categoryId);
       if (hasMatchingItem) {
-        totalRevenue += Number(order.total);
+        totalRevenue += this.orderNet(order);
+        totalGross += Number(order.total);
         // Cash-basis: how much has actually been collected on these orders.
         totalPaid += Number(order.paidAmount ?? 0);
       }
+      const factor = this.lineFactor(order);
       for (const item of order.items) {
         // Filter by category if specified
         if (query.categoryId && item.product.categoryId !== query.categoryId) {
@@ -383,24 +471,8 @@ export class ErpAnalyticsService {
         }
 
         const quantity = Number(item.quantity);
-        const unitPrice = Number(item.unitPrice);
-        const itemRevenue = quantity * unitPrice;
-
-        // Get cost: 0) snapshot on the row (директна доставка), 1) linked batch,
-        // 2) linked serial, 3) weighted avg from goods receipts, 4) product purchasePrice
-        let unitCost = 0;
-        if (item.unitCost != null) {
-          unitCost = Number(item.unitCost);
-        } else if (item.inventoryBatch) {
-          unitCost = Number(item.inventoryBatch.unitCost);
-        } else if ((item as any).inventorySerial) {
-          unitCost = Number((item as any).inventorySerial.unitCost);
-        } else if (avgCostMap.has(item.productId)) {
-          unitCost = avgCostMap.get(item.productId)!;
-        } else if (item.product.purchasePrice) {
-          unitCost = Number(item.product.purchasePrice);
-        }
-        const itemCost = quantity * unitCost;
+        const itemRevenue = this.lineNet(item) * factor;
+        const itemCost = this.lineCost(item);
 
         totalCost += itemCost;
         totalItemsSold += quantity;
@@ -433,8 +505,10 @@ export class ErpAnalyticsService {
     const byProduct: ProductProfitData[] = [];
     for (const [, data] of productMap) {
       data.profit = data.revenue - data.cost;
-      data.profitMargin = data.revenue > 0 ? (data.profit / data.revenue) * 100 : 0;
-      data.avgSellingPrice = data.unitsSold > 0 ? data.revenue / data.unitsSold : 0;
+      data.profitMargin =
+        data.revenue > 0 ? (data.profit / data.revenue) * 100 : 0;
+      data.avgSellingPrice =
+        data.unitsSold > 0 ? data.revenue / data.unitsSold : 0;
       data.avgCostPrice = data.unitsSold > 0 ? data.cost / data.unitsSold : 0;
       byProduct.push(data);
     }
@@ -443,12 +517,15 @@ export class ErpAnalyticsService {
     byProduct.sort((a, b) => b.profit - a.profit);
 
     // Aggregate by category
-    const categoryMap = new Map<string, {
-      categoryId: string | null;
-      categoryName: string;
-      revenue: number;
-      cost: number;
-    }>();
+    const categoryMap = new Map<
+      string,
+      {
+        categoryId: string | null;
+        categoryName: string;
+        revenue: number;
+        cost: number;
+      }
+    >();
 
     for (const product of byProduct) {
       const catKey = product.categoryName || 'uncategorized';
@@ -466,15 +543,19 @@ export class ErpAnalyticsService {
       }
     }
 
-    const byCategory = Array.from(categoryMap.values()).map(cat => ({
-      ...cat,
-      profit: cat.revenue - cat.cost,
-      profitMargin: cat.revenue > 0 ? ((cat.revenue - cat.cost) / cat.revenue) * 100 : 0,
-    })).sort((a, b) => b.profit - a.profit);
+    const byCategory = Array.from(categoryMap.values())
+      .map((cat) => ({
+        ...cat,
+        profit: cat.revenue - cat.cost,
+        profitMargin:
+          cat.revenue > 0 ? ((cat.revenue - cat.cost) / cat.revenue) * 100 : 0,
+      }))
+      .sort((a, b) => b.profit - a.profit);
 
     // Calculate gross profit
     const grossProfit = totalRevenue - totalCost;
-    const profitMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+    const profitMargin =
+      totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
 
     // Fetch previous period for comparison
     const previousOrders = await this.prisma.order.findMany({
@@ -494,6 +575,9 @@ export class ErpAnalyticsService {
             inventoryBatch: true,
             inventorySerial: true,
             product: true,
+            batchAllocations: {
+              include: { inventoryBatch: { select: { unitCost: true } } },
+            },
           },
         },
       },
@@ -503,39 +587,30 @@ export class ErpAnalyticsService {
     let previousCost = 0;
 
     for (const order of previousOrders) {
-      // Mirror the current-period change above: revenue = Σ order.total so
-      // the period-over-period delta matches dashboard semantics.
-      previousRevenue += Number(order.total);
+      previousRevenue += this.orderNet(order);
       for (const item of order.items) {
-        const quantity = Number(item.quantity);
-
-        let unitCost = 0;
-        if (item.unitCost != null) {
-          unitCost = Number(item.unitCost);
-        } else if (item.inventoryBatch) {
-          unitCost = Number(item.inventoryBatch.unitCost);
-        } else if (item.inventorySerial) {
-          unitCost = Number(item.inventorySerial.unitCost);
-        } else if (avgCostMap.has(item.productId)) {
-          unitCost = avgCostMap.get(item.productId)!;
-        } else if (item.product.purchasePrice) {
-          unitCost = Number(item.product.purchasePrice);
-        }
-        previousCost += quantity * unitCost;
+        previousCost += this.lineCost(item);
       }
     }
 
     const previousProfit = previousRevenue - previousCost;
-    const revenueGrowth = previousRevenue > 0
-      ? ((totalRevenue - previousRevenue) / previousRevenue) * 100
-      : totalRevenue > 0 ? 100 : 0;
-    const profitGrowth = previousProfit > 0
-      ? ((grossProfit - previousProfit) / previousProfit) * 100
-      : grossProfit > 0 ? 100 : 0;
+    const revenueGrowth =
+      previousRevenue > 0
+        ? ((totalRevenue - previousRevenue) / previousRevenue) * 100
+        : totalRevenue > 0
+          ? 100
+          : 0;
+    const profitGrowth =
+      previousProfit > 0
+        ? ((grossProfit - previousProfit) / previousProfit) * 100
+        : grossProfit > 0
+          ? 100
+          : 0;
 
     return {
       summary: {
         totalRevenue,
+        totalGross,
         totalPaid,
         totalCost,
         grossProfit,
@@ -566,7 +641,15 @@ export class ErpAnalyticsService {
       : new Date(now.getFullYear(), now.getMonth(), 1); // Start of current month
     const dateTo = query.dateTo
       ? new Date(query.dateTo + 'T23:59:59.999Z')
-      : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      : new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          23,
+          59,
+          59,
+          999,
+        );
 
     const receiptWhere: any = {
       companyId,
@@ -601,15 +684,18 @@ export class ErpAnalyticsService {
     });
 
     // Calculate totals
-    const productPurchases = new Map<string, {
-      productId: string;
-      productName: string;
-      productSku: string;
-      categoryName: string | null;
-      unitsPurchased: number;
-      totalCost: number;
-      avgCostPrice: number;
-    }>();
+    const productPurchases = new Map<
+      string,
+      {
+        productId: string;
+        productName: string;
+        productSku: string;
+        categoryName: string | null;
+        unitsPurchased: number;
+        totalCost: number;
+        avgCostPrice: number;
+      }
+    >();
 
     let totalPurchaseCost = 0;
     let totalUnitsPurchased = 0;
@@ -647,18 +733,23 @@ export class ErpAnalyticsService {
     }
 
     // Calculate averages
-    const byProduct = Array.from(productPurchases.values()).map(p => ({
-      ...p,
-      avgCostPrice: p.unitsPurchased > 0 ? p.totalCost / p.unitsPurchased : 0,
-    })).sort((a, b) => b.totalCost - a.totalCost);
+    const byProduct = Array.from(productPurchases.values())
+      .map((p) => ({
+        ...p,
+        avgCostPrice: p.unitsPurchased > 0 ? p.totalCost / p.unitsPurchased : 0,
+      }))
+      .sort((a, b) => b.totalCost - a.totalCost);
 
     // By supplier
-    const supplierMap = new Map<string, {
-      supplierId: string | null;
-      supplierName: string;
-      totalCost: number;
-      receiptCount: number;
-    }>();
+    const supplierMap = new Map<
+      string,
+      {
+        supplierId: string | null;
+        supplierName: string;
+        totalCost: number;
+        receiptCount: number;
+      }
+    >();
 
     for (const receipt of receipts) {
       let receiptTotal = 0;
@@ -684,8 +775,9 @@ export class ErpAnalyticsService {
       }
     }
 
-    const bySupplier = Array.from(supplierMap.values())
-      .sort((a, b) => b.totalCost - a.totalCost);
+    const bySupplier = Array.from(supplierMap.values()).sort(
+      (a, b) => b.totalCost - a.totalCost,
+    );
 
     return {
       summary: {
@@ -718,7 +810,10 @@ export class ErpAnalyticsService {
           // Заплати в рамките на периода
           {
             year: startYear,
-            month: { gte: startMonth, lte: startYear === endYear ? endMonth : 12 },
+            month: {
+              gte: startMonth,
+              lte: startYear === endYear ? endMonth : 12,
+            },
           },
           // Ако периода обхваща две години
           ...(startYear !== endYear
@@ -764,7 +859,15 @@ export class ErpAnalyticsService {
       : new Date(now.getFullYear(), now.getMonth(), 1); // Start of current month
     const dateTo = query.dateTo
       ? new Date(query.dateTo + 'T23:59:59.999Z')
-      : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      : new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          23,
+          59,
+          59,
+          999,
+        );
 
     const [profitData, purchaseData, expensesSummary, payrollSummary] =
       await Promise.all([
@@ -791,17 +894,21 @@ export class ErpAnalyticsService {
     // Cost-ът се прилага пропорционално на колекшън ratio-то — ако сме
     // събрали 60% от продажбите, отчитаме 60% от cost-а. Opex-ът е изцяло
     // изваден (реално платени разходи).
+    // Събираемостта се мери спрямо дължимото С ДДС (платеното е с ДДС), а
+    // после се прилага върху нетните приходи и себестойността.
     const collectionRatio =
-      profitData.summary.totalRevenue > 0
-        ? profitData.summary.totalPaid / profitData.summary.totalRevenue
+      profitData.summary.totalGross > 0
+        ? Math.min(
+            1,
+            profitData.summary.totalPaid / profitData.summary.totalGross,
+          )
         : 0;
+    const cashRevenue = profitData.summary.totalRevenue * collectionRatio;
     const cashCostOfGoods = profitData.summary.totalCost * collectionRatio;
     const netProfitCash =
-      profitData.summary.totalPaid - cashCostOfGoods - totalOperatingExpenses;
+      cashRevenue - cashCostOfGoods - totalOperatingExpenses;
     const netMarginCash =
-      profitData.summary.totalPaid > 0
-        ? (netProfitCash / profitData.summary.totalPaid) * 100
-        : 0;
+      cashRevenue > 0 ? (netProfitCash / cashRevenue) * 100 : 0;
 
     return {
       // Приходи
@@ -829,6 +936,8 @@ export class ErpAnalyticsService {
       // Касова нетна печалба (cash basis)
       netProfitCash,
       netMarginCash,
+      cashRevenue,
+      cashCostOfGoods,
 
       // Допълнителни данни
       totalPurchases: purchaseData.summary.totalPurchaseCost,
@@ -851,133 +960,201 @@ export class ErpAnalyticsService {
       : new Date(now.getFullYear(), now.getMonth(), 1); // Start of current month
     const dateTo = query.dateTo
       ? new Date(query.dateTo + 'T23:59:59.999Z')
-      : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      : new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          23,
+          59,
+          59,
+          999,
+        );
 
     const periodLength = dateTo.getTime() - dateFrom.getTime();
     const previousFrom = new Date(dateFrom.getTime() - periodLength);
     const previousTo = new Date(dateFrom.getTime() - 1);
 
-    const orders = await this.prisma.order.findMany({
-      where: {
-        companyId,
-        orderDate: { gte: dateFrom, lte: dateTo },
-        status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+    const orderWhere: any = {
+      companyId,
+      orderDate: { gte: dateFrom, lte: dateTo },
+      status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+      ...(query.customerId && { customerId: query.customerId }),
+      ...(query.siteId && { siteId: query.siteId }),
+    };
+    const itemInclude = {
+      product: { include: { category: true } },
+      inventoryBatch: true,
+      inventorySerial: true,
+      batchAllocations: {
+        include: { inventoryBatch: { select: { unitCost: true } } },
       },
-      include: {
-        items: { include: { product: true } },
-      },
-    });
+    };
+    const loadOrders = (from: Date, to: Date) =>
+      this.prisma.order.findMany({
+        where: { ...orderWhere, orderDate: { gte: from, lte: to } },
+        include: {
+          items: { include: itemInclude },
+          site: { select: { id: true, name: true } },
+        },
+      });
 
-    // Calculate totals
-    let revenue = 0;
-    let paid = 0;
-    const productMap = new Map<string, { productId: string; productName: string; productSku: string; quantitySold: number; revenue: number }>();
-    const customerMap = new Map<string, { customerId: string; customerName: string; orderCount: number; totalSpent: number }>();
-    const trendMap = new Map<string, { revenue: number; orderCount: number }>();
+    const [orders, previousOrders] = await Promise.all([
+      loadOrders(dateFrom, dateTo),
+      loadOrders(previousFrom, previousTo),
+    ]);
 
-    for (const order of orders) {
-      let orderTotal = 0;
-      paid += Number(order.paidAmount ?? 0);
-      for (const item of order.items) {
-        const qty = Number(item.quantity);
-        const price = Number(item.unitPrice);
-        const itemRevenue = qty * price;
-        orderTotal += itemRevenue;
+    // Филтър по продукт/категория е на ниво ред; поръчка без такъв ред не влиза
+    const itemMatches = (item: any) =>
+      (!query.productId || item.productId === query.productId) &&
+      (!query.categoryId || item.product?.categoryId === query.categoryId);
+    const lineFilterActive = !!(query.productId || query.categoryId);
 
-        const existing = productMap.get(item.productId);
-        if (existing) {
-          existing.quantitySold += qty;
-          existing.revenue += itemRevenue;
-        } else {
-          productMap.set(item.productId, {
-            productId: item.productId,
-            productName: item.product.name,
-            productSku: item.product.sku || '',
-            quantitySold: qty,
-            revenue: itemRevenue,
-          });
+    type Acc = { qty: number; revenue: number; cost: number; orders: Set<string> };
+    const makeGroup = () => new Map<string, Acc & { name: string; sub?: string }>();
+    const groups = {
+      product: makeGroup(),
+      customer: makeGroup(),
+      month: makeGroup(),
+      site: makeGroup(),
+    };
+    const add = (
+      map: ReturnType<typeof makeGroup>,
+      key: string,
+      name: string,
+      sub: string | undefined,
+      orderId: string,
+      qty: number,
+      rev: number,
+      cost: number,
+    ) => {
+      const row = map.get(key) || { name, sub, qty: 0, revenue: 0, cost: 0, orders: new Set<string>() };
+      row.qty += qty;
+      row.revenue += rev;
+      row.cost += cost;
+      row.orders.add(orderId);
+      map.set(key, row);
+    };
+
+    // Сумиране на период: приход, себестойност, платено, брой поръчки, бройки
+    const summarize = (list: typeof orders, fill: boolean) => {
+      let revenue = 0;
+      let paid = 0;
+      let cost = 0;
+      let itemsSold = 0;
+      let orderCount = 0;
+      for (const order of list) {
+        const items = order.items.filter(itemMatches);
+        if (lineFilterActive && items.length === 0) continue;
+        orderCount += 1;
+        const factor = this.lineFactor(order);
+        // При филтър по ред приходът е само на тези редове; иначе цялата основа
+        let orderRevenue = 0;
+        let orderCost = 0;
+        for (const item of items) {
+          const qty = Number(item.quantity);
+          const rev = this.lineNet(item) * factor;
+          const c = this.lineCost(item);
+          orderRevenue += rev;
+          orderCost += c;
+          itemsSold += qty;
+          if (fill) {
+            add(groups.product, item.productId, item.product.name, item.product.sku || undefined, order.id, qty, rev, c);
+          }
+        }
+        if (!lineFilterActive) orderRevenue = this.orderNet(order);
+        revenue += orderRevenue;
+        cost += orderCost;
+        // Платеното се разпределя пропорционално, ако гледаме част от поръчката
+        const total = Number(order.total) || 0;
+        const share = lineFilterActive && total > 0 ? Math.min(1, orderRevenue / Math.max(this.orderNet(order), 0.0001)) : 1;
+        paid += Number(order.paidAmount ?? 0) * share;
+        if (fill) {
+          const custKey = order.customerId || `name:${order.customerName}`;
+          add(groups.customer, custKey, order.customerName, undefined, order.id, 0, orderRevenue, orderCost);
+          const monthKey = order.orderDate.toISOString().slice(0, 7);
+          add(groups.month, monthKey, monthKey, undefined, order.id, 0, orderRevenue, orderCost);
+          const siteKey = order.siteId || '';
+          add(groups.site, siteKey, order.site?.name || '', undefined, order.id, 0, orderRevenue, orderCost);
         }
       }
-      revenue += orderTotal;
+      return { revenue, paid, cost, itemsSold, orderCount };
+    };
 
-      // Customer aggregation (customerName is on the Order itself)
-      if (order.customerId) {
-        const cust = customerMap.get(order.customerId);
-        if (cust) {
-          cust.orderCount += 1;
-          cust.totalSpent += orderTotal;
-        } else {
-          customerMap.set(order.customerId, {
-            customerId: order.customerId,
-            customerName: order.customerName,
-            orderCount: 1,
-            totalSpent: orderTotal,
-          });
-        }
-      }
+    const cur = summarize(orders, true);
+    const prev = summarize(previousOrders, false);
 
-      // Monthly trend
-      const monthKey = order.orderDate.toISOString().slice(0, 7); // YYYY-MM
-      const trend = trendMap.get(monthKey);
-      if (trend) {
-        trend.revenue += orderTotal;
-        trend.orderCount += 1;
-      } else {
-        trendMap.set(monthKey, { revenue: orderTotal, orderCount: 1 });
-      }
-    }
+    const toRows = (map: ReturnType<typeof makeGroup>): SalesGroupRow[] =>
+      Array.from(map.entries())
+        .map(([key, r]) => ({
+          key,
+          name: r.name,
+          sub: r.sub,
+          quantity: round2(r.qty),
+          orderCount: r.orders.size,
+          revenue: round2(r.revenue),
+          cost: round2(r.cost),
+          profit: round2(r.revenue - r.cost),
+          margin: r.revenue > 0 ? round2(((r.revenue - r.cost) / r.revenue) * 100) : 0,
+        }));
+    const byRevenue = (rows: SalesGroupRow[]) => rows.sort((a, b) => b.revenue - a.revenue);
+    const byProduct = byRevenue(toRows(groups.product));
+    const byCustomer = byRevenue(toRows(groups.customer));
+    const bySite = byRevenue(toRows(groups.site));
+    const byMonth = toRows(groups.month).sort((a, b) => a.key.localeCompare(b.key));
 
-    const orderCount = orders.length;
-    const avgOrderValue = orderCount > 0 ? revenue / orderCount : 0;
-
-    // Previous period
-    const previousOrders = await this.prisma.order.findMany({
-      where: {
-        companyId,
-        orderDate: { gte: previousFrom, lte: previousTo },
-        status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
-      },
-      include: { items: true },
-    });
-
-    let previousRevenue = 0;
-    let previousPaid = 0;
-    for (const order of previousOrders) {
-      previousPaid += Number(order.paidAmount ?? 0);
-      for (const item of order.items) {
-        previousRevenue += Number(item.quantity) * Number(item.unitPrice);
-      }
-    }
-    const previousOrderCount = previousOrders.length;
-    const previousAvgOrderValue = previousOrderCount > 0 ? previousRevenue / previousOrderCount : 0;
-
+    const avgOrderValue = cur.orderCount > 0 ? cur.revenue / cur.orderCount : 0;
+    const previousAvgOrderValue = prev.orderCount > 0 ? prev.revenue / prev.orderCount : 0;
+    const grossProfit = cur.revenue - cur.cost;
+    const previousProfit = prev.revenue - prev.cost;
     const calcGrowth = (current: number, previous: number) =>
       previous > 0 ? ((current - previous) / previous) * 100 : current > 0 ? 100 : 0;
 
     return {
-      revenue,
-      paid,
-      orderCount,
-      avgOrderValue,
+      revenue: round2(cur.revenue),
+      paid: round2(cur.paid),
+      cost: round2(cur.cost),
+      grossProfit: round2(grossProfit),
+      grossMargin: cur.revenue > 0 ? round2((grossProfit / cur.revenue) * 100) : 0,
+      orderCount: cur.orderCount,
+      itemsSold: round2(cur.itemsSold),
+      avgOrderValue: round2(avgOrderValue),
       periodComparison: {
-        previousRevenue,
-        previousPaid,
-        previousOrderCount,
-        previousAvgOrderValue,
-        revenueGrowth: calcGrowth(revenue, previousRevenue),
-        paidGrowth: calcGrowth(paid, previousPaid),
-        orderGrowth: calcGrowth(orderCount, previousOrderCount),
+        previousRevenue: round2(prev.revenue),
+        previousPaid: round2(prev.paid),
+        previousCost: round2(prev.cost),
+        previousProfit: round2(previousProfit),
+        previousOrderCount: prev.orderCount,
+        previousAvgOrderValue: round2(previousAvgOrderValue),
+        revenueGrowth: calcGrowth(cur.revenue, prev.revenue),
+        paidGrowth: calcGrowth(cur.paid, prev.paid),
+        profitGrowth: calcGrowth(grossProfit, previousProfit),
+        orderGrowth: calcGrowth(cur.orderCount, prev.orderCount),
         avgOrderValueGrowth: calcGrowth(avgOrderValue, previousAvgOrderValue),
       },
-      topProducts: Array.from(productMap.values())
-        .sort((a, b) => b.revenue - a.revenue)
-        .slice(0, 10),
-      topCustomers: Array.from(customerMap.values())
-        .sort((a, b) => b.totalSpent - a.totalSpent)
-        .slice(0, 10),
-      trend: Array.from(trendMap.entries())
-        .map(([date, data]) => ({ date, ...data }))
-        .sort((a, b) => a.date.localeCompare(b.date)),
+      byProduct,
+      byCustomer,
+      byMonth,
+      bySite,
+      topProducts: byProduct.slice(0, 10).map((r) => ({
+        productId: r.key,
+        productName: r.name,
+        productSku: r.sub || '',
+        quantitySold: r.quantity,
+        revenue: r.revenue,
+      })),
+      topCustomers: byCustomer.slice(0, 10).map((r) => ({
+        customerId: r.key,
+        customerName: r.name,
+        orderCount: r.orderCount,
+        totalSpent: r.revenue,
+      })),
+      trend: byMonth.map((r) => ({
+        date: r.key,
+        revenue: r.revenue,
+        cost: r.cost,
+        profit: r.profit,
+        orderCount: r.orderCount,
+      })),
     };
   }
 
@@ -992,7 +1169,15 @@ export class ErpAnalyticsService {
       : new Date(now.getFullYear(), now.getMonth(), 1);
     const dateTo = query.dateTo
       ? new Date(query.dateTo + 'T23:59:59.999Z')
-      : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      : new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          23,
+          59,
+          59,
+          999,
+        );
 
     const periodLength = dateTo.getTime() - dateFrom.getTime();
     const previousFrom = new Date(dateFrom.getTime() - periodLength);
@@ -1011,11 +1196,16 @@ export class ErpAnalyticsService {
     });
 
     // Customer aggregation
-    const customerMap = new Map<string, {
-      customerId: string; customerName: string;
-      orderCount: number; totalSpent: number;
-      firstOrderDate: Date;
-    }>();
+    const customerMap = new Map<
+      string,
+      {
+        customerId: string;
+        customerName: string;
+        orderCount: number;
+        totalSpent: number;
+        firstOrderDate: Date;
+      }
+    >();
 
     for (const order of orders) {
       if (!order.customerId) continue;
@@ -1045,7 +1235,10 @@ export class ErpAnalyticsService {
 
     const totalCustomers = customerMap.size;
     const totalOrders = orders.length;
-    const totalRevenue = Array.from(customerMap.values()).reduce((sum, c) => sum + c.totalSpent, 0);
+    const totalRevenue = Array.from(customerMap.values()).reduce(
+      (sum, c) => sum + c.totalSpent,
+      0,
+    );
     const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
     // Find "new" customers — customers whose first-ever order is in this period
@@ -1069,7 +1262,8 @@ export class ErpAnalyticsService {
     // New customers per month trend
     const newCustomerMonthMap = new Map<string, Set<string>>();
     for (const order of orders) {
-      if (!order.customerId || !newCustomerIds.includes(order.customerId)) continue;
+      if (!order.customerId || !newCustomerIds.includes(order.customerId))
+        continue;
       const monthKey = order.orderDate.toISOString().slice(0, 7);
       if (!newCustomerMonthMap.has(monthKey)) {
         newCustomerMonthMap.set(monthKey, new Set());
@@ -1087,7 +1281,9 @@ export class ErpAnalyticsService {
       select: { id: true, customerId: true, orderDate: true },
     });
 
-    const previousCustomerIds = new Set(previousOrders.filter(o => o.customerId).map(o => o.customerId!));
+    const previousCustomerIds = new Set(
+      previousOrders.filter((o) => o.customerId).map((o) => o.customerId!),
+    );
     let previousNewCustomers = 0;
     for (const customerId of previousCustomerIds) {
       const earlierOrder = await this.prisma.order.findFirst({
@@ -1103,7 +1299,11 @@ export class ErpAnalyticsService {
     }
 
     const calcGrowth = (current: number, previous: number) =>
-      previous > 0 ? ((current - previous) / previous) * 100 : current > 0 ? 100 : 0;
+      previous > 0
+        ? ((current - previous) / previous) * 100
+        : current > 0
+          ? 100
+          : 0;
 
     return {
       totalCustomers,
@@ -1117,7 +1317,7 @@ export class ErpAnalyticsService {
         ordersGrowth: calcGrowth(totalOrders, previousOrders.length),
       },
       topCustomers: Array.from(customerMap.values())
-        .map(c => ({
+        .map((c) => ({
           customerId: c.customerId,
           customerName: c.customerName,
           orderCount: c.orderCount,
@@ -1272,7 +1472,15 @@ export class ErpAnalyticsService {
       : new Date(now.getFullYear(), now.getMonth(), 1);
     const dateTo = query.dateTo
       ? new Date(query.dateTo + 'T23:59:59.999Z')
-      : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      : new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          23,
+          59,
+          59,
+          999,
+        );
 
     // All active products
     const products = await this.prisma.product.findMany({
@@ -1291,7 +1499,10 @@ export class ErpAnalyticsService {
     const totalProducts = products.length;
 
     // Calculate inventory values and stock levels per product
-    const productStockMap = new Map<string, { currentStock: number; inventoryValue: number; minStock: number }>();
+    const productStockMap = new Map<
+      string,
+      { currentStock: number; inventoryValue: number; minStock: number }
+    >();
     let totalInventoryValue = 0;
     let lowStockCount = 0;
 
@@ -1317,7 +1528,11 @@ export class ErpAnalyticsService {
       totalInventoryValue += inventoryValue;
 
       const minStock = Number(product.minStock) || 0;
-      productStockMap.set(product.id, { currentStock, inventoryValue, minStock });
+      productStockMap.set(product.id, {
+        currentStock,
+        inventoryValue,
+        minStock,
+      });
 
       if (minStock > 0 && currentStock < minStock) {
         lowStockCount++;
@@ -1337,7 +1552,16 @@ export class ErpAnalyticsService {
     });
 
     // Product sales aggregation
-    const salesMap = new Map<string, { productId: string; productName: string; productSku: string; quantitySold: number; revenue: number }>();
+    const salesMap = new Map<
+      string,
+      {
+        productId: string;
+        productName: string;
+        productSku: string;
+        quantitySold: number;
+        revenue: number;
+      }
+    >();
     const soldProductIds = new Set<string>();
 
     for (const order of orders) {
@@ -1393,20 +1617,20 @@ export class ErpAnalyticsService {
     const topProducts = Array.from(salesMap.values())
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 10)
-      .map(p => ({
+      .map((p) => ({
         ...p,
         currentStock: productStockMap.get(p.productId)?.currentStock || 0,
       }));
 
     // Low stock products list
     const lowStockProducts = products
-      .filter(p => {
+      .filter((p) => {
         const minStock = Number(p.minStock) || 0;
         if (minStock <= 0) return false;
         const stock = productStockMap.get(p.id);
         return stock && stock.currentStock < minStock;
       })
-      .map(p => {
+      .map((p) => {
         const stock = productStockMap.get(p.id)!;
         return {
           productId: p.id,
@@ -1416,7 +1640,10 @@ export class ErpAnalyticsService {
           minStockLevel: stock.minStock,
         };
       })
-      .sort((a, b) => (a.currentStock / a.minStockLevel) - (b.currentStock / b.minStockLevel));
+      .sort(
+        (a, b) =>
+          a.currentStock / a.minStockLevel - b.currentStock / b.minStockLevel,
+      );
 
     return {
       totalProducts,

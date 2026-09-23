@@ -27,44 +27,64 @@ describe('ErpAnalyticsService', () => {
       ],
     }).compile();
     service = module.get<ErpAnalyticsService>(ErpAnalyticsService);
-    // Няма стокови разписки по подразбиране → cost fallback е product.purchasePrice
-    mockPrisma.goodsReceiptItem.findMany.mockResolvedValue([]);
   });
 
-  const makeOrderItem = (overrides = {}) => ({
-    productId: 'p1',
-    quantity: 10,
-    unitPrice: 100,
-    product: {
-      name: 'Product A',
-      sku: 'SKU-A',
-      purchasePrice: 60,
-      categoryId: 'cat1',
-      category: { name: 'Electronics' },
-    },
-    inventoryBatch: null,
-    inventorySerial: null,
-    ...overrides,
-  });
+  // Себестойността идва САМО от доставки: lastLandedCost е последната доставна
+  // стойност на продукта (от доставка); purchasePrice от картона не се ползва.
+  const makeOrderItem = (overrides: Record<string, any> = {}) => {
+    const item: any = {
+      productId: 'p1',
+      quantity: 10,
+      unitPrice: 100,
+      product: {
+        name: 'Product A',
+        sku: 'SKU-A',
+        purchasePrice: 999, // нарочно грешна — не бива да влиза никъде
+        lastLandedCost: 60,
+        categoryId: 'cat1',
+        category: { name: 'Electronics' },
+      },
+      inventoryBatch: null,
+      inventorySerial: null,
+      batchAllocations: [],
+      ...overrides,
+    };
+    if (item.subtotal === undefined)
+      item.subtotal = Number(item.quantity) * Number(item.unitPrice);
+    return item;
+  };
 
-  // Приходът на ниво summary се смята от Order.total (като Dashboard KPI-то),
-  // затова mock поръчката носи total = сумата на редовете си.
-  const makeOrder = (id: string, items: any[], overrides = {}) => ({
-    id,
-    items,
-    total: items.reduce(
-      (sum: number, i: any) => sum + Number(i.quantity) * Number(i.unitPrice),
+  // Приходът е данъчната основа (subtotal − discount); total носи и ДДС.
+  const makeOrder = (
+    id: string,
+    items: any[],
+    overrides: Record<string, any> = {},
+  ) => {
+    const subtotal = items.reduce(
+      (sum: number, i: any) =>
+        sum +
+        (i.subtotal != null
+          ? Number(i.subtotal)
+          : Number(i.quantity) * Number(i.unitPrice)),
       0,
-    ),
-    paidAmount: 0,
-    ...overrides,
-  });
+    );
+    return {
+      id,
+      items,
+      subtotal,
+      discount: 0,
+      total: subtotal,
+      paidAmount: 0,
+      ...overrides,
+    };
+  };
 
   describe('getProfitAnalytics', () => {
     it('should calculate revenue, cost, and profit correctly', async () => {
       // Current period order
       mockPrisma.order.findMany
-        .mockResolvedValueOnce([ // current period
+        .mockResolvedValueOnce([
+          // current period
           makeOrder('o1', [makeOrderItem({ quantity: 10, unitPrice: 100 })]),
         ])
         .mockResolvedValueOnce([]); // previous period
@@ -75,7 +95,7 @@ describe('ErpAnalyticsService', () => {
       } as any);
 
       // revenue = 10 * 100 = 1000
-      // cost = 10 * 60 (purchasePrice) = 600
+      // cost = 10 * 60 (lastLandedCost от последната доставка) = 600
       expect(result.summary.totalRevenue).toBe(1000);
       expect(result.summary.totalCost).toBe(600);
       expect(result.summary.grossProfit).toBe(400);
@@ -83,7 +103,7 @@ describe('ErpAnalyticsService', () => {
       expect(result.summary.orderCount).toBe(1);
     });
 
-    it('should use inventoryBatch.unitCost over product.purchasePrice', async () => {
+    it('should use inventoryBatch.unitCost over product.lastLandedCost', async () => {
       const item = makeOrderItem({
         inventoryBatch: { unitCost: 40 },
       });
@@ -102,9 +122,16 @@ describe('ErpAnalyticsService', () => {
       expect(result.summary.grossProfit).toBe(600);
     });
 
-    it('should handle zero cost (no purchasePrice, no batch)', async () => {
+    it('should handle zero cost (no delivery at all, no batch)', async () => {
       const item = makeOrderItem({
-        product: { name: 'Service', sku: 'SRV', purchasePrice: null, categoryId: null, category: null },
+        product: {
+          name: 'Service',
+          sku: 'SRV',
+          purchasePrice: 60,
+          lastLandedCost: null,
+          categoryId: null,
+          category: null,
+        },
         inventoryBatch: null,
       });
 
@@ -122,12 +149,129 @@ describe('ErpAnalyticsService', () => {
       expect(result.summary.profitMargin).toBe(100);
     });
 
+    it('себестойност от FIFO изписването: Σ кол. × доставна стойност на партидата', async () => {
+      // Обикновен продукт: 3 бр. от партида по 140 (40 + 100 транспорт) и 2 бр. по 150
+      const item = makeOrderItem({
+        quantity: 5,
+        unitPrice: 200,
+        batchAllocations: [
+          { quantity: 3, inventoryBatch: { unitCost: 140 } },
+          { quantity: 2, inventoryBatch: { unitCost: 150 } },
+        ],
+      });
+      mockPrisma.order.findMany
+        .mockResolvedValueOnce([makeOrder('o1', [item])])
+        .mockResolvedValueOnce([]);
+
+      const result = await service.getProfitAnalytics('c1', {
+        dateFrom: '2026-01-01',
+        dateTo: '2026-01-31',
+      } as any);
+
+      expect(result.summary.totalRevenue).toBe(1000);
+      expect(result.summary.totalCost).toBe(720); // 3×140 + 2×150
+      expect(result.summary.grossProfit).toBe(280);
+      expect(result.byProduct[0].avgCostPrice).toBe(144);
+    });
+
+    it('неизписаният остатък от реда взема последната доставна стойност', async () => {
+      const item = makeOrderItem({
+        quantity: 4,
+        unitPrice: 100,
+        product: {
+          name: 'A',
+          sku: 'A',
+          lastLandedCost: 50,
+          categoryId: null,
+          category: null,
+        },
+        batchAllocations: [{ quantity: 1, inventoryBatch: { unitCost: 70 } }],
+      });
+      mockPrisma.order.findMany
+        .mockResolvedValueOnce([makeOrder('o1', [item])])
+        .mockResolvedValueOnce([]);
+
+      const result = await service.getProfitAnalytics('c1', {
+        dateFrom: '2026-01-01',
+        dateTo: '2026-01-31',
+      } as any);
+
+      expect(result.summary.totalCost).toBe(220); // 1×70 + 3×50
+    });
+
+    it('покупната цена от картона никога не влиза в себестойността', async () => {
+      const item = makeOrderItem({
+        product: {
+          name: 'A',
+          sku: 'A',
+          purchasePrice: 60,
+          lastLandedCost: null,
+          categoryId: null,
+          category: null,
+        },
+      });
+      mockPrisma.order.findMany
+        .mockResolvedValueOnce([makeOrder('o1', [item])])
+        .mockResolvedValueOnce([]);
+
+      const result = await service.getProfitAnalytics('c1', {
+        dateFrom: '2026-01-01',
+        dateTo: '2026-01-31',
+      } as any);
+
+      expect(result.summary.totalCost).toBe(0);
+    });
+
+    it('приходът е без ДДС и след отстъпките; ДДС и доставка не са приход', async () => {
+      // 1 × 200, отстъпка на реда 20 → ред 180; отстъпка на документа 18 (10%) → основа 162;
+      // ДДС 32.40, доставка 10 → total 204.40; платени 204.40
+      const item = makeOrderItem({
+        quantity: 1,
+        unitPrice: 200,
+        subtotal: 180,
+        batchAllocations: [{ quantity: 1, inventoryBatch: { unitCost: 140 } }],
+      });
+      mockPrisma.order.findMany
+        .mockResolvedValueOnce([
+          makeOrder('o1', [item], {
+            subtotal: 180,
+            discount: 18,
+            total: 204.4,
+            paidAmount: 204.4,
+          }),
+        ])
+        .mockResolvedValueOnce([]);
+
+      const result = await service.getProfitAnalytics('c1', {
+        dateFrom: '2026-01-01',
+        dateTo: '2026-01-31',
+      } as any);
+
+      expect(result.summary.totalRevenue).toBe(162);
+      expect(result.summary.totalGross).toBe(204.4);
+      expect(result.summary.totalPaid).toBe(204.4);
+      expect(result.summary.totalCost).toBe(140);
+      expect(result.summary.grossProfit).toBe(22);
+      expect(result.byProduct[0].revenue).toBeCloseTo(162, 6);
+    });
+
     it('should aggregate by product correctly', async () => {
       mockPrisma.order.findMany
         .mockResolvedValueOnce([
           makeOrder('o1', [
             makeOrderItem({ productId: 'p1', quantity: 5, unitPrice: 100 }),
-            makeOrderItem({ productId: 'p2', quantity: 3, unitPrice: 200, product: { name: 'Product B', sku: 'SKU-B', purchasePrice: 120, categoryId: 'cat1', category: { name: 'Electronics' } } }),
+            makeOrderItem({
+              productId: 'p2',
+              quantity: 3,
+              unitPrice: 200,
+              product: {
+                name: 'Product B',
+                sku: 'SKU-B',
+                lastLandedCost: 120,
+                categoryId: 'cat1',
+                category: { name: 'Electronics' },
+              },
+            }),
           ]),
           makeOrder('o2', [
             makeOrderItem({ productId: 'p1', quantity: 5, unitPrice: 100 }),
@@ -142,7 +286,7 @@ describe('ErpAnalyticsService', () => {
 
       expect(result.byProduct).toHaveLength(2);
       // p1: 10 units * 100 = 1000 rev, 10 * 60 = 600 cost, 400 profit
-      const p1 = result.byProduct.find(p => p.productId === 'p1');
+      const p1 = result.byProduct.find((p) => p.productId === 'p1');
       expect(p1!.unitsSold).toBe(10);
       expect(p1!.revenue).toBe(1000);
       expect(p1!.cost).toBe(600);
@@ -157,8 +301,16 @@ describe('ErpAnalyticsService', () => {
           makeOrder('o1', [
             makeOrderItem({ productId: 'p1', quantity: 10, unitPrice: 100 }),
             makeOrderItem({
-              productId: 'p2', quantity: 5, unitPrice: 200,
-              product: { name: 'Gadget', sku: 'G1', purchasePrice: 100, categoryId: 'cat1', category: { name: 'Electronics' } },
+              productId: 'p2',
+              quantity: 5,
+              unitPrice: 200,
+              product: {
+                name: 'Gadget',
+                sku: 'G1',
+                lastLandedCost: 100,
+                categoryId: 'cat1',
+                category: { name: 'Electronics' },
+              },
             }),
           ]),
         ])
@@ -180,7 +332,13 @@ describe('ErpAnalyticsService', () => {
 
     it('should label uncategorized products', async () => {
       const item = makeOrderItem({
-        product: { name: 'Loose', sku: 'L1', purchasePrice: 10, categoryId: null, category: null },
+        product: {
+          name: 'Loose',
+          sku: 'L1',
+          lastLandedCost: 10,
+          categoryId: null,
+          category: null,
+        },
       });
 
       mockPrisma.order.findMany
@@ -203,12 +361,15 @@ describe('ErpAnalyticsService', () => {
         ])
         // Previous period: revenue 500
         .mockResolvedValueOnce([
-          makeOrder('o-prev', [{
-            quantity: 5, unitPrice: 100,
-            inventoryBatch: null,
-            inventorySerial: null,
-            product: { purchasePrice: 60 },
-          }]),
+          makeOrder('o-prev', [
+            {
+              quantity: 5,
+              unitPrice: 100,
+              inventoryBatch: null,
+              inventorySerial: null,
+              product: { lastLandedCost: 60 },
+            },
+          ]),
         ]);
 
       const result = await service.getProfitAnalytics('c1', {
@@ -224,9 +385,7 @@ describe('ErpAnalyticsService', () => {
 
     it('should handle 100% growth when previous is zero', async () => {
       mockPrisma.order.findMany
-        .mockResolvedValueOnce([
-          makeOrder('o1', [makeOrderItem()]),
-        ])
+        .mockResolvedValueOnce([makeOrder('o1', [makeOrderItem()])])
         .mockResolvedValueOnce([]); // no previous orders
 
       const result = await service.getProfitAnalytics('c1', {
@@ -261,8 +420,26 @@ describe('ErpAnalyticsService', () => {
       mockPrisma.order.findMany
         .mockResolvedValueOnce([
           makeOrder('o1', [
-            makeOrderItem({ productId: 'p1', product: { name: 'A', sku: 'A', purchasePrice: 60, categoryId: 'cat1', category: { name: 'Elec' } } }),
-            makeOrderItem({ productId: 'p2', product: { name: 'B', sku: 'B', purchasePrice: 30, categoryId: 'cat2', category: { name: 'Food' } } }),
+            makeOrderItem({
+              productId: 'p1',
+              product: {
+                name: 'A',
+                sku: 'A',
+                lastLandedCost: 60,
+                categoryId: 'cat1',
+                category: { name: 'Elec' },
+              },
+            }),
+            makeOrderItem({
+              productId: 'p2',
+              product: {
+                name: 'B',
+                sku: 'B',
+                lastLandedCost: 30,
+                categoryId: 'cat2',
+                category: { name: 'Food' },
+              },
+            }),
           ]),
         ])
         .mockResolvedValueOnce([]);
@@ -274,8 +451,8 @@ describe('ErpAnalyticsService', () => {
       } as any);
 
       // Only cat1 product should be included in byProduct. Summary revenue
-      // stays at Order.total (2000): поръчка с поне един ред от категорията
-      // влиза с целия си total (виж коментара в getProfitAnalytics).
+      // stays at the order's net (2000): поръчка с поне един ред от категорията
+      // влиза с цялата си данъчна основа (виж коментара в getProfitAnalytics).
       expect(result.byProduct).toHaveLength(1);
       expect(result.byProduct[0].productId).toBe('p1');
       expect(result.summary.totalRevenue).toBe(2000);
@@ -285,8 +462,30 @@ describe('ErpAnalyticsService', () => {
       mockPrisma.order.findMany
         .mockResolvedValueOnce([
           makeOrder('o1', [
-            makeOrderItem({ productId: 'p1', quantity: 1, unitPrice: 100, product: { name: 'Low', sku: 'L', purchasePrice: 90, categoryId: null, category: null } }),
-            makeOrderItem({ productId: 'p2', quantity: 1, unitPrice: 100, product: { name: 'High', sku: 'H', purchasePrice: 10, categoryId: null, category: null } }),
+            makeOrderItem({
+              productId: 'p1',
+              quantity: 1,
+              unitPrice: 100,
+              product: {
+                name: 'Low',
+                sku: 'L',
+                lastLandedCost: 90,
+                categoryId: null,
+                category: null,
+              },
+            }),
+            makeOrderItem({
+              productId: 'p2',
+              quantity: 1,
+              unitPrice: 100,
+              product: {
+                name: 'High',
+                sku: 'H',
+                lastLandedCost: 10,
+                categoryId: null,
+                category: null,
+              },
+            }),
           ]),
         ])
         .mockResolvedValueOnce([]);
@@ -308,7 +507,12 @@ describe('ErpAnalyticsService', () => {
       quantity: 20,
       unitPrice: 50,
       exchangeRate: 1,
-      product: { name: 'Widget', sku: 'W1', categoryId: 'cat1', category: { name: 'Parts' } },
+      product: {
+        name: 'Widget',
+        sku: 'W1',
+        categoryId: 'cat1',
+        category: { name: 'Parts' },
+      },
       ...overrides,
     });
 
@@ -339,7 +543,13 @@ describe('ErpAnalyticsService', () => {
           id: 'gr1',
           supplierId: 's1',
           supplier: { name: 'S' },
-          items: [makeReceiptItem({ quantity: 10, unitPrice: 100, exchangeRate: 1.96 })],
+          items: [
+            makeReceiptItem({
+              quantity: 10,
+              unitPrice: 100,
+              exchangeRate: 1.96,
+            }),
+          ],
         },
       ]);
 
@@ -358,7 +568,13 @@ describe('ErpAnalyticsService', () => {
           id: 'gr1',
           supplierId: 's1',
           supplier: { name: 'S' },
-          items: [makeReceiptItem({ quantity: 5, unitPrice: 100, exchangeRate: null })],
+          items: [
+            makeReceiptItem({
+              quantity: 5,
+              unitPrice: 100,
+              exchangeRate: null,
+            }),
+          ],
         },
       ]);
 
@@ -374,12 +590,20 @@ describe('ErpAnalyticsService', () => {
     it('should aggregate by product with avg cost', async () => {
       mockPrisma.goodsReceipt.findMany.mockResolvedValue([
         {
-          id: 'gr1', supplierId: 's1', supplier: { name: 'S' },
-          items: [makeReceiptItem({ productId: 'p1', quantity: 10, unitPrice: 50 })],
+          id: 'gr1',
+          supplierId: 's1',
+          supplier: { name: 'S' },
+          items: [
+            makeReceiptItem({ productId: 'p1', quantity: 10, unitPrice: 50 }),
+          ],
         },
         {
-          id: 'gr2', supplierId: 's1', supplier: { name: 'S' },
-          items: [makeReceiptItem({ productId: 'p1', quantity: 10, unitPrice: 70 })],
+          id: 'gr2',
+          supplierId: 's1',
+          supplier: { name: 'S' },
+          items: [
+            makeReceiptItem({ productId: 'p1', quantity: 10, unitPrice: 70 }),
+          ],
         },
       ]);
 
@@ -397,15 +621,21 @@ describe('ErpAnalyticsService', () => {
     it('should aggregate by supplier', async () => {
       mockPrisma.goodsReceipt.findMany.mockResolvedValue([
         {
-          id: 'gr1', supplierId: 's1', supplier: { name: 'Supplier A' },
+          id: 'gr1',
+          supplierId: 's1',
+          supplier: { name: 'Supplier A' },
           items: [makeReceiptItem({ quantity: 10, unitPrice: 100 })],
         },
         {
-          id: 'gr2', supplierId: 's2', supplier: { name: 'Supplier B' },
+          id: 'gr2',
+          supplierId: 's2',
+          supplier: { name: 'Supplier B' },
           items: [makeReceiptItem({ quantity: 5, unitPrice: 200 })],
         },
         {
-          id: 'gr3', supplierId: 's1', supplier: { name: 'Supplier A' },
+          id: 'gr3',
+          supplierId: 's1',
+          supplier: { name: 'Supplier A' },
           items: [makeReceiptItem({ quantity: 5, unitPrice: 50 })],
         },
       ]);
@@ -417,8 +647,8 @@ describe('ErpAnalyticsService', () => {
 
       expect(result.bySupplier).toHaveLength(2);
       // Sorted by totalCost desc
-      const sA = result.bySupplier.find(s => s.supplierId === 's1');
-      const sB = result.bySupplier.find(s => s.supplierId === 's2');
+      const sA = result.bySupplier.find((s) => s.supplierId === 's1');
+      const sB = result.bySupplier.find((s) => s.supplierId === 's2');
       expect(sA!.receiptCount).toBe(2);
       expect(sA!.totalCost).toBe(1250); // 1000 + 250
       expect(sB!.receiptCount).toBe(1);
@@ -443,7 +673,9 @@ describe('ErpAnalyticsService', () => {
     it('should label unknown supplier', async () => {
       mockPrisma.goodsReceipt.findMany.mockResolvedValue([
         {
-          id: 'gr1', supplierId: null, supplier: null,
+          id: 'gr1',
+          supplierId: null,
+          supplier: null,
           items: [makeReceiptItem({ quantity: 1, unitPrice: 10 })],
         },
       ]);
@@ -461,7 +693,8 @@ describe('ErpAnalyticsService', () => {
     it('should calculate P&L correctly', async () => {
       // Profit analytics: revenue 10000, cost 6000 → grossProfit 4000
       mockPrisma.order.findMany
-        .mockResolvedValueOnce([ // current orders
+        .mockResolvedValueOnce([
+          // current orders
           makeOrder('o1', [makeOrderItem({ quantity: 100, unitPrice: 100 })]), // rev 10000, cost 6000
         ])
         .mockResolvedValueOnce([]); // previous period
@@ -469,11 +702,23 @@ describe('ErpAnalyticsService', () => {
       // Purchase summary
       mockPrisma.goodsReceipt.findMany.mockResolvedValue([
         {
-          id: 'gr1', supplierId: 's1', supplier: { name: 'S' },
-          items: [{
-            productId: 'p1', quantity: 50, unitPrice: 60, exchangeRate: 1,
-            product: { name: 'P', sku: 'P', categoryId: null, category: null },
-          }],
+          id: 'gr1',
+          supplierId: 's1',
+          supplier: { name: 'S' },
+          items: [
+            {
+              productId: 'p1',
+              quantity: 50,
+              unitPrice: 60,
+              exchangeRate: 1,
+              product: {
+                name: 'P',
+                sku: 'P',
+                categoryId: null,
+                category: null,
+              },
+            },
+          ],
         },
       ]);
 
@@ -515,18 +760,20 @@ describe('ErpAnalyticsService', () => {
 
     it('should return top 10 products and top 5 categories/suppliers', async () => {
       // Create 12 products to test top-10 slicing
-      const items = Array.from({ length: 12 }, (_, i) => makeOrderItem({
-        productId: `p${i}`,
-        quantity: 1,
-        unitPrice: (12 - i) * 100,
-        product: {
-          name: `Product ${i}`,
-          sku: `SKU${i}`,
-          purchasePrice: 10,
-          categoryId: `cat${i % 6}`,
-          category: { name: `Cat ${i % 6}` },
-        },
-      }));
+      const items = Array.from({ length: 12 }, (_, i) =>
+        makeOrderItem({
+          productId: `p${i}`,
+          quantity: 1,
+          unitPrice: (12 - i) * 100,
+          product: {
+            name: `Product ${i}`,
+            sku: `SKU${i}`,
+            lastLandedCost: 10,
+            categoryId: `cat${i % 6}`,
+            category: { name: `Cat ${i % 6}` },
+          },
+        }),
+      );
 
       mockPrisma.order.findMany
         .mockResolvedValueOnce([{ id: 'o1', items }])
@@ -534,7 +781,9 @@ describe('ErpAnalyticsService', () => {
 
       mockPrisma.goodsReceipt.findMany.mockResolvedValue([]);
       mockExpensesService.getExpensesSummary.mockResolvedValue({
-        totalExpenses: 0, expenseCount: 0, byCategory: [],
+        totalExpenses: 0,
+        expenseCount: 0,
+        byCategory: [],
       });
       mockPrisma.payroll.findMany.mockResolvedValue([]);
 
@@ -551,7 +800,9 @@ describe('ErpAnalyticsService', () => {
       mockPrisma.order.findMany.mockResolvedValue([]);
       mockPrisma.goodsReceipt.findMany.mockResolvedValue([]);
       mockExpensesService.getExpensesSummary.mockResolvedValue({
-        totalExpenses: 0, expenseCount: 0, byCategory: [],
+        totalExpenses: 0,
+        expenseCount: 0,
+        byCategory: [],
       });
       mockPrisma.payroll.findMany.mockResolvedValue([]);
 
@@ -566,4 +817,62 @@ describe('ErpAnalyticsService', () => {
       expect(result.netMargin).toBe(0);
     });
   });
+  describe('getSalesReport', () => {
+    it('групира по продукт/клиент/месец/обект със себестойност и марж; приходът е без ДДС', async () => {
+      const orders = [
+        {
+          ...makeOrder('o1', [
+            makeOrderItem({ productId: 'p1', quantity: 1, unitPrice: 200, batchAllocations: [{ quantity: 1, inventoryBatch: { unitCost: 140 } }] }),
+          ], { total: 240, paidAmount: 240 }),
+          customerId: 'c1', customerName: 'Инатех', siteId: 's1', site: { id: 's1', name: 'Обект 1' },
+          orderDate: new Date('2026-09-22T00:00:00Z'),
+        },
+        {
+          ...makeOrder('o2', [
+            makeOrderItem({ productId: 'p1', quantity: 2, unitPrice: 200, batchAllocations: [{ quantity: 2, inventoryBatch: { unitCost: 150 } }] }),
+          ], { total: 480, paidAmount: 0 }),
+          customerId: 'c2', customerName: 'Друг', siteId: null, site: null,
+          orderDate: new Date('2026-08-05T00:00:00Z'),
+        },
+      ];
+      mockPrisma.order.findMany.mockResolvedValueOnce(orders).mockResolvedValueOnce([]);
+
+      const r = await service.getSalesReport('c1', { dateFrom: '2026-08-01', dateTo: '2026-09-30' } as any);
+
+      expect(r.revenue).toBe(600);
+      expect(r.paid).toBe(240);
+      expect(r.cost).toBe(440); // 140 + 2×150
+      expect(r.grossProfit).toBe(160);
+      expect(r.orderCount).toBe(2);
+      expect(r.itemsSold).toBe(3);
+
+      expect(r.byProduct).toHaveLength(1);
+      expect(r.byProduct[0]).toMatchObject({ key: 'p1', quantity: 3, orderCount: 2, revenue: 600, cost: 440, profit: 160 });
+      expect(r.byProduct[0].margin).toBeCloseTo(26.67, 2);
+
+      expect(r.byCustomer.map((c) => c.key)).toEqual(['c2', 'c1']); // по приход
+      expect(r.byMonth.map((m) => m.key)).toEqual(['2026-08', '2026-09']);
+      expect(r.bySite.find((x) => x.key === 's1')).toMatchObject({ name: 'Обект 1', revenue: 200, cost: 140 });
+      expect(r.bySite.find((x) => x.key === '')).toMatchObject({ revenue: 400 });
+      expect(r.trend[1]).toMatchObject({ date: '2026-09', revenue: 200, cost: 140, profit: 60 });
+    });
+
+    it('филтърът по продукт брои само неговите редове и дела от платеното', async () => {
+      const order = {
+        ...makeOrder('o1', [
+          makeOrderItem({ productId: 'p1', quantity: 1, unitPrice: 100 }),
+          makeOrderItem({ productId: 'p2', quantity: 1, unitPrice: 300 }),
+        ], { total: 480, paidAmount: 480 }),
+        customerId: 'c1', customerName: 'X', siteId: null, site: null, orderDate: new Date('2026-09-01T00:00:00Z'),
+      };
+      mockPrisma.order.findMany.mockResolvedValueOnce([order]).mockResolvedValueOnce([]);
+
+      const r = await service.getSalesReport('c1', { dateFrom: '2026-09-01', dateTo: '2026-09-30', productId: 'p1' } as any);
+
+      expect(r.revenue).toBe(100);
+      expect(r.paid).toBe(120); // 480 × 100/400
+      expect(r.byProduct.map((p) => p.key)).toEqual(['p1']);
+    });
+  });
+
 });

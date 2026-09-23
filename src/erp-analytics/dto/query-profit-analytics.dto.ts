@@ -24,4 +24,9 @@ export class QueryProfitAnalyticsDto {
   @IsString()
   @IsOptional()
   supplierId?: string;
+
+  // Обект (Order.siteId) — за отчетите по продажби и P&L
+  @IsString()
+  @IsOptional()
+  siteId?: string;
 }

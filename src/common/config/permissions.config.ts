@@ -810,6 +810,12 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         actions: ['view'],
       },
       {
+        // Приходи и разходи (P&L) — отделена от „Продажби" 2026-09-22
+        key: 'profitLoss',
+        labelKey: 'modules.bi.profitLoss',
+        actions: ['view'],
+      },
+      {
         key: 'customers',
         labelKey: 'modules.bi.customers',
         actions: ['view'],
