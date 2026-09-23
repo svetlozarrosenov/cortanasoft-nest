@@ -340,6 +340,8 @@ export class AdminService {
         firstName: dto.firstName,
         lastName: dto.lastName,
         isActive: dto.isActive ?? true,
+        // Нов потребител с 2FA: QR при първия вход
+        twoFactorMode: dto.twoFactorRequired ? 'NOT_SETUP' : 'NOT_REQUIRED',
       },
     });
 
@@ -411,6 +413,29 @@ export class AdminService {
       updateData.password = await bcrypt.hash(dto.password, 10);
     }
 
+    // Двуфакторна автентикация: включване → чака записване на ключ (QR при
+    // следващия вход); изключване → без 2FA, ключът и запомнените устройства
+    // се трият, така че повторно включване = нов ключ (напр. загубен телефон).
+    if (
+      dto.twoFactorRequired === true &&
+      user.twoFactorMode === 'NOT_REQUIRED'
+    ) {
+      updateData.twoFactorMode = 'NOT_SETUP';
+      updateData.twoFactorSecret = null;
+      updateData.twoFactorEnabledAt = null;
+    } else if (
+      dto.twoFactorRequired === false &&
+      user.twoFactorMode !== 'NOT_REQUIRED'
+    ) {
+      updateData.twoFactorMode = 'NOT_REQUIRED';
+      updateData.twoFactorSecret = null;
+      updateData.twoFactorEnabledAt = null;
+      await this.prisma.trustedDevice.deleteMany({ where: { userId: id } });
+      await this.prisma.twoFactorChallenge.deleteMany({
+        where: { userId: id },
+      });
+    }
+
     // Обновяване на user данните
     await this.prisma.user.update({
       where: { id },
@@ -448,7 +473,10 @@ export class AdminService {
       if (companiesToAdd.length > 0) {
         for (const c of companiesToAdd as UserCompanyAssignmentData[]) {
           if (c.partnerCustomerId) {
-            await this.validatePartnerCustomer(c.companyId, c.partnerCustomerId);
+            await this.validatePartnerCustomer(
+              c.companyId,
+              c.partnerCustomerId,
+            );
           }
         }
         await this.prisma.userCompany.createMany({
@@ -494,7 +522,9 @@ export class AdminService {
 
     // Не позволяваме изтриване на потребител, който е асоцииран с компания
     if (user.userCompanies.length > 0) {
-      const companyNames = user.userCompanies.map((uc) => uc.company.name).join(', ');
+      const companyNames = user.userCompanies
+        .map((uc) => uc.company.name)
+        .join(', ');
       throw new ForbiddenException(
         `Потребителят е асоцииран с компании: ${companyNames}. Първо го премахнете от всички компании.`,
       );
@@ -699,6 +729,7 @@ export class AdminService {
             firstName: true,
             lastName: true,
             isActive: true,
+            twoFactorMode: true,
             createdAt: true,
           },
         },
@@ -1059,8 +1090,13 @@ export class AdminService {
     });
   }
 
-  async createIntegrationWebhook(companyId: string, dto: CreateIntegrationWebhookDto) {
-    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+  async createIntegrationWebhook(
+    companyId: string,
+    dto: CreateIntegrationWebhookDto,
+  ) {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+    });
     if (!company) {
       throw new NotFoundException('Company not found');
     }
@@ -1246,7 +1282,7 @@ export class AdminService {
     const CHUNK_SIZE = 50;
     let created = 0;
     let skipped = 0;
-    let errors: string[] = [];
+    const errors: string[] = [];
 
     for (let i = 0; i < records.length; i += CHUNK_SIZE) {
       const chunk = records.slice(i, i + CHUNK_SIZE);
@@ -1257,7 +1293,11 @@ export class AdminService {
         const sku = (row['SKU'] || '').trim();
         const name = (row['Name'] || '').trim();
         const regularPrice = row['Regular price'] || row['Sale price'] || '';
-        const description = (row['Description'] || row['Short description'] || '').trim();
+        const description = (
+          row['Description'] ||
+          row['Short description'] ||
+          ''
+        ).trim();
         const weight = row['Weight (kg)'] || row['Weight (lbs)'] || '';
         const length = row['Length (cm)'] || row['Length (in)'] || '';
         const width = row['Width (cm)'] || row['Width (in)'] || '';
@@ -1276,7 +1316,8 @@ export class AdminService {
         }
 
         // Generate SKU if missing
-        const finalSku = sku || `WC-${i + chunk.indexOf(row) + 1}-${Date.now()}`;
+        const finalSku =
+          sku || `WC-${i + chunk.indexOf(row) + 1}-${Date.now()}`;
 
         if (existingSkus.has(finalSku)) {
           skipped++;
@@ -1287,7 +1328,9 @@ export class AdminService {
         const salePrice = parseFloat(regularPrice) || 0;
 
         if (!name) {
-          errors.push(`Ред ${i + chunk.indexOf(row) + 2}: Липсва име на продукт`);
+          errors.push(
+            `Ред ${i + chunk.indexOf(row) + 2}: Липсва име на продукт`,
+          );
           continue;
         }
 
@@ -1296,7 +1339,10 @@ export class AdminService {
         if (categories) {
           // Take the first category path (before comma)
           const firstCategoryPath = categories.split(',')[0].trim();
-          const parts = firstCategoryPath.split('>').map((p) => p.trim()).filter(Boolean);
+          const parts = firstCategoryPath
+            .split('>')
+            .map((p) => p.trim())
+            .filter(Boolean);
 
           let parentId: string | null = null;
           for (const catName of parts) {
@@ -1337,7 +1383,8 @@ export class AdminService {
           dimensionsW: parseFloat(width) || null,
           dimensionsH: parseFloat(height) || null,
           minStock: parseFloat(lowStock) || null,
-          trackInventory: manageStock === '1' || manageStock.toLowerCase() === 'yes',
+          trackInventory:
+            manageStock === '1' || manageStock.toLowerCase() === 'yes',
           isActive: published !== '0' && published.toLowerCase() !== 'no',
           type: 'PRODUCT',
           unit: 'PIECE',

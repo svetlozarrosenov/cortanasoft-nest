@@ -1,13 +1,49 @@
-import { Injectable, UnauthorizedException, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
-import { randomBytes } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
+import { authenticator } from 'otplib';
+import * as QRCode from 'qrcode';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { normalizePermissions } from '../common/config/permissions.config';
 import { LoginDto } from './dto/login.dto';
+import { VerifyTwoFactorDto } from './dto/verify-two-factor.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
+import {
+  encryptSecret,
+  decryptSecretIfNeeded,
+} from '../common/utils/secret-crypto.util';
+
+// Двуфакторна автентикация (TOTP): кодът е валиден ±1 стъпка (30 s) заради
+// разминаване на часовника на телефона.
+authenticator.options = { window: 1 };
+const TWO_FACTOR_ISSUER = 'CortanaSoft';
+const CHALLENGE_TTL_MS = 10 * 60 * 1000;
+const CHALLENGE_MAX_ATTEMPTS = 5;
+export const TRUSTED_DEVICE_DAYS = 30;
+
+/** Незавършен вход: клиентът показва QR (при първо записване) и поле за код */
+export interface TwoFactorChallengeResult {
+  twoFactor: {
+    challengeId: string;
+    setup: boolean;
+    /** data: URL с QR кода (само при setup) */
+    qrDataUrl?: string;
+    /** Ключът за ръчно въвеждане в приложението (само при setup) */
+    manualKey?: string;
+  };
+}
+
+const hashToken = (token: string) =>
+  createHash('sha256').update(token).digest('hex');
 
 // A valid bcrypt hash used to burn the same CPU time when an email doesn't
 // exist, so login response timing can't reveal whether an account is registered.
@@ -53,9 +89,9 @@ export class AuthService {
     );
 
     // Намираме компанията по подразбиране или първата активна
-    const defaultUserCompany = user?.userCompanies.find(
-      (uc) => uc.isDefault && uc.company.isActive,
-    ) || user?.userCompanies.find((uc) => uc.company.isActive);
+    const defaultUserCompany =
+      user?.userCompanies.find((uc) => uc.isDefault && uc.company.isActive) ||
+      user?.userCompanies.find((uc) => uc.company.isActive);
 
     // Single generic error for every failure mode (unknown email, wrong
     // password, inactive user, no/inactive company) to prevent account
@@ -77,11 +113,187 @@ export class AuthService {
     };
   }
 
-  async login(loginDto: LoginDto) {
+  async login(loginDto: LoginDto, trustedDeviceToken?: string) {
     const user = await this.validateUser(loginDto.email, loginDto.password);
 
+    // Двуфакторна автентикация: без ключ → QR за записване; с ключ → код,
+    // освен ако устройството е запомнено (валидно trusted_device cookie).
+    if (user.twoFactorMode !== 'NOT_REQUIRED') {
+      const trusted =
+        user.twoFactorMode === 'REQUIRED' &&
+        (await this.isTrustedDevice(user.id, trustedDeviceToken));
+      if (!trusted) {
+        return this.createTwoFactorChallenge(user, loginDto);
+      }
+    }
+
+    return this.issueLogin(user, loginDto.rememberMe, loginDto.acceptTerms);
+  }
+
+  // ---- Двуфакторна автентикация -------------------------------------------
+
+  private async isTrustedDevice(
+    userId: string,
+    token?: string,
+  ): Promise<boolean> {
+    if (!token) return false;
+    const device = await this.prisma.trustedDevice.findUnique({
+      where: { tokenHash: hashToken(token) },
+    });
+    if (!device || device.userId !== userId || device.expiresAt < new Date()) {
+      return false;
+    }
+    await this.prisma.trustedDevice.update({
+      where: { id: device.id },
+      data: { lastUsedAt: new Date() },
+    });
+    return true;
+  }
+
+  private async createTwoFactorChallenge(
+    user: { id: string; email: string; twoFactorMode: string },
+    loginDto: LoginDto,
+  ): Promise<TwoFactorChallengeResult> {
+    const setup = user.twoFactorMode === 'NOT_SETUP';
+    const secret = setup ? authenticator.generateSecret() : null;
+
+    // Стари незавършени входове на същия потребител се чистят
+    await this.prisma.twoFactorChallenge.deleteMany({
+      where: { userId: user.id, expiresAt: { lt: new Date() } },
+    });
+    const challenge = await this.prisma.twoFactorChallenge.create({
+      data: {
+        userId: user.id,
+        purpose: setup ? 'SETUP' : 'LOGIN',
+        pendingSecret: secret ? encryptSecret(secret) : null,
+        rememberMe: !!loginDto.rememberMe,
+        acceptTerms: !!loginDto.acceptTerms,
+        expiresAt: new Date(Date.now() + CHALLENGE_TTL_MS),
+      },
+    });
+
+    if (!setup || !secret) {
+      return { twoFactor: { challengeId: challenge.id, setup: false } };
+    }
+    const otpauth = authenticator.keyuri(user.email, TWO_FACTOR_ISSUER, secret);
+    const qrDataUrl = await QRCode.toDataURL(otpauth, {
+      margin: 1,
+      width: 220,
+    });
+    return {
+      twoFactor: {
+        challengeId: challenge.id,
+        setup: true,
+        qrDataUrl,
+        manualKey: secret,
+      },
+    };
+  }
+
+  /**
+   * Втора стъпка на входа: проверява кода от приложението. При SETUP
+   * записва ключа на потребителя (режим REQUIRED). Връща същия резултат
+   * като login() плюс токен за запомняне на устройството (30 дни).
+   */
+  async verifyTwoFactor(dto: VerifyTwoFactorDto, userAgent?: string) {
+    const challenge = await this.prisma.twoFactorChallenge.findUnique({
+      where: { id: dto.challengeId },
+    });
+    if (
+      !challenge ||
+      challenge.expiresAt < new Date() ||
+      challenge.attempts >= CHALLENGE_MAX_ATTEMPTS
+    ) {
+      throw new UnauthorizedException('Invalid or expired code');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: challenge.userId },
+      include: {
+        userCompanies: {
+          include: { company: { include: { currency: true } }, role: true },
+          orderBy: { isDefault: 'desc' },
+        },
+      },
+    });
+    const defaultUserCompany =
+      user?.userCompanies.find((uc) => uc.isDefault && uc.company.isActive) ||
+      user?.userCompanies.find((uc) => uc.company.isActive);
+    if (!user || !user.isActive || !defaultUserCompany) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const encrypted =
+      challenge.purpose === 'SETUP'
+        ? challenge.pendingSecret
+        : user.twoFactorSecret;
+    const secret = encrypted ? decryptSecretIfNeeded(encrypted) : null;
+    const valid = !!secret && authenticator.check(dto.code, secret);
+    if (!valid) {
+      await this.prisma.twoFactorChallenge.update({
+        where: { id: challenge.id },
+        data: { attempts: { increment: 1 } },
+      });
+      throw new UnauthorizedException('Invalid or expired code');
+    }
+
+    // Първо записване: ключът става ключ на потребителя
+    if (challenge.purpose === 'SETUP') {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          twoFactorSecret: encrypted,
+          twoFactorMode: 'REQUIRED',
+          twoFactorEnabledAt: new Date(),
+        },
+      });
+    }
+    await this.prisma.twoFactorChallenge.delete({
+      where: { id: challenge.id },
+    });
+
+    // Запомняне на устройството
+    const trustedDeviceToken = randomBytes(32).toString('hex');
+    await this.prisma.trustedDevice.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(trustedDeviceToken),
+        userAgent: userAgent?.slice(0, 255) || null,
+        expiresAt: new Date(
+          Date.now() + TRUSTED_DEVICE_DAYS * 24 * 60 * 60 * 1000,
+        ),
+      },
+    });
+    await this.prisma.trustedDevice.deleteMany({
+      where: { userId: user.id, expiresAt: { lt: new Date() } },
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { password: _password, ...safeUser } = user;
+    const result = await this.issueLogin(
+      { ...safeUser, defaultUserCompany },
+      challenge.rememberMe,
+      challenge.acceptTerms,
+    );
+    return { ...result, trustedDeviceToken };
+  }
+
+  /** Cookie за запомненото устройство — както access_token, но винаги 30 дни */
+  getTrustedDeviceCookieOptions() {
+    return {
+      ...this.getCookieOptions(true),
+      maxAge: TRUSTED_DEVICE_DAYS * 24 * 60 * 60 * 1000,
+    };
+  }
+
+  /** Издава JWT и форматира потребителя за frontend (общо за login и 2FA) */
+  private async issueLogin(
+    user: Awaited<ReturnType<AuthService['validateUser']>>,
+    rememberMe?: boolean,
+    acceptTerms?: boolean,
+  ) {
     // Record terms acceptance if user accepted terms during login
-    if (loginDto.acceptTerms && !user.termsAcceptedAt) {
+    if (acceptTerms && !user.termsAcceptedAt) {
       await this.prisma.user.update({
         where: { id: user.id },
         data: { termsAcceptedAt: new Date() },
@@ -97,14 +309,16 @@ export class AuthService {
     };
 
     // Set token expiration based on rememberMe (30 days vs 1 day)
-    const expiresIn = loginDto.rememberMe ? '30d' : '1d';
+    const expiresIn = rememberMe ? '30d' : '1d';
     const accessToken = this.jwtService.sign(payload, { expiresIn });
 
     // Форматираме потребителя за frontend
     const currentCompany = user.defaultUserCompany.company;
     const currentRole = {
       ...user.defaultUserCompany.role,
-      permissions: normalizePermissions(user.defaultUserCompany.role.permissions as any),
+      permissions: normalizePermissions(
+        user.defaultUserCompany.role.permissions as any,
+      ),
     };
 
     return {
@@ -128,7 +342,7 @@ export class AuthService {
         })),
       },
       accessToken,
-      rememberMe: loginDto.rememberMe || false,
+      rememberMe: rememberMe || false,
     };
   }
 
@@ -209,9 +423,11 @@ export class AuthService {
     };
   }
 
-
-
-  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+  ) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) {
       throw new NotFoundException('User not found');
@@ -262,7 +478,8 @@ export class AuthService {
     });
 
     // Send email
-    const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
     const resetUrl = `${frontendUrl}/reset-password?token=${token}`;
 
     try {
@@ -343,7 +560,10 @@ export class AuthService {
 </html>`,
       });
     } catch (error) {
-      this.logger.error(`Failed to send password reset email to ${email}`, error);
+      this.logger.error(
+        `Failed to send password reset email to ${email}`,
+        error,
+      );
     }
 
     return { success: true };
@@ -356,7 +576,9 @@ export class AuthService {
     });
 
     if (!resetRecord) {
-      throw new BadRequestException('Невалиден или изтекъл линк за промяна на парола');
+      throw new BadRequestException(
+        'Невалиден или изтекъл линк за промяна на парола',
+      );
     }
 
     if (resetRecord.usedAt) {

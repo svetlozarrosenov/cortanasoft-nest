@@ -496,6 +496,20 @@ enum CompanyPlanStatus {
   EXPIRED // Изтекъл
 }
 
+// Двуфакторна автентикация (TOTP, приложение като Google Authenticator):
+// NOT_REQUIRED = без (по подразбиране); NOT_SETUP = админът я е включил, при
+// следващия вход потребителят сканира QR; REQUIRED = ключът е записан, иска се код.
+enum TwoFactorMode {
+  NOT_REQUIRED
+  NOT_SETUP
+  REQUIRED
+}
+
+enum TwoFactorPurpose {
+  SETUP
+  LOGIN
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -505,6 +519,13 @@ model User {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Двуфакторна автентикация — тайният ключ е шифрован (enc:v1:, secret-crypto.util)
+  twoFactorMode      TwoFactorMode @default(NOT_REQUIRED)
+  twoFactorSecret    String?
+  twoFactorEnabledAt DateTime?
+  trustedDevices      TrustedDevice[]
+  twoFactorChallenges TwoFactorChallenge[]
 
   userCompanies                 UserCompany[]
   createdProducts               Product[]
@@ -603,6 +624,42 @@ model User {
   caseMessages  CaseMessage[]  @relation("CaseMessageAuthor")
 
   @@map("users")
+}
+
+// Запомнено устройство за двуфакторната автентикация: браузърът пази подписан
+// токен в cookie (30 дни), тук е неговият SHA-256 хеш, за да може да се анулира.
+model TrustedDevice {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  userAgent  String?
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime
+  lastUsedAt DateTime?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("trusted_devices")
+}
+
+// Незавършен вход, чакащ код от приложението. При SETUP носи новия (шифрован)
+// ключ, който става ключ на потребителя чак след първия верен код.
+model TwoFactorChallenge {
+  id            String           @id @default(cuid())
+  purpose       TwoFactorPurpose
+  pendingSecret String?
+  rememberMe    Boolean          @default(false)
+  acceptTerms   Boolean          @default(false)
+  attempts      Int              @default(0)
+  createdAt     DateTime         @default(now())
+  expiresAt     DateTime
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("two_factor_challenges")
 }
 
 // Токен за възстановяване на парола

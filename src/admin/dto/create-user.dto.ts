@@ -10,7 +10,10 @@ import {
   MinLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { NormalizeEmail, TrimEnds } from '../../common/decorators/normalize.decorator';
+import {
+  NormalizeEmail,
+  TrimEnds,
+} from '../../common/decorators/normalize.decorator';
 
 class UserCompanyAssignment {
   @IsString()
@@ -55,6 +58,13 @@ export class CreateUserDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  // Двуфакторна автентикация (TOTP приложение): true = NOT_SETUP (QR при
+  // следващия вход), false = изключена и ключът се трие. Включване на вече
+  // включена не пипа ключа; изключване + включване = нов ключ.
+  @IsBoolean()
+  @IsOptional()
+  twoFactorRequired?: boolean;
 
   @IsArray()
   @ValidateNested({ each: true })
