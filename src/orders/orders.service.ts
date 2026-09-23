@@ -16,6 +16,7 @@ import {
 } from './dto';
 import { Prisma } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
+import { calculateDocumentTotals } from '../common/utils/document-totals';
 import { WarrantiesService } from '../warranties/warranties.service';
 import { PaymentsService } from '../payments/payments.service';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
@@ -198,7 +199,6 @@ export class OrdersService {
     defaultVatRate: number,
   ) {
     let subtotal = 0;
-    let vatAmount = 0;
 
     const itemsData = items.map((item) => {
       const product = products.find((p) => p.id === item.productId);
@@ -217,10 +217,7 @@ export class OrdersService {
         );
       }
 
-      const itemVat = round2(itemSubtotal * (itemVatRate / 100));
-
       subtotal += itemSubtotal;
-      vatAmount += itemVat;
 
       // Директен ред: никаква връзка със склад (партида/сериен/локация) и
       // stockDeducted=false от самото начало, за да няма какво да се
@@ -249,7 +246,48 @@ export class OrdersService {
     return {
       itemsData,
       subtotal: round2(subtotal),
-      vatAmount: round2(vatAmount),
+    };
+  }
+
+  // Редакция без редове: ако се сменя отстъпката или доставката, ДДС и
+  // общата сума се преизчисляват от съществуващите редове, за да не се
+  // разминат с тях.
+  private async recalculatedHeaderTotals(
+    order: { id: string; discount: any; discountPercent: any; shippingCost: any },
+    dto: UpdateOrderDto,
+  ) {
+    if (
+      dto.discount === undefined &&
+      dto.discountPercent === undefined &&
+      dto.shippingCost === undefined
+    ) {
+      return {};
+    }
+    const items = await this.prisma.orderItem.findMany({
+      where: { orderId: order.id },
+      select: { subtotal: true, vatRate: true },
+    });
+    const itemsData = items.map((i) => ({
+      subtotal: Number(i.subtotal),
+      vatRate: Number(i.vatRate),
+    }));
+    const subtotal = round2(itemsData.reduce((sum, i) => sum + i.subtotal, 0));
+    const shippingCost = dto.shippingCost ?? Number(order.shippingCost);
+    const discountInput =
+      dto.discount === undefined && dto.discountPercent === undefined
+        ? {
+            discount: Number(order.discount),
+            discountPercent:
+              order.discountPercent == null ? null : Number(order.discountPercent),
+          }
+        : dto;
+    const totals = calculateDocumentTotals(itemsData, subtotal, discountInput, shippingCost);
+    return {
+      shippingCost,
+      discount: totals.discount,
+      discountPercent: totals.discountPercent,
+      vatAmount: totals.vatAmount,
+      total: totals.total,
     };
   }
 
@@ -333,15 +371,19 @@ export class OrdersService {
     const currencyId = dto.currencyId || company.currencyId;
 
     // Calculate totals with proper rounding
-    const { itemsData, subtotal, vatAmount } = this.calculateItemTotals(
+    const { itemsData, subtotal } = this.calculateItemTotals(
       dto.items,
       products,
       defaultVatRate,
     );
 
-    const orderDiscount = dto.discount ?? 0;
     const shippingCost = dto.shippingCost ?? 0;
-    const total = round2(subtotal + vatAmount + shippingCost - orderDiscount);
+    const {
+      discount: orderDiscount,
+      discountPercent,
+      vatAmount,
+      total,
+    } = calculateDocumentTotals(itemsData, subtotal, dto, shippingCost);
 
     // Generate order number inside transaction to avoid race condition
     const initialPaymentStatus =
@@ -376,6 +418,7 @@ export class OrdersService {
           paymentMethod: dto.paymentMethod,
           shippingCost,
           discount: orderDiscount,
+          discountPercent,
           subtotal,
           vatAmount,
           total,
@@ -1093,15 +1136,28 @@ export class OrdersService {
         throw new BadRequestException(ErrorMessages.orders.productsNotFound);
       }
 
-      const { itemsData, subtotal, vatAmount } = this.calculateItemTotals(
+      const { itemsData, subtotal } = this.calculateItemTotals(
         dto.items,
         products,
         defaultVatRate,
       );
 
-      const orderDiscount = dto.discount ?? Number(order.discount);
       const shippingCost = dto.shippingCost ?? Number(order.shippingCost);
-      const total = round2(subtotal + vatAmount + shippingCost - orderDiscount);
+      // Ако формата не праща отстъпка, пазим текущата (сума или %)
+      const discountInput =
+        dto.discount === undefined && dto.discountPercent === undefined
+          ? {
+              discount: Number(order.discount),
+              discountPercent:
+                order.discountPercent == null ? null : Number(order.discountPercent),
+            }
+          : dto;
+      const {
+        discount: orderDiscount,
+        discountPercent,
+        vatAmount,
+        total,
+      } = calculateDocumentTotals(itemsData, subtotal, discountInput, shippingCost);
 
       // Build a quick lookup so the apply step below knows each new item's
       // product type without an extra DB round-trip.
@@ -1232,6 +1288,7 @@ export class OrdersService {
             ...(dto.notes !== undefined && { notes: dto.notes }),
             shippingCost,
             discount: orderDiscount,
+            discountPercent,
             subtotal,
             vatAmount,
             total,
@@ -1405,10 +1462,7 @@ export class OrdersService {
         ...(dto.paymentMethod && { paymentMethod: dto.paymentMethod }),
         // paymentStatus НЕ се пише директно — минава през PaymentsService
         ...(dto.locationId && { locationId: dto.locationId }),
-        ...(dto.shippingCost !== undefined && {
-          shippingCost: dto.shippingCost,
-        }),
-        ...(dto.discount !== undefined && { discount: dto.discount }),
+        ...(await this.recalculatedHeaderTotals(order, dto)),
         ...(dto.notes !== undefined && { notes: dto.notes }),
       },
       include: ORDER_INCLUDE,

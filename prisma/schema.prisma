@@ -1829,8 +1829,12 @@ model Order {
   subtotal     Decimal @db.Decimal(12, 2) // Сума без ДДС
   vatAmount    Decimal @db.Decimal(12, 2) // ДДС
   shippingCost Decimal @default(0) @db.Decimal(10, 2) // Цена за доставка
-  discount     Decimal @default(0) @db.Decimal(10, 2) // Отстъпка
-  total        Decimal @db.Decimal(12, 2) // Обща сума с ДДС
+  // Отстъпка на документа — сума преди ДДС, разпределена пропорционално по
+  // редовете при изчисляване на ДДС (данъчната основа е subtotal − discount).
+  // discountPercent е зададеният процент, ако отстъпката е въведена като %.
+  discount        Decimal  @default(0) @db.Decimal(10, 2) // Отстъпка (сума, преди ДДС)
+  discountPercent Decimal? @db.Decimal(5, 2) // Отстъпка в %, ако е въведена така
+  total           Decimal  @db.Decimal(12, 2) // Обща сума с ДДС
 
   notes String? // Бележки
 
@@ -2141,11 +2145,13 @@ model Offer {
   customerCity       String? // Град
   customerPostalCode String? // Пощенски код
 
-  // Суми
-  subtotal  Decimal @db.Decimal(12, 2) // Сума без ДДС
-  vatAmount Decimal @db.Decimal(12, 2) // ДДС
-  discount  Decimal @default(0) @db.Decimal(10, 2) // Отстъпка
-  total     Decimal @db.Decimal(12, 2) // Обща сума с ДДС
+  // Суми — отстъпката на документа е преди ДДС, както при продажбите
+  // (разпределя се по редовете; данъчната основа е subtotal − discount)
+  subtotal        Decimal  @db.Decimal(12, 2) // Сума без ДДС
+  vatAmount       Decimal  @db.Decimal(12, 2) // ДДС
+  discount        Decimal  @default(0) @db.Decimal(10, 2) // Отстъпка (сума, преди ДДС)
+  discountPercent Decimal? @db.Decimal(5, 2) // Отстъпка в %, ако е въведена така
+  total           Decimal  @db.Decimal(12, 2) // Обща сума с ДДС
 
   notes String? // Бележки
 

@@ -7,6 +7,7 @@ import {
   IsArray,
   ValidateNested,
   Min,
+  Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaymentMethod, PaymentStatus, OrderStatus } from '@prisma/client';
@@ -110,6 +111,13 @@ export class UpdateOrderDto {
   @IsOptional()
   @Min(0)
   discount?: number;
+
+  // Отстъпка на документа в % (алтернатива на discount като сума)
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(100)
+  discountPercent?: number;
 
   @IsString()
   @IsOptional()

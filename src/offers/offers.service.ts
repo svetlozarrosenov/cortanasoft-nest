@@ -4,8 +4,14 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateOfferDto, UpdateOfferDto, QueryOffersDto } from './dto';
+import {
+  CreateOfferDto,
+  CreateOfferItemDto,
+  UpdateOfferDto,
+  QueryOffersDto,
+} from './dto';
 import { Prisma } from '@prisma/client';
+import { calculateDocumentTotals } from '../common/utils/document-totals';
 
 const OFFER_INCLUDE = {
   customer: true,
@@ -50,6 +56,98 @@ export class OffersService {
     return `${prefix}${(count + 1).toString().padStart(5, '0')}`;
   }
 
+  // Редове: отстъпката на реда е сума (frontend-ът я смята от %), стойността
+  // на реда е количество × ед. цена − отстъпка. ДДС се смята след
+  // отстъпката на документа (calculateDocumentTotals), не тук.
+  private calculateItemTotals(
+    items: CreateOfferItemDto[],
+    products: any[],
+    defaultVatRate: number,
+  ) {
+    let subtotal = 0;
+
+    const itemsData = items.map((item) => {
+      const product = item.productId
+        ? products.find((p: any) => p.id === item.productId)
+        : null;
+      const productVatRate = product ? Number(product.vatRate) : defaultVatRate;
+      const itemVatRate =
+        item.vatRate ??
+        (isNaN(productVatRate) ? defaultVatRate : productVatRate);
+      const itemDiscount = item.discount ?? 0;
+      const itemSubtotal = round2(
+        item.quantity * item.unitPrice - itemDiscount,
+      );
+
+      subtotal += itemSubtotal;
+
+      return {
+        productId: item.productId || null,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        vatRate: itemVatRate,
+        discount: itemDiscount,
+        total: itemSubtotal,
+      };
+    });
+
+    // Редовете за формулата на ДДС (стойност + ставка), отделно от данните за запис
+    const lines = itemsData.map((i) => ({
+      subtotal: i.total,
+      vatRate: i.vatRate,
+    }));
+
+    return { itemsData, lines, subtotal: round2(subtotal) };
+  }
+
+  // Ако формата не праща отстъпка, пазим текущата (сума или %)
+  private discountInputFor(
+    offer: { discount: Prisma.Decimal; discountPercent: Prisma.Decimal | null },
+    dto: UpdateOfferDto,
+  ) {
+    return dto.discount === undefined && dto.discountPercent === undefined
+      ? {
+          discount: Number(offer.discount),
+          discountPercent:
+            offer.discountPercent == null
+              ? null
+              : Number(offer.discountPercent),
+        }
+      : dto;
+  }
+
+  // Редакция без редове: при смяна на отстъпката ДДС и общата сума се
+  // преизчисляват от съществуващите редове, за да не се разминат с тях.
+  private async recalculatedHeaderTotals(
+    offer: {
+      id: string;
+      discount: Prisma.Decimal;
+      discountPercent: Prisma.Decimal | null;
+    },
+    dto: UpdateOfferDto,
+  ) {
+    if (dto.discount === undefined && dto.discountPercent === undefined) {
+      return {};
+    }
+    const items = await this.prisma.offerItem.findMany({
+      where: { offerId: offer.id },
+      select: { total: true, vatRate: true },
+    });
+    const lines = items.map((i) => ({
+      subtotal: Number(i.total),
+      vatRate: Number(i.vatRate),
+    }));
+    const subtotal = round2(lines.reduce((sum, l) => sum + l.subtotal, 0));
+    const totals = calculateDocumentTotals(lines, subtotal, dto);
+    return {
+      discount: totals.discount,
+      discountPercent: totals.discountPercent,
+      vatAmount: totals.vatAmount,
+      total: totals.total,
+    };
+  }
+
   async create(companyId: string, userId: string, dto: CreateOfferDto) {
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
@@ -89,39 +187,17 @@ export class OffersService {
 
     const currencyId = dto.currencyId || company.currencyId;
 
-    // Calculate totals
-    let subtotal = 0;
-    let vatAmount = 0;
-
-    const itemsData = dto.items.map((item) => {
-      const product = item.productId
-        ? products.find((p: any) => p.id === item.productId)
-        : null;
-      const productVatRate = product ? Number(product.vatRate) : defaultVatRate;
-      const itemVatRate =
-        item.vatRate ?? (isNaN(productVatRate) ? defaultVatRate : productVatRate);
-      const itemDiscount = item.discount ?? 0;
-      const itemSubtotal = round2(item.quantity * item.unitPrice - itemDiscount);
-      const itemVat = round2(itemSubtotal * (itemVatRate / 100));
-
-      subtotal += itemSubtotal;
-      vatAmount += itemVat;
-
-      return {
-        productId: item.productId || null,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        vatRate: itemVatRate,
-        discount: itemDiscount,
-        total: itemSubtotal,
-      };
-    });
-
-    subtotal = round2(subtotal);
-    vatAmount = round2(vatAmount);
-    const offerDiscount = dto.discount ?? 0;
-    const total = round2(subtotal + vatAmount - offerDiscount);
+    const { itemsData, lines, subtotal } = this.calculateItemTotals(
+      dto.items,
+      products,
+      defaultVatRate,
+    );
+    const {
+      discount: offerDiscount,
+      discountPercent,
+      vatAmount,
+      total,
+    } = calculateDocumentTotals(lines, subtotal, dto);
 
     return this.prisma.$transaction(async (tx) => {
       const offerNumber = await this.generateOfferNumber(companyId, tx);
@@ -145,6 +221,7 @@ export class OffersService {
           subtotal,
           vatAmount,
           discount: offerDiscount,
+          discountPercent,
           total,
           notes: dto.notes || null,
           richDescription: dto.richDescription || null,
@@ -236,9 +313,7 @@ export class OffersService {
     const offer = await this.findOne(companyId, id);
 
     if (offer.status !== 'DRAFT') {
-      throw new BadRequestException(
-        'Може да редактирате само чернови оферти',
-      );
+      throw new BadRequestException('Може да редактирате само чернови оферти');
     }
 
     // Verify a reassigned customer belongs to this company (IDOR guard).
@@ -290,6 +365,7 @@ export class OffersService {
             richDescription: dto.richDescription || null,
           }),
           ...(dto.hideTotals !== undefined && { hideTotals: dto.hideTotals }),
+          ...(await this.recalculatedHeaderTotals(offer, dto)),
         },
         include: OFFER_INCLUDE,
       });
@@ -313,38 +389,21 @@ export class OffersService {
       });
     }
 
-    let subtotal = 0;
-    let vatAmount = 0;
-
-    const itemsData = dto.items.map((item) => {
-      const product = item.productId
-        ? products.find((p: any) => p.id === item.productId)
-        : null;
-      const productVatRate = product ? Number(product.vatRate) : defaultVatRate;
-      const itemVatRate =
-        item.vatRate ?? (isNaN(productVatRate) ? defaultVatRate : productVatRate);
-      const itemDiscount = item.discount ?? 0;
-      const itemSubtotal = round2(item.quantity * item.unitPrice - itemDiscount);
-      const itemVat = round2(itemSubtotal * (itemVatRate / 100));
-
-      subtotal += itemSubtotal;
-      vatAmount += itemVat;
-
-      return {
-        productId: item.productId || null,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        vatRate: itemVatRate,
-        discount: itemDiscount,
-        total: itemSubtotal,
-      };
-    });
-
-    subtotal = round2(subtotal);
-    vatAmount = round2(vatAmount);
-    const offerDiscount = dto.discount ?? offer.discount.toNumber();
-    const total = round2(subtotal + vatAmount - offerDiscount);
+    const { itemsData, lines, subtotal } = this.calculateItemTotals(
+      dto.items,
+      products,
+      defaultVatRate,
+    );
+    const {
+      discount: offerDiscount,
+      discountPercent,
+      vatAmount,
+      total,
+    } = calculateDocumentTotals(
+      lines,
+      subtotal,
+      this.discountInputFor(offer, dto),
+    );
 
     return this.prisma.$transaction(async (tx) => {
       await tx.offerItem.deleteMany({ where: { offerId: id } });
@@ -391,6 +450,7 @@ export class OffersService {
           subtotal,
           vatAmount,
           discount: offerDiscount,
+          discountPercent,
           total,
           items: { create: itemsData },
         },
@@ -414,9 +474,7 @@ export class OffersService {
   async accept(companyId: string, id: string) {
     const offer = await this.findOne(companyId, id);
     if (offer.status !== 'SENT') {
-      throw new BadRequestException(
-        'Може да приемете само изпратени оферти',
-      );
+      throw new BadRequestException('Може да приемете само изпратени оферти');
     }
     return this.prisma.$transaction(async (tx) => {
       if (offer.customer && offer.customer.stage === 'LEAD') {
@@ -453,9 +511,7 @@ export class OffersService {
       throw new BadRequestException('Офертата вече е анулирана');
     }
     if (offer.status === 'ACCEPTED') {
-      throw new BadRequestException(
-        'Не може да анулирате приета оферта',
-      );
+      throw new BadRequestException('Не може да анулирате приета оферта');
     }
     return this.prisma.offer.update({
       where: { id },
@@ -467,11 +523,8 @@ export class OffersService {
   async remove(companyId: string, id: string) {
     const offer = await this.findOne(companyId, id);
     if (offer.status !== 'DRAFT') {
-      throw new BadRequestException(
-        'Може да изтриете само чернови оферти',
-      );
+      throw new BadRequestException('Може да изтриете само чернови оферти');
     }
     return this.prisma.offer.delete({ where: { id } });
   }
-
 }

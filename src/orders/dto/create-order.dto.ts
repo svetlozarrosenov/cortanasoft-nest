@@ -5,6 +5,7 @@ import {
   ValidateNested,
   IsNumber,
   Min,
+  Max,
   IsEnum,
   IsEmail,
   IsBoolean,
@@ -174,10 +175,19 @@ export class CreateOrderDto {
   @Min(0)
   shippingCost?: number;
 
+  // Отстъпка на документа (преди ДДС). Задава се или като сума (discount),
+  // или като процент (discountPercent) — при подаден процент сумата се
+  // изчислява от backend-а и подаденият discount се игнорира.
   @IsNumber()
   @IsOptional()
   @Min(0)
   discount?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(100)
+  discountPercent?: number;
 
   @IsString()
   @IsOptional()

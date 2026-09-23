@@ -8,6 +8,7 @@ import {
   ArrayMinSize,
   ValidateNested,
   Min,
+  Max,
   IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -87,10 +88,18 @@ export class CreateOfferDto {
   @IsOptional()
   validUntil?: string;
 
+  // Отстъпка на документа (преди ДДС): сума (discount) или процент
+  // (discountPercent) — при подаден процент сумата се изчислява от backend-а.
   @IsNumber()
   @IsOptional()
   @Min(0)
   discount?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(100)
+  discountPercent?: number;
 
   @IsString()
   @IsOptional()
@@ -160,10 +169,18 @@ export class UpdateOfferDto {
   @IsOptional()
   validUntil?: string;
 
+  // Отстъпка на документа (преди ДДС): сума (discount) или процент
+  // (discountPercent) — при подаден процент сумата се изчислява от backend-а.
   @IsNumber()
   @IsOptional()
   @Min(0)
   discount?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(100)
+  discountPercent?: number;
 
   @IsString()
   @IsOptional()

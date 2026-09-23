@@ -164,6 +164,104 @@ describe('OrdersService', () => {
       expect(result.vatAmount).toBe(90);
     });
 
+    describe('отстъпка на документа (преди ДДС)', () => {
+      const setup = () => {
+        mockPrisma.company.findUnique.mockResolvedValue({ id: 'c1', vatNumber: 'BG123', currencyId: 'cur1' });
+        const catalogue = [
+          { id: 'p1', name: 'A', vatRate: 20 },
+          { id: 'p2', name: 'B', vatRate: 0 },
+        ];
+        mockPrisma.product.findMany.mockImplementation(({ where }: any) =>
+          Promise.resolve(catalogue.filter((p) => where.id.in.includes(p.id))),
+        );
+        mockPrisma.order.findFirst.mockResolvedValue(null);
+        mockPrisma.order.create.mockImplementation(({ data }) => Promise.resolve({ id: '1', ...data }));
+      };
+
+      it('сума: намалява данъчната основа, ДДС е върху остатъка', async () => {
+        setup();
+        const result = await service.create('c1', 'u1', {
+          customerName: 'Client',
+          items: [{ productId: 'p1', quantity: 1, unitPrice: 100 }],
+          discount: 10,
+        } as any);
+        expect(result.subtotal).toBe(100);
+        expect(result.discount).toBe(10);
+        expect(result.discountPercent).toBeNull();
+        expect(result.vatAmount).toBe(18); // (100 − 10) × 20%
+        expect(result.total).toBe(108);
+      });
+
+      it('процент: сумата се изчислява от backend-а и се пази процентът', async () => {
+        setup();
+        const result = await service.create('c1', 'u1', {
+          customerName: 'Client',
+          items: [{ productId: 'p1', quantity: 2, unitPrice: 50 }],
+          discount: 999, // игнорира се при подаден процент
+          discountPercent: 15,
+        } as any);
+        expect(result.discount).toBe(15);
+        expect(result.discountPercent).toBe(15);
+        expect(result.vatAmount).toBe(17); // 85 × 20%
+        expect(result.total).toBe(102);
+      });
+
+      it('разпределя се по редовете според ставката им (20% и 0%)', async () => {
+        setup();
+        const result = await service.create('c1', 'u1', {
+          customerName: 'Client',
+          items: [
+            { productId: 'p1', quantity: 1, unitPrice: 100 }, // 20%
+            { productId: 'p2', quantity: 1, unitPrice: 100 }, // 0%
+          ],
+          discount: 50,
+        } as any);
+        // 25 от отстъпката пада на реда с 20% → ДДС = 75 × 20% = 15
+        expect(result.vatAmount).toBe(15);
+        expect(result.total).toBe(165); // 200 − 50 + 15
+      });
+
+      it('закръглянето се събира точно (остатъкът е на последния ред)', async () => {
+        setup();
+        const result = await service.create('c1', 'u1', {
+          customerName: 'Client',
+          items: [
+            { productId: 'p1', quantity: 1, unitPrice: 33.33 },
+            { productId: 'p1', quantity: 1, unitPrice: 33.33 },
+            { productId: 'p1', quantity: 1, unitPrice: 33.34 },
+          ],
+          discount: 10,
+        } as any);
+        expect(result.subtotal).toBe(100);
+        expect(result.vatAmount).toBe(18);
+        expect(result.total).toBe(108);
+      });
+
+      it('отстъпка над стойността на редовете е грешка', async () => {
+        setup();
+        await expect(
+          service.create('c1', 'u1', {
+            customerName: 'Client',
+            items: [{ productId: 'p1', quantity: 1, unitPrice: 100 }],
+            discount: 150,
+          } as any),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('отстъпка на реда се вади преди тази на документа', async () => {
+        setup();
+        const result = await service.create('c1', 'u1', {
+          customerName: 'Client',
+          items: [{ productId: 'p1', quantity: 1, unitPrice: 100, discount: 20 }],
+          discountPercent: 10,
+        } as any);
+        expect(result.subtotal).toBe(80);
+        expect(result.discount).toBe(8);
+        expect(result.vatAmount).toBe(14.4); // 72 × 20%
+        expect(result.total).toBe(86.4);
+      });
+    });
+
     it('пази описанието на реда (trim), а при празно — snapshot на името на продукта', async () => {
       const dto = {
         customerName: 'Client',
