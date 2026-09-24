@@ -44,6 +44,10 @@ export class CompanyContractFilesController {
     if (!file) {
       throw new BadRequestException('Не е предоставен файл');
     }
+    // Видът идва като query параметър — само стойности от enum-а
+    if (kind && !Object.values(ContractFileKind).includes(kind)) {
+      throw new BadRequestException('Невалиден тип на файла');
+    }
     const created = await this.service.upload(
       companyId,
       user.id,
