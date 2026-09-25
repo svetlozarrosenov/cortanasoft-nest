@@ -50,6 +50,8 @@ export class AdminService {
                 email: true,
                 firstName: true,
                 lastName: true,
+                middleName: true,
+                phone: true,
                 isActive: true,
               },
             },
@@ -83,6 +85,8 @@ export class AdminService {
                 email: true,
                 firstName: true,
                 lastName: true,
+                middleName: true,
+                phone: true,
                 isActive: true,
               },
             },
@@ -265,6 +269,8 @@ export class AdminService {
         email: true,
         firstName: true,
         lastName: true,
+        middleName: true,
+        phone: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,
@@ -296,6 +302,8 @@ export class AdminService {
         email: true,
         firstName: true,
         lastName: true,
+        middleName: true,
+        phone: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,
@@ -339,6 +347,8 @@ export class AdminService {
         password: hashedPassword,
         firstName: dto.firstName,
         lastName: dto.lastName,
+        middleName: dto.middleName || null,
+        phone: dto.phone || null,
         isActive: dto.isActive ?? true,
         // Нов потребител с 2FA: QR при първия вход
         twoFactorMode: dto.twoFactorRequired ? 'NOT_SETUP' : 'NOT_REQUIRED',
@@ -408,6 +418,13 @@ export class AdminService {
       lastName: dto.lastName,
       isActive: dto.isActive,
     };
+    // Незадължителни: пропуснато поле не пипа стойността, празно → NULL
+    if (dto.middleName !== undefined) {
+      updateData.middleName = dto.middleName || null;
+    }
+    if (dto.phone !== undefined) {
+      updateData.phone = dto.phone || null;
+    }
 
     if (dto.password) {
       updateData.password = await bcrypt.hash(dto.password, 10);
@@ -728,6 +745,8 @@ export class AdminService {
             email: true,
             firstName: true,
             lastName: true,
+            middleName: true,
+            phone: true,
             isActive: true,
             twoFactorMode: true,
             createdAt: true,
@@ -801,6 +820,8 @@ export class AdminService {
         email: true,
         firstName: true,
         lastName: true,
+        middleName: true,
+        phone: true,
         isActive: true,
         createdAt: true,
         userCompanies: {
@@ -911,6 +932,8 @@ export class AdminService {
             email: true,
             firstName: true,
             lastName: true,
+            middleName: true,
+            phone: true,
             isActive: true,
             createdAt: true,
           },
@@ -1020,6 +1043,8 @@ export class AdminService {
             email: true,
             firstName: true,
             lastName: true,
+            middleName: true,
+            phone: true,
             isActive: true,
             createdAt: true,
           },

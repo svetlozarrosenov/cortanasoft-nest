@@ -55,6 +55,17 @@ export class CreateUserDto {
   @IsNotEmpty()
   lastName: string;
 
+  // Презиме и телефон — незадължителни; празен низ се пази като NULL
+  @TrimEnds()
+  @IsString()
+  @IsOptional()
+  middleName?: string;
+
+  @TrimEnds()
+  @IsString()
+  @IsOptional()
+  phone?: string;
+
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;

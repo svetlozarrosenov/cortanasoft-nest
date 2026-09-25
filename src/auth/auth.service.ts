@@ -327,6 +327,8 @@ export class AuthService {
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
+        middleName: user.middleName,
+        phone: user.phone,
         isActive: user.isActive,
         isSuperAdmin: currentCompany.role === 'OWNER',
         termsAcceptedAt: user.termsAcceptedAt,

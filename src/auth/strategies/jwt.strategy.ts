@@ -82,6 +82,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       email: userWithoutPassword.email,
       firstName: userWithoutPassword.firstName,
       lastName: userWithoutPassword.lastName,
+      middleName: userWithoutPassword.middleName,
+      phone: userWithoutPassword.phone,
       isActive: userWithoutPassword.isActive,
       termsAcceptedAt: userWithoutPassword.termsAcceptedAt,
       currentCompany: currentUserCompany.company,
