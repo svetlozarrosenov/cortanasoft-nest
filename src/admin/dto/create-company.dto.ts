@@ -9,6 +9,7 @@ import {
   Length,
   IsInt,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CompanyRole } from '@prisma/client';
@@ -117,6 +118,17 @@ export class CreateCompanyDto {
   @IsString()
   @IsOptional()
   logoUrl?: string;
+
+  // Основен цвят на стандартните PDF документи; '' или null = лилавото на Cortana
+  @ValidateIf((_, v) => v !== null && v !== '')
+  @Matches(/^#[0-9a-fA-F]{6}$/, { message: 'Цветът трябва да е hex, напр. #1e6fd9' })
+  @IsOptional()
+  pdfAccentColor?: string | null;
+
+  // Рекламен ред на CortanaSoft във фактура/оферта (само със съгласие на клиента)
+  @IsBoolean()
+  @IsOptional()
+  showCortanaBranding?: boolean;
 
   // PDF template keys (NULL = default)
   @IsString()

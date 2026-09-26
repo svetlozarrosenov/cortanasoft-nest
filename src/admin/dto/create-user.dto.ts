@@ -77,6 +77,12 @@ export class CreateUserDto {
   @IsOptional()
   twoFactorRequired?: boolean;
 
+  // Достъп до системата. false = служител без вход (виж User.loginEnabled).
+  // Включването не задава парола — тя се праща с welcome имейла.
+  @IsBoolean()
+  @IsOptional()
+  loginEnabled?: boolean;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => UserCompanyAssignment)

@@ -52,6 +52,7 @@ export class AdminService {
                 lastName: true,
                 middleName: true,
                 phone: true,
+            loginEnabled: true,
                 isActive: true,
               },
             },
@@ -87,6 +88,7 @@ export class AdminService {
                 lastName: true,
                 middleName: true,
                 phone: true,
+            loginEnabled: true,
                 isActive: true,
               },
             },
@@ -224,6 +226,11 @@ export class AdminService {
         bic: dto.bic,
         currencyId: dto.currencyId,
         logoUrl: dto.logoUrl,
+        // '' от формата = изчистване → NULL (лилавото на Cortana)
+        ...(dto.pdfAccentColor !== undefined
+          ? { pdfAccentColor: dto.pdfAccentColor ? dto.pdfAccentColor.toLowerCase() : null }
+          : {}),
+        showCortanaBranding: dto.showCortanaBranding,
         invoiceTemplateKey: dto.invoiceTemplateKey,
         offerTemplateKey: dto.offerTemplateKey,
         stockReceiptTemplateKey: dto.stockReceiptTemplateKey,
@@ -271,6 +278,7 @@ export class AdminService {
         lastName: true,
         middleName: true,
         phone: true,
+        loginEnabled: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,
@@ -304,6 +312,7 @@ export class AdminService {
         lastName: true,
         middleName: true,
         phone: true,
+        loginEnabled: true,
         isActive: true,
         createdAt: true,
         updatedAt: true,
@@ -350,6 +359,7 @@ export class AdminService {
         middleName: dto.middleName || null,
         phone: dto.phone || null,
         isActive: dto.isActive ?? true,
+        loginEnabled: dto.loginEnabled ?? true,
         // Нов потребител с 2FA: QR при първия вход
         twoFactorMode: dto.twoFactorRequired ? 'NOT_SETUP' : 'NOT_REQUIRED',
       },
@@ -428,6 +438,16 @@ export class AdminService {
 
     if (dto.password) {
       updateData.password = await bcrypt.hash(dto.password, 10);
+    }
+
+    // Достъп до системата. Изключване → сесиите му умират (JwtStrategy) и
+    // запомнените устройства се трият. Включване → паролата остава
+    // генерираната неизвестна, докато не се зададе тук или с welcome имейла.
+    if (dto.loginEnabled !== undefined) {
+      updateData.loginEnabled = dto.loginEnabled;
+      if (dto.loginEnabled === false) {
+        await this.prisma.trustedDevice.deleteMany({ where: { userId: id } });
+      }
     }
 
     // Двуфакторна автентикация: включване → чака записване на ключ (QR при
@@ -747,6 +767,7 @@ export class AdminService {
             lastName: true,
             middleName: true,
             phone: true,
+            loginEnabled: true,
             isActive: true,
             twoFactorMode: true,
             createdAt: true,
@@ -822,6 +843,7 @@ export class AdminService {
         lastName: true,
         middleName: true,
         phone: true,
+        loginEnabled: true,
         isActive: true,
         createdAt: true,
         userCompanies: {
@@ -934,6 +956,7 @@ export class AdminService {
             lastName: true,
             middleName: true,
             phone: true,
+            loginEnabled: true,
             isActive: true,
             createdAt: true,
           },
@@ -1045,6 +1068,7 @@ export class AdminService {
             lastName: true,
             middleName: true,
             phone: true,
+            loginEnabled: true,
             isActive: true,
             createdAt: true,
           },
@@ -1204,6 +1228,11 @@ export class AdminService {
     });
     if (!user) {
       throw new NotFoundException('User not found');
+    }
+    if (!user.loginEnabled) {
+      throw new BadRequestException(
+        'Потребителят е без достъп до системата. Първо включете достъпа.',
+      );
     }
 
     const company = await this.prisma.company.findUnique({

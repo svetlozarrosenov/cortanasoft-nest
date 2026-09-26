@@ -144,6 +144,15 @@ model Company {
   // Лого
   logoUrl String? // URL към логото на компанията (Cloudflare R2)
 
+  // Основен цвят на СТАНДАРТНИТЕ PDF документи (hex, напр. #1e6fd9). NULL =
+  // лилавото на Cortana. Къстъм шаблоните (Modern, клиентски) не го четат —
+  // те са с фиксиран дизайн.
+  pdfAccentColor String?
+
+  // Рекламен ред „Издадено с CortanaSoft" в долния край на СТАНДАРТНИТЕ
+  // фактура и оферта. Само със съгласие на клиента (opt-in от Администрация).
+  showCortanaBranding Boolean @default(false)
+
   // PDF template keys — точка за lookup в template registry на frontend-а.
   // NULL = default. Задава се ръчно от superadmin при custom клиентски шаблон.
   invoiceTemplateKey               String?
@@ -524,6 +533,12 @@ model User {
   middleName String?
   phone      String?
 
+  // false = „служител без достъп": създаден от самата фирма (HR > Служители)
+  // за присъствия/заплати, с генерирана парола, която никой не знае. Входът,
+  // забравена/нова парола и JWT го отказват. Достъп се дава само от
+  // Администрация (СВ Софт) — флагът никога не се приема от фирмен endpoint.
+  loginEnabled Boolean @default(true)
+
   // Двуфакторна автентикация — тайният ключ е шифрован (enc:v1:, secret-crypto.util)
   twoFactorMode      TwoFactorMode @default(NOT_REQUIRED)
   twoFactorSecret    String?
@@ -718,6 +733,8 @@ model UserCompany {
   personalAddress     String? // Постоянен адрес
   idCardNumber        String? // № лична карта
   hireDate            DateTime? // Дата на постъпване
+  leftAt              DateTime? // Дата на напускане — само за информация; видимостта се води по User.isActive
+  workEmail           String? // Служебен имейл, въвеждан от фирмата; уникален само в нейните рамки (User.email е за вход)
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -744,6 +761,7 @@ model UserCompany {
   hourlyRate Decimal?  @db.Decimal(10, 2)
 
   @@unique([userId, companyId])
+  @@unique([companyId, workEmail])
   @@map("user_companies")
 }
 
@@ -1128,6 +1146,11 @@ model Product {
   trackInventory Boolean  @default(true) // Дали да се следи наличността
   shelfLifeDays  Int? // Срок на годност в дни (за авто-срок на готовите партиди при производство)
 
+  // Куриерски продукт: услуга „Доставка", вързана за куриер (econt | speedy).
+  // Редът с такъв продукт в продажбата е кликаем — попъп с данните на пратката
+  // и изчислена цена от куриера. Един на куриер за фирма. Само за type=SERVICE.
+  courierProvider String?
+
   // Статус
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -1188,6 +1211,7 @@ model Product {
   serviceLoaners    ServiceLoaner[]
 
   @@unique([companyId, sku])
+  @@unique([companyId, courierProvider])
   @@index([companyId, name])
   @@index([companyId, barcode])
   @@map("products")
@@ -1866,6 +1890,14 @@ model Order {
   receiverPhone      String? // Телефон на получател
   econtOfficeCode    String? // Код на офис на Еконт
   econtOfficeName    String? // Име на офис на Еконт
+  // Спиди: населено място и офис (id-та от Спиди API)
+  speedySiteId     Int?
+  speedyOfficeId   Int?
+  speedyOfficeName String?
+  // Чернова на пратката от реда „Доставка" (тегло/брой пакети) — за да не се
+  // въвежда втори път при „Създай пратка"
+  shipmentWeight    Decimal? @db.Decimal(10, 3)
+  shipmentPackCount Int?
 
   // Експедиционен лист: попълва се при първото издаване. NULL = още не е
   // издаван. Документът носи номера на поръчката (няма отделна номерация);
@@ -4014,7 +4046,10 @@ model Shipment {
   codAmount Decimal? @db.Decimal(12, 2) // Сума за наложен платеж
   currency  String   @default("BGN")
 
-  // Разходи
+  // Кой плаща куриера: sender (фирмата) | receiver (клиентът на вратата/в офиса)
+  payer String @default("sender")
+
+  // Разходи — цената на етикета от куриера (с ДДС), разход на фирмата
   shippingCost      Decimal? @db.Decimal(10, 2) // Цена на доставката
   senderDueAmount   Decimal? @db.Decimal(10, 2)
   receiverDueAmount Decimal? @db.Decimal(10, 2)

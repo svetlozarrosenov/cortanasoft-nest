@@ -54,7 +54,7 @@ export class UpdateEcontConfigDto {
 
   @IsString()
   @IsOptional()
-  @IsIn(['sender', 'receiver'])
+  @IsIn(['sender', 'sender_credit', 'receiver'])
   paymentBy?: string;
 
   // COD

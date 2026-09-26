@@ -415,6 +415,11 @@ export class OrdersService {
           receiverPhone: dto.receiverPhone,
           econtOfficeCode: dto.econtOfficeCode,
           econtOfficeName: dto.econtOfficeName,
+          speedySiteId: dto.speedySiteId,
+          speedyOfficeId: dto.speedyOfficeId,
+          speedyOfficeName: dto.speedyOfficeName,
+          shipmentWeight: dto.shipmentWeight,
+          shipmentPackCount: dto.shipmentPackCount,
           paymentMethod: dto.paymentMethod,
           shippingCost,
           discount: orderDiscount,
@@ -1459,6 +1464,11 @@ export class OrdersService {
         ...(dto.econtOfficeName !== undefined && {
           econtOfficeName: dto.econtOfficeName,
         }),
+        ...(dto.speedySiteId !== undefined && { speedySiteId: dto.speedySiteId }),
+        ...(dto.speedyOfficeId !== undefined && { speedyOfficeId: dto.speedyOfficeId }),
+        ...(dto.speedyOfficeName !== undefined && { speedyOfficeName: dto.speedyOfficeName }),
+        ...(dto.shipmentWeight !== undefined && { shipmentWeight: dto.shipmentWeight }),
+        ...(dto.shipmentPackCount !== undefined && { shipmentPackCount: dto.shipmentPackCount }),
         ...(dto.paymentMethod && { paymentMethod: dto.paymentMethod }),
         // paymentStatus НЕ се пише директно — минава през PaymentsService
         ...(dto.locationId && { locationId: dto.locationId }),

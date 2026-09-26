@@ -156,6 +156,12 @@ export class CreateShipmentDto {
   @IsString()
   @IsOptional()
   paymentBy?: string;
+
+  // Кой плаща куриера: sender (фирмата) | receiver (клиентът). Пази се в
+  // пратката; за Еконт става paymentBy, за Спиди — payerType.
+  @IsIn(['sender', 'receiver'])
+  @IsOptional()
+  payer?: 'sender' | 'receiver';
 }
 
 export class CalculateShippingDto {
@@ -277,4 +283,10 @@ export class CalculateShippingDto {
   @IsString()
   @IsOptional()
   paymentBy?: string;
+
+  // Кой плаща куриера: sender (фирмата) | receiver (клиентът). Пази се в
+  // пратката; за Еконт става paymentBy, за Спиди — payerType.
+  @IsIn(['sender', 'receiver'])
+  @IsOptional()
+  payer?: 'sender' | 'receiver';
 }

@@ -72,6 +72,7 @@ describe('AuthService', () => {
     firstName: 'John',
     lastName: 'Doe',
     isActive: true,
+    loginEnabled: true,
     twoFactorMode: 'NOT_REQUIRED',
     twoFactorSecret: null,
     userCompanies: [
@@ -107,6 +108,14 @@ describe('AuthService', () => {
       mockPrisma.user.findFirst.mockResolvedValue(null);
       await expect(
         service.validateUser('bad@test.com', 'pass'),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('служител без достъп (loginEnabled=false) не влиза дори с вярна парола', async () => {
+      mockPrisma.user.findFirst.mockResolvedValue(makeUser({ loginEnabled: false }));
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      await expect(
+        service.validateUser('test@test.com', 'password123'),
       ).rejects.toThrow(UnauthorizedException);
     });
 

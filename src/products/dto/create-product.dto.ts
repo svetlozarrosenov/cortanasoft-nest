@@ -6,6 +6,8 @@ import {
   IsBoolean,
   Min,
   MaxLength,
+  ValidateIf,
+  IsIn,
 } from 'class-validator';
 import { Unit, ProductType } from '@prisma/client';
 
@@ -32,6 +34,12 @@ export class CreateProductDto {
   @IsEnum(ProductType)
   @IsOptional()
   type?: ProductType;
+
+  // Куриерски продукт (само за услуги): econt | speedy | null
+  @ValidateIf((_, v) => v !== null)
+  @IsIn(['econt', 'speedy'])
+  @IsOptional()
+  courierProvider?: string | null;
 
   @IsEnum(Unit)
   @IsOptional()

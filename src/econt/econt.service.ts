@@ -61,17 +61,7 @@ export class EcontService implements ShippingProvider, OnModuleInit {
     const creds = await this.getCredentials(companyId);
     const dbSettings = await this.getSettings(companyId);
 
-    // Frontend подава override-и per-order; fallback от DB config
-    const settings: EcontSettings = {
-      ...dbSettings,
-      senderName: dto.senderName ?? dbSettings.senderName,
-      senderPhone: dto.senderPhone ?? dbSettings.senderPhone,
-      senderOfficeCode: dto.senderOfficeCode ?? dbSettings.senderOfficeCode,
-      shipmentType: dto.shipmentType ?? dbSettings.shipmentType,
-      paymentBy: dto.paymentBy ?? dbSettings.paymentBy,
-      codEnabled: dto.codEnabled ?? dbSettings.codEnabled,
-      declaredValueEnabled: dto.declaredValueEnabled ?? dbSettings.declaredValueEnabled,
-    };
+    const settings = this.mergeSettings(dbSettings, dto);
 
     return this.api.calculateShipping(creds, settings, {
       orderNumber: 'CALC',
@@ -113,7 +103,9 @@ export class EcontService implements ShippingProvider, OnModuleInit {
     }
 
     const creds = this.configToCredentials(config);
-    const settings = this.configToSettings(config);
+    // Същите override-и като при „изчисли" — иначе цената в модала и
+    // реалният етикет се разминават (кой плаща, подател, наложен платеж).
+    const settings = this.mergeSettings(this.configToSettings(config), dto);
 
     const receiverAddress =
       dto.deliveryType === 'ADDRESS' && dto.addressCity
@@ -168,6 +160,7 @@ export class EcontService implements ShippingProvider, OnModuleInit {
         description: dto.description,
         codAmount: dto.codAmount,
         currency: dto.currency || 'BGN',
+        payer: dto.payer ?? (settings.paymentBy === 'receiver' ? 'receiver' : 'sender'),
         shippingCost: result.totalPrice,
         senderDueAmount: result.senderDueAmount,
         receiverDueAmount: result.receiverDueAmount,
@@ -256,6 +249,43 @@ export class EcontService implements ShippingProvider, OnModuleInit {
   }
 
   // ==================== Helpers ====================
+
+  /**
+   * Настройките на фирмата + per-order override-и от модала. `payer` е
+   * общият (Еконт/Спиди) избор „кой плаща": receiver → paymentBy=receiver;
+   * sender → фирмената настройка (sender или sender_credit по договор).
+   */
+  private mergeSettings(
+    dbSettings: EcontSettings,
+    dto: Pick<
+      CreateShipmentDto,
+      | 'senderName'
+      | 'senderPhone'
+      | 'senderOfficeCode'
+      | 'shipmentType'
+      | 'paymentBy'
+      | 'codEnabled'
+      | 'declaredValueEnabled'
+      | 'payer'
+    >,
+  ): EcontSettings {
+    const paymentBy =
+      dto.payer === 'receiver'
+        ? 'receiver'
+        : dto.payer === 'sender'
+          ? (dbSettings.paymentBy === 'receiver' ? 'sender' : dbSettings.paymentBy)
+          : (dto.paymentBy ?? dbSettings.paymentBy);
+    return {
+      ...dbSettings,
+      senderName: dto.senderName ?? dbSettings.senderName,
+      senderPhone: dto.senderPhone ?? dbSettings.senderPhone,
+      senderOfficeCode: dto.senderOfficeCode ?? dbSettings.senderOfficeCode,
+      shipmentType: dto.shipmentType ?? dbSettings.shipmentType,
+      paymentBy,
+      codEnabled: dto.codEnabled ?? dbSettings.codEnabled,
+      declaredValueEnabled: dto.declaredValueEnabled ?? dbSettings.declaredValueEnabled,
+    };
+  }
 
   private async getCredentials(companyId: string): Promise<EcontCredentials> {
     const config = await this.prisma.econtConfig.findUnique({

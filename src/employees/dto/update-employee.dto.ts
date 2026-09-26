@@ -1,6 +1,7 @@
 import { IsInt, IsNumber, IsOptional, IsString, Max, Min, ValidateIf } from 'class-validator';
+import { UpdateEmployeePersonalDto } from './create-employee.dto';
 
-export class UpdateEmployeeDto {
+export class UpdateEmployeeDto extends UpdateEmployeePersonalDto {
   @ValidateIf((_, v) => v !== null)
   @IsInt()
   @Min(0)

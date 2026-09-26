@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { WordPressService } from '../wordpress/wordpress.service';
@@ -74,6 +75,8 @@ export class ProductsService {
         );
       }
 
+      await this.assertCourierProduct(tx, companyId, productType, dto.courierProvider ?? null);
+
       // Проверка дали категорията съществува и принадлежи на компанията
       if (dto.categoryId) {
         const category = await tx.productCategory.findFirst({
@@ -125,6 +128,36 @@ export class ProductsService {
         },
       });
     });
+  }
+
+  /**
+   * Куриерски продукт: само услуга, и най-много един на куриер за фирма.
+   * Редът с него в продажбата е „Доставка" с цена от куриера.
+   */
+  private async assertCourierProduct(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    type: ProductType,
+    courierProvider: string | null,
+    exceptId?: string,
+  ) {
+    if (!courierProvider) return;
+    if (type !== ProductType.SERVICE) {
+      throw new BadRequestException('Куриерски продукт може да бъде само услуга');
+    }
+    const taken = await tx.product.findFirst({
+      where: {
+        companyId,
+        courierProvider,
+        ...(exceptId ? { NOT: { id: exceptId } } : {}),
+      },
+      select: { id: true, name: true },
+    });
+    if (taken) {
+      throw new ConflictException(
+        `Фирмата вече има продукт за този куриер: „${taken.name}“`,
+      );
+    }
   }
 
   async findAll(companyId: string, query: QueryProductsDto) {
@@ -237,6 +270,16 @@ export class ProductsService {
       });
       if (!existing) {
         throw new NotFoundException('Продуктът не е намерен');
+      }
+
+      if (dto.courierProvider !== undefined || dto.type !== undefined) {
+        await this.assertCourierProduct(
+          tx,
+          companyId,
+          dto.type ?? existing.type,
+          dto.courierProvider === undefined ? existing.courierProvider : dto.courierProvider,
+          id,
+        );
       }
 
       // Проверка за дублиран SKU ако се променя

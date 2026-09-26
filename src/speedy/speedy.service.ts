@@ -71,7 +71,12 @@ export class SpeedyService implements ShippingProvider, OnModuleInit {
     const settings: SpeedySettings = {
       ...dbSettings,
       serviceId: dto.serviceId ?? dbSettings.serviceId,
-      payerType: dto.payerType ?? dbSettings.payerType,
+      payerType:
+        dto.payer === 'receiver'
+          ? 'RECIPIENT'
+          : dto.payer === 'sender'
+            ? (dbSettings.payerType === 'RECIPIENT' ? 'SENDER' : dbSettings.payerType)
+            : (dto.payerType ?? dbSettings.payerType),
       senderName: dto.senderName ?? dbSettings.senderName,
       senderPhone: dto.senderPhone ?? dbSettings.senderPhone,
       senderSiteId: dto.senderSiteId ?? dbSettings.senderSiteId,
@@ -127,7 +132,12 @@ export class SpeedyService implements ShippingProvider, OnModuleInit {
     const settings: SpeedySettings = {
       ...dbSettings,
       serviceId: dto.serviceId ?? dbSettings.serviceId,
-      payerType: dto.payerType ?? dbSettings.payerType,
+      payerType:
+        dto.payer === 'receiver'
+          ? 'RECIPIENT'
+          : dto.payer === 'sender'
+            ? (dbSettings.payerType === 'RECIPIENT' ? 'SENDER' : dbSettings.payerType)
+            : (dto.payerType ?? dbSettings.payerType),
       senderName: dto.senderName ?? dbSettings.senderName,
       senderPhone: dto.senderPhone ?? dbSettings.senderPhone,
       senderSiteId: dto.senderSiteId ?? dbSettings.senderSiteId,
@@ -172,6 +182,7 @@ export class SpeedyService implements ShippingProvider, OnModuleInit {
         shipmentNumber: result.shipmentId,
         status: result.shipmentId ? 'CREATED' : 'PENDING',
         provider: PROVIDER,
+        payer: dto.payer ?? (settings.payerType === 'RECIPIENT' ? 'receiver' : 'sender'),
         deliveryType: dto.deliveryType,
         receiverName: dto.receiverName,
         receiverPhone: dto.receiverPhone,

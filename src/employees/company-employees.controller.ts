@@ -1,10 +1,10 @@
-import { Controller, Get, Patch, Param, Body, Query, Res, StreamableFile, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Query, Res, StreamableFile, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { EmployeesService } from './employees.service';
-import { UpdateEmployeeDto } from './dto';
+import { CreateEmployeeDto, LeaveEmployeeDto, UpdateEmployeeDto } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
-import { PermissionsGuard, RequireEdit } from '../common/guards/permissions.guard';
+import { PermissionsGuard, RequireCreate, RequireEdit } from '../common/guards/permissions.guard';
 import { ExportService } from '../common/export/export.service';
 import type { ExportFormat } from '../common/export/export.service';
 
@@ -30,9 +30,14 @@ export class CompanyEmployeesController {
     const result = await this.employeesService.findAll(companyId);
     const data = (result as any).data || result;
     const columns = [
-      { header: 'First Name', key: 'user.firstName', width: 20 },
-      { header: 'Last Name', key: 'user.lastName', width: 20 },
-      { header: 'Email', key: 'user.email', width: 25 },
+      { header: 'First Name', key: 'firstName', width: 20 },
+      { header: 'Middle Name', key: 'middleName', width: 20 },
+      { header: 'Last Name', key: 'lastName', width: 20 },
+      { header: 'Phone', key: 'phone', width: 18 },
+      { header: 'Work Email', key: 'workEmail', width: 25 },
+      { header: 'Login Email', key: 'email', width: 25 },
+      { header: 'Hire Date', key: 'hireDate', width: 14 },
+      { header: 'Left At', key: 'leftAt', width: 14 },
       { header: 'Role', key: 'role.name', width: 20 },
       { header: 'Active', key: 'isActive', width: 10 },
     ];
@@ -48,6 +53,33 @@ export class CompanyEmployeesController {
   @Get(':id')
   findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.employeesService.findOne(companyId, id);
+  }
+
+  // Служител без достъп — виж EmployeesService.create. loginEnabled и паролата
+  // се определят на сървъра, нищо от това не се приема от клиента.
+  @Post()
+  @UseGuards(PermissionsGuard)
+  @RequireCreate('hr', 'employees')
+  create(@Param('companyId') companyId: string, @Body() body: CreateEmployeeDto) {
+    return this.employeesService.create(companyId, body);
+  }
+
+  @Post(':id/leave')
+  @UseGuards(PermissionsGuard)
+  @RequireEdit('hr', 'employees')
+  leave(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Body() body: LeaveEmployeeDto,
+  ) {
+    return this.employeesService.leave(companyId, id, body);
+  }
+
+  @Post(':id/return')
+  @UseGuards(PermissionsGuard)
+  @RequireEdit('hr', 'employees')
+  returnToWork(@Param('companyId') companyId: string, @Param('id') id: string) {
+    return this.employeesService.returnToWork(companyId, id);
   }
 
   @Patch(':id')

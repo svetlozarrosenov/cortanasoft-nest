@@ -53,10 +53,6 @@ export class ShippingService {
 
   // ==================== Делегиране към providers ====================
 
-  async testConnection(companyId: string, provider: string) {
-    return this.getProvider(provider).testConnection(companyId);
-  }
-
   async calculateShipping(
     companyId: string,
     provider: string,
@@ -79,6 +75,28 @@ export class ShippingService {
       dto,
       order,
     );
+
+    // Куриерът на продажбата се извежда от етикета — във формата няма
+    // поле „начин на доставка"; списъкът/„за изпращане" филтрират по него.
+    // Наложен платеж = част от етикета: с НП > 0 продажбата става COD, а
+    // етикет без НП върху COD продажба я връща на банков превод (чака се
+    // плащане). Платена продажба не се пипа.
+    const codOnLabel = Number(dto.codAmount) > 0;
+    const paymentMethod =
+      codOnLabel && order.paymentMethod !== 'COD'
+        ? 'COD'
+        : !codOnLabel && order.paymentMethod === 'COD' && order.paymentStatus !== 'PAID'
+          ? 'BANK_TRANSFER'
+          : undefined;
+    if (order.deliveryMethod !== dto.provider || paymentMethod) {
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          deliveryMethod: dto.provider,
+          ...(paymentMethod ? { paymentMethod } : {}),
+        },
+      });
+    }
 
     // Уведомяваме shop-а (ако поръчката е от там): order.changed вече носи
     // shipmentNumber, така че клиентът вижда проследяване на сайта. За

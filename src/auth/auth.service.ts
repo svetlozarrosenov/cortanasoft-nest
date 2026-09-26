@@ -99,6 +99,7 @@ export class AuthService {
     if (
       !user ||
       !user.isActive ||
+      !user.loginEnabled ||
       !isPasswordValid ||
       user.userCompanies.length === 0 ||
       !defaultUserCompany
@@ -219,7 +220,12 @@ export class AuthService {
     const defaultUserCompany =
       user?.userCompanies.find((uc) => uc.isDefault && uc.company.isActive) ||
       user?.userCompanies.find((uc) => uc.company.isActive);
-    if (!user || !user.isActive || !defaultUserCompany) {
+    if (
+      !user ||
+      !user.isActive ||
+      !user.loginEnabled ||
+      !defaultUserCompany
+    ) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -456,8 +462,9 @@ export class AuthService {
       where: { email: { equals: email, mode: 'insensitive' } },
     });
 
-    // Always return success to prevent email enumeration
-    if (!user || !user.isActive) {
+    // Always return success to prevent email enumeration. Служител без
+    // достъп (loginEnabled=false) също не получава линк.
+    if (!user || !user.isActive || !user.loginEnabled) {
       return { success: true };
     }
 
@@ -589,6 +596,12 @@ export class AuthService {
 
     if (resetRecord.expiresAt < new Date()) {
       throw new BadRequestException('Линкът е изтекъл. Моля, заявете нов.');
+    }
+
+    if (!resetRecord.user.loginEnabled) {
+      throw new BadRequestException(
+        'Невалиден или изтекъл линк за промяна на парола',
+      );
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);

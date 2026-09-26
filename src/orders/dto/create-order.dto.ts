@@ -12,6 +12,7 @@ import {
   IsIn,
   IsDateString,
   MaxLength,
+  IsInt,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaymentMethod } from '@prisma/client';
@@ -161,6 +162,29 @@ export class CreateOrderDto {
   @IsString()
   @IsOptional()
   econtOfficeName?: string;
+
+  // Спиди (id-та от Спиди API) и чернова на пратката от реда „Доставка"
+  @IsInt()
+  @IsOptional()
+  speedySiteId?: number;
+
+  @IsInt()
+  @IsOptional()
+  speedyOfficeId?: number;
+
+  @IsString()
+  @IsOptional()
+  speedyOfficeName?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  shipmentWeight?: number;
+
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  shipmentPackCount?: number;
 
   @IsEnum(PaymentMethod)
   @IsOptional()

@@ -8,6 +8,7 @@ import {
   ValidateNested,
   Min,
   Max,
+  IsInt,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PaymentMethod, PaymentStatus, OrderStatus } from '@prisma/client';
@@ -89,6 +90,29 @@ export class UpdateOrderDto {
   @IsString()
   @IsOptional()
   econtOfficeName?: string;
+
+  // Спиди (id-та от Спиди API) и чернова на пратката от реда „Доставка"
+  @IsInt()
+  @IsOptional()
+  speedySiteId?: number;
+
+  @IsInt()
+  @IsOptional()
+  speedyOfficeId?: number;
+
+  @IsString()
+  @IsOptional()
+  speedyOfficeName?: string;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  shipmentWeight?: number;
+
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  shipmentPackCount?: number;
 
   @IsEnum(PaymentMethod)
   @IsOptional()
