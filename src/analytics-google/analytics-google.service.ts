@@ -8,7 +8,10 @@ import { ConfigService } from '@nestjs/config';
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
 import { PrismaService } from '../prisma/prisma.service';
 import { SaveGoogleAnalyticsConfigDto } from './dto';
-import { decryptSecret, encryptSecret } from './crypto.util';
+import {
+  decryptSecret,
+  encryptSecret,
+} from '../common/utils/secret-crypto.util';
 
 interface ServiceAccountJson {
   client_email?: string;

@@ -13,8 +13,13 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { assertEncryptionKeyConfigured } from './common/utils/secret-crypto.util';
 
 async function bootstrap() {
+  // В production без ENCRYPTION_KEY не стартираме — тайните в базата не
+  // трябва да зависят от ключа за сесиите (виж deploy/README.md).
+  assertEncryptionKeyConfigured();
+
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'debug'],
   });

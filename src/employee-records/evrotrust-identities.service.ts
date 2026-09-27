@@ -7,7 +7,7 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EvrotrustService } from './evrotrust.service';
 import { EmployeeRecordAuditService } from './employee-record-audit.service';
-import { decryptSecret } from './crypto.util';
+import { decryptSecret } from '../common/utils/secret-crypto.util';
 
 const IDENTITY_VALIDITY_DAYS = 365; // RefID важи 1 година за OTP eSign
 

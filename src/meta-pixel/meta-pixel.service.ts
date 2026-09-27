@@ -1,7 +1,10 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SaveMetaPixelConfigDto } from './dto';
-import { decryptSecret, encryptSecret } from './crypto.util';
+import {
+  decryptSecret,
+  encryptSecret,
+} from '../common/utils/secret-crypto.util';
 
 export interface ResolvedEventConfig {
   pixelId: string;

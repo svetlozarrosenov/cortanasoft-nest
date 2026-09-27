@@ -1,6 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { encryptSecret, decryptSecret } from './crypto.util';
+import {
+  encryptSecret,
+  decryptSecret,
+} from '../common/utils/secret-crypto.util';
 import { UpdateEmployeeProfileDto } from './dto/update-employee-profile.dto';
 
 @Injectable()

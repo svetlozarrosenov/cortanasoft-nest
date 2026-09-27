@@ -68,6 +68,23 @@ docker ps                                                 # само backend, ng
 - **Връщане назад:** смени тага на образа в `docker-compose.yml` на `sha-<commit>` и `docker compose up -d backend`.
   Внимание: миграция назад няма — новите колони остават (всички са nullable/с default, старият код ги игнорира).
 
+## Ключ за шифроване на тайните (ENCRYPTION_KEY)
+
+Тайните в базата (Еконт/Спиди пароли, Anthropic ключове, 2FA ключове, ЕГН, Google Analytics
+service account, Meta Pixel токен) са AES-256-GCM с ключ от `ENCRYPTION_KEY`. Той е ОТДЕЛЕН
+от `JWT_SECRET` (сесиите): в production без него бекендът не стартира. Смяната му не е просто
+нова стойност — старите записи трябва да се презапишат:
+
+1. В `.env`: `ENCRYPTION_KEY=<нов>` (`openssl rand -base64 48`) и `ENCRYPTION_KEY_PREVIOUS=<стар>`.
+   При първата ротация (исторически ключът беше JWT_SECRET) старият = стойността на `JWT_SECRET`.
+2. `docker compose up -d backend` — новите записи вече са с новия ключ, старите се четат с предишния.
+3. `docker compose exec backend node dist/src/cli/reencrypt-secrets.js --dry-run` — показва по таблици
+   колко реда са с текущия ключ / за презаписване / plaintext / нечетими. Нищо не пише.
+4. Същото без `--dry-run`. Идемпотентно; „unreadable" редове остават непипнати и се изписват с id.
+5. Махни `ENCRYPTION_KEY_PREVIOUS` от `.env`, `docker compose up -d backend`.
+
+Смяна на `JWT_SECRET` (изхвърля всички сесии) вече НЕ засяга шифрованите данни.
+
 ## Миграция към друг доставчик (напр. AWS)
 
 1. **База:** `pg_dump -Fc` от DO → `pg_restore` в RDS (или EC2 Postgres). Направи го в прозорец без
