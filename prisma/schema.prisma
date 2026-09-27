@@ -5253,10 +5253,19 @@ model Contract {
   customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   // Snapshot на контрагента (за ръчен контрагент или замразени данни)
-  counterpartyName    String
-  counterpartyEik     String?
-  counterpartyAddress String?
-  counterpartyContact String?
+  counterpartyName           String
+  counterpartyEik            String?
+  counterpartyVatNumber      String? // ДДС номер (за {{client.vatNumber}})
+  counterpartyRepresentative String? // МОЛ/управител (за {{client.representative}})
+  counterpartyEmail          String? // имейл за известия (за {{client.email}})
+  counterpartyAddress        String?
+  counterpartyContact        String?
+
+  // Търговски условия на договора — влизат в текста като {{contract.fee}},
+  // {{contract.annualFee}}, {{contract.users}}; сумата е във валутата на фирмата
+  monthlyFee Decimal? @db.Decimal(12, 2)
+  annualFee  Decimal? @db.Decimal(12, 2)
+  userLimit  Int?
 
   startDate DateTime?
   endDate   DateTime?

@@ -1218,6 +1218,26 @@ export class AdminService {
 
   // ==================== Welcome Email ====================
 
+  /** Данните за welcome имейла БЕЗ да пипа паролата (за преглед). */
+  async welcomeEmailVars(companyId: string, userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+    if (!company) throw new NotFoundException('Company not found');
+    const userCompany = await this.prisma.userCompany.findUnique({
+      where: { userId_companyId: { userId, companyId } },
+      include: { role: true },
+    });
+    return {
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      companyName: company.name,
+      roleName: userCompany?.role?.name || 'Потребител',
+      password: '',
+    };
+  }
+
   async prepareWelcomeEmail(
     companyId: string,
     userId: string,

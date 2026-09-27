@@ -70,20 +70,11 @@ services:
       - ./certbot/www:/var/www/certbot
 EOF
 
-# 6. Create .env if not exists
+# 6. .env от документирания пример (реалните стойности НЕ са в git)
 if [ ! -f .env ]; then
-  echo "Creating .env file..."
-  cat > .env << 'ENVEOF'
-DATABASE_URL=postgresql://cortanasoft:CHANGE_ME@DB_PRIVATE_IP:5432/cortanasoft
-JWT_SECRET=CHANGE_ME
-FRONTEND_URL=https://cortanasoft.com
-R2_ACCOUNT_ID=
-R2_ACCESS_KEY_ID=
-R2_SECRET_ACCESS_KEY=
-R2_BUCKET_NAME=
-R2_PUBLIC_URL=
-ENVEOF
-  echo "WARNING: Edit .env with real values before going live!"
+  echo "Creating .env from .env.example..."
+  cp .env.example .env
+  echo "WARNING: Edit .env with the real values before going live!"
 fi
 
 # 7. SSL Certificate
@@ -115,7 +106,14 @@ else
   echo "SSL certificate already exists, skipping..."
 fi
 
-# 8. Pull and start
+# 8. Cron за подновяване на сертификата (идемпотентно; пътят = тази директория)
+CRON_LINE="17 3 * * * cd $PROJECT_DIR && /usr/bin/docker compose run --rm certbot renew --quiet && /usr/bin/docker compose exec nginx nginx -s reload >> /var/log/certbot-renew.log 2>&1"
+if ! crontab -l 2>/dev/null | grep -Fq "certbot renew"; then
+  (crontab -l 2>/dev/null; echo "$CRON_LINE") | crontab -
+  echo "Cron for certificate renewal installed (daily 03:17)."
+fi
+
+# 9. Pull and start
 echo "Pulling Docker image..."
 docker compose pull backend
 
@@ -131,4 +129,4 @@ echo ""
 echo "=== Done! ==="
 echo "Backend is live at https://$DOMAIN"
 echo ""
-echo "Don't forget to edit .env with real values!"
+echo "Don't forget to edit .env with the real values (see .env.example)!"

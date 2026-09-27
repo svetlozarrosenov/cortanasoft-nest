@@ -1,0 +1,3 @@
+# Подновяване на сертификата: certbot renew издава нов САМО ако остават < 30 дни.
+# Инсталира се от deploy/init.sh. Пътят трябва да е директорията на compose проекта.
+17 3 * * * cd /home/cortanasoft-nest && /usr/bin/docker compose run --rm certbot renew --quiet && /usr/bin/docker compose exec nginx nginx -s reload >> /var/log/certbot-renew.log 2>&1

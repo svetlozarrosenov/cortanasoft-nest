@@ -22,6 +22,9 @@ export class ContractsService {
       counterpartyEik: dto.counterpartyEik,
       counterpartyAddress: dto.counterpartyAddress,
       counterpartyContact: dto.counterpartyContact,
+      counterpartyVatNumber: dto.counterpartyVatNumber,
+      counterpartyRepresentative: dto.counterpartyRepresentative,
+      counterpartyEmail: dto.counterpartyEmail,
     };
 
     if (dto.customerId) {
@@ -52,6 +55,12 @@ export class ContractsService {
           counterpartyEik: counterparty.counterpartyEik ?? null,
           counterpartyAddress: counterparty.counterpartyAddress ?? null,
           counterpartyContact: counterparty.counterpartyContact ?? null,
+          counterpartyVatNumber: counterparty.counterpartyVatNumber ?? null,
+          counterpartyRepresentative: counterparty.counterpartyRepresentative ?? null,
+          counterpartyEmail: counterparty.counterpartyEmail ?? null,
+          monthlyFee: dto.monthlyFee ?? null,
+          annualFee: dto.annualFee ?? null,
+          userLimit: dto.userLimit ?? null,
           startDate: dto.startDate ? new Date(dto.startDate) : null,
           endDate: dto.endDate ? new Date(dto.endDate) : null,
           notes: dto.notes ?? null,
@@ -138,6 +147,9 @@ export class ContractsService {
       counterpartyEik: dto.counterpartyEik,
       counterpartyAddress: dto.counterpartyAddress,
       counterpartyContact: dto.counterpartyContact,
+      counterpartyVatNumber: dto.counterpartyVatNumber,
+      counterpartyRepresentative: dto.counterpartyRepresentative,
+      counterpartyEmail: dto.counterpartyEmail,
     };
 
     if (dto.customerId) {
@@ -170,6 +182,18 @@ export class ContractsService {
         ...(counterparty.counterpartyContact !== undefined
           ? { counterpartyContact: counterparty.counterpartyContact }
           : {}),
+        ...(counterparty.counterpartyVatNumber !== undefined
+          ? { counterpartyVatNumber: counterparty.counterpartyVatNumber }
+          : {}),
+        ...(counterparty.counterpartyRepresentative !== undefined
+          ? { counterpartyRepresentative: counterparty.counterpartyRepresentative }
+          : {}),
+        ...(counterparty.counterpartyEmail !== undefined
+          ? { counterpartyEmail: counterparty.counterpartyEmail }
+          : {}),
+        ...(dto.monthlyFee !== undefined ? { monthlyFee: dto.monthlyFee } : {}),
+        ...(dto.annualFee !== undefined ? { annualFee: dto.annualFee } : {}),
+        ...(dto.userLimit !== undefined ? { userLimit: dto.userLimit } : {}),
         ...(dto.startDate !== undefined
           ? { startDate: dto.startDate ? new Date(dto.startDate) : null }
           : {}),
@@ -199,6 +223,9 @@ export class ContractsService {
       counterpartyEik?: string;
       counterpartyAddress?: string;
       counterpartyContact?: string;
+      counterpartyVatNumber?: string;
+      counterpartyRepresentative?: string;
+      counterpartyEmail?: string;
     },
     customer: {
       type: string;
@@ -206,6 +233,8 @@ export class ContractsService {
       firstName: string | null;
       lastName: string | null;
       eik: string | null;
+      vatNumber: string | null;
+      molName: string | null;
       address: string | null;
       city: string | null;
       email: string | null;
@@ -219,7 +248,8 @@ export class ContractsService {
     const address = [customer.address, customer.city]
       .filter(Boolean)
       .join(', ');
-    const contact = customer.email || customer.phone || '';
+    // Имейлът има свое поле; контактът е телефонът (или имейлът, ако няма)
+    const contact = customer.phone || customer.email || '';
 
     return {
       counterpartyName: current.counterpartyName || fullName || '',
@@ -228,6 +258,11 @@ export class ContractsService {
         current.counterpartyAddress || address || undefined,
       counterpartyContact:
         current.counterpartyContact || contact || undefined,
+      counterpartyVatNumber:
+        current.counterpartyVatNumber || customer.vatNumber || undefined,
+      counterpartyRepresentative:
+        current.counterpartyRepresentative || customer.molName || undefined,
+      counterpartyEmail: current.counterpartyEmail || customer.email || undefined,
     };
   }
 
