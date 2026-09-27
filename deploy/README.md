@@ -72,7 +72,7 @@ docker ps                                                 # само backend, ng
 
 Тайните в базата (Еконт/Спиди пароли, Anthropic ключове, 2FA ключове, ЕГН, Google Analytics
 service account, Meta Pixel токен) са AES-256-GCM с ключ от `ENCRYPTION_KEY`. Той е ОТДЕЛЕН
-от `JWT_SECRET` (сесиите): в production без него бекендът не стартира. Смяната му не е просто
+от `JWT_SECRET` (сесиите, никакъв fallback): без него бекендът не стартира. Смяната му не е просто
 нова стойност — старите записи трябва да се презапишат:
 
 1. В `.env`: `ENCRYPTION_KEY=<нов>` (`openssl rand -base64 48`) и `ENCRYPTION_KEY_PREVIOUS=<стар>`.

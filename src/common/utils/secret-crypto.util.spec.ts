@@ -19,7 +19,6 @@ describe('secret-crypto.util', () => {
     delete process.env.ENCRYPTION_KEY;
     delete process.env.ENCRYPTION_KEY_PREVIOUS;
     delete process.env.JWT_SECRET;
-    delete process.env.NODE_ENV;
     process.env.ENCRYPTION_KEY = 'new-key';
   });
   afterAll(() => {
@@ -63,15 +62,11 @@ describe('secret-crypto.util', () => {
     expect(() => mod.decryptSecret(encOld)).toThrow();
   });
 
-  it('falls back to JWT_SECRET outside production, but refuses in production', () => {
+  it('refuses to work without ENCRYPTION_KEY, whatever JWT_SECRET is', () => {
     delete process.env.ENCRYPTION_KEY;
     process.env.JWT_SECRET = 'jwt';
-    expect(mod.encryptionKeySource()).toBe('JWT_SECRET');
-    expect(() => mod.assertEncryptionKeyConfigured()).not.toThrow();
-    expect(mod.decryptSecret(mod.encryptSecret('v'))).toBe('v');
-
-    process.env.NODE_ENV = 'production';
     expect(() => mod.assertEncryptionKeyConfigured()).toThrow(/ENCRYPTION_KEY/);
     expect(() => mod.encryptSecret('v')).toThrow(/ENCRYPTION_KEY/);
+    expect(() => mod.decryptSecret('enc:v1:AAAA')).toThrow(/ENCRYPTION_KEY/);
   });
 });

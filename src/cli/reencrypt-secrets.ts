@@ -22,7 +22,6 @@ import { PrismaClient } from '@prisma/client';
 import {
   decryptSecret,
   encryptSecret,
-  encryptionKeySource,
   isEncryptedSecret,
   isEncryptedWithCurrentKey,
 } from '../common/utils/secret-crypto.util';
@@ -172,8 +171,7 @@ const targets: Target[] = [
 ];
 
 async function main() {
-  const source = encryptionKeySource();
-  if (source !== 'ENCRYPTION_KEY') {
+  if (!process.env.ENCRYPTION_KEY) {
     console.error(
       'ENCRYPTION_KEY is not set — nothing to rotate to. Aborting.',
     );

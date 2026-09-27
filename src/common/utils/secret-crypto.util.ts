@@ -10,13 +10,12 @@ import {
 // токен). ЕДИНСТВЕНИЯТ helper за това — не копирай логиката по модулите.
 //
 // Ключове:
-// - ENCRYPTION_KEY          — текущият ключ; с него се ШИФРОВА всичко ново.
+// - ENCRYPTION_KEY          — задължителен; с него се ШИФРОВА всичко ново.
 // - ENCRYPTION_KEY_PREVIOUS — по избор, само за ДЕШИФРИРАНЕ по време на
 //                             ротация. След `node dist/src/cli/reencrypt-secrets.js`
 //                             се маха.
-// В production ENCRYPTION_KEY е задължителен (assertEncryptionKeyConfigured в
-// main.ts). Локално, ако липсва, се ползва JWT_SECRET с предупреждение — така
-// беше исторически и прод данните до ротацията са шифровани именно с него.
+// JWT_SECRET НЕ участва — той подписва само сесиите. (Исторически беше
+// fallback и прод данните до ротацията на 2026-09-27 бяха шифровани с него.)
 //
 // Формат: 'enc:v1:' + base64(iv[12] + authTag[16] + ciphertext). Трите модула
 // (analytics-google, meta-pixel, employee-records) преди пишеха същото без
@@ -26,51 +25,25 @@ const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 const PREFIX = 'enc:v1:';
 
-export type EncryptionKeySource = 'ENCRYPTION_KEY' | 'JWT_SECRET';
-
-let warnedFallback = false;
-
 function deriveKey(secret: string): Buffer {
   return createHash('sha256').update(secret).digest();
 }
 
-/** Откъде идва текущият ключ (за startup проверка и CLI). */
-export function encryptionKeySource(): EncryptionKeySource | null {
-  if (process.env.ENCRYPTION_KEY) return 'ENCRYPTION_KEY';
-  if (process.env.JWT_SECRET) return 'JWT_SECRET';
-  return null;
-}
-
 /**
- * В production спира приложението при липсващ ENCRYPTION_KEY — по-добре
- * ясна грешка при старт, отколкото тайни, шифровани с ключа за сесиите.
+ * Хвърля при липсващ ENCRYPTION_KEY — вика се при старт (main.ts), за да е
+ * ясна грешката, а не 500 при първата тайна.
  */
 export function assertEncryptionKeyConfigured(): void {
-  const source = encryptionKeySource();
-  if (source === 'ENCRYPTION_KEY') return;
-  if (process.env.NODE_ENV === 'production') {
+  if (!process.env.ENCRYPTION_KEY) {
     throw new Error(
-      'ENCRYPTION_KEY is required in production (separate from JWT_SECRET). ' +
-        'See deploy/README.md — key rotation.',
-    );
-  }
-  if (!warnedFallback) {
-    warnedFallback = true;
-    console.warn(
-      source === 'JWT_SECRET'
-        ? '[secret-crypto] ENCRYPTION_KEY is not set — falling back to JWT_SECRET (dev only)'
-        : '[secret-crypto] Neither ENCRYPTION_KEY nor JWT_SECRET is set — encryption will fail',
+      'ENCRYPTION_KEY is required (separate from JWT_SECRET). See deploy/README.md — key rotation.',
     );
   }
 }
 
 function primaryKey(): Buffer {
-  const source = encryptionKeySource();
-  if (!source) {
-    throw new Error('Missing ENCRYPTION_KEY for credential encryption');
-  }
-  if (source === 'JWT_SECRET') assertEncryptionKeyConfigured(); // throws in prod
-  return deriveKey(process.env[source] as string);
+  assertEncryptionKeyConfigured();
+  return deriveKey(process.env.ENCRYPTION_KEY as string);
 }
 
 /** Текущ ключ + предишен (ако има) — в този ред се пробват при четене. */
