@@ -82,7 +82,7 @@ export class DirectDeliveriesService {
           select: {
             productId: true,
             quantity: true,
-            product: { select: { purchasePrice: true } },
+            product: { select: { purchasePrice: true, type: true } },
           },
         },
       },
@@ -90,6 +90,8 @@ export class DirectDeliveriesService {
     if (!order) throw new NotFoundException('Поръчката не е намерена');
     const wanted = new Map<string, { quantity: number; purchasePrice: number }>();
     for (const it of order.items) {
+      // Стари редове отпреди забраната за дропшип на услуга
+      if (it.product?.type === 'SERVICE') continue;
       const cur = wanted.get(it.productId);
       wanted.set(it.productId, {
         quantity: (cur?.quantity ?? 0) + Number(it.quantity),

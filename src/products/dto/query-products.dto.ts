@@ -29,6 +29,12 @@ export class QueryProductsDto {
   @IsBoolean()
   isActive?: boolean;
 
+  // Само стоки (без услуги) — за picker-а на доставките
+  @IsOptional()
+  @Transform(({ value }) => value === 'true')
+  @IsBoolean()
+  stockOnly?: boolean;
+
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

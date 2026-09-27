@@ -166,6 +166,7 @@ export class ProductsService {
       type,
       categoryId,
       isActive,
+      stockOnly,
       page = 1,
       limit = 20,
       sortBy = 'createdAt',
@@ -189,6 +190,8 @@ export class ProductsService {
 
     if (type) {
       where.type = type;
+    } else if (stockOnly) {
+      where.type = { not: 'SERVICE' };
     }
 
     if (categoryId) {

@@ -61,6 +61,8 @@ export const ErrorMessages = {
     mustHaveItems: 'Поръчката трябва да има поне един артикул',
     locationNotFound: 'Локацията не е намерена',
     productsNotFound: 'Един или повече продукти не са намерени',
+    directDeliveryService:
+      'Услуга не може да бъде директна доставка — няма какво да се достави от доставчик',
     canOnlyUpdatePending: 'Може да редактирате само чакащи поръчки',
     canOnlyConfirmPending: 'Може да потвърдите само чакащи поръчки',
     cannotConfirmWithoutItems: 'Не може да потвърдите поръчка без артикули',
@@ -151,6 +153,8 @@ export const ErrorMessages = {
     locationNotFound: 'Локацията не е намерена',
     supplierNotFound: 'Доставчикът не е намерен',
     productsNotFound: 'Един или повече продукти не са намерени',
+    serviceNotAllowed:
+      'Услуга не може да бъде ред в доставка — въведете я в „Разходи по доставката“',
     canOnlyUpdateExpected: 'Може да редактирате само очаквани доставки',
     canOnlyConfirmDraft: 'Може да потвърдите само чернови разписки',
     cannotConfirmWithoutItems: 'Не може да потвърдите разписка без артикули',

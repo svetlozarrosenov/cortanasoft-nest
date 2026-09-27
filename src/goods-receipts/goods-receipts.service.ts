@@ -107,6 +107,12 @@ export class GoodsReceiptsService {
         ErrorMessages.goodsReceipts.productsNotFound,
       );
     }
+    // Услугите не минават през склад — мястото им е „Разходи по доставката"
+    if (products.some((p) => p.type === 'SERVICE')) {
+      throw new BadRequestException(
+        ErrorMessages.goodsReceipts.serviceNotAllowed,
+      );
+    }
 
     // Use company currency as default
     const currencyId = dto.currencyId || company.currencyId;
@@ -543,6 +549,11 @@ export class GoodsReceiptsService {
         if (products.length !== uniqueProductIds.length) {
           throw new BadRequestException(
             ErrorMessages.goodsReceipts.productsNotFound,
+          );
+        }
+        if (products.some((p) => p.type === 'SERVICE')) {
+          throw new BadRequestException(
+            ErrorMessages.goodsReceipts.serviceNotAllowed,
           );
         }
 

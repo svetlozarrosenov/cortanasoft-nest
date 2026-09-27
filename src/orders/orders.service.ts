@@ -326,6 +326,15 @@ export class OrdersService {
     if (products.length !== uniqueProductIds.length) {
       throw new BadRequestException(ErrorMessages.orders.productsNotFound);
     }
+    // Дропшип има смисъл само за стока — услуга няма какво да се достави
+    const serviceIds = new Set(
+      products.filter((p) => p.type === 'SERVICE').map((p) => p.id),
+    );
+    if (
+      dto.items.some((it) => it.directDelivery && serviceIds.has(it.productId))
+    ) {
+      throw new BadRequestException(ErrorMessages.orders.directDeliveryService);
+    }
 
     // Verify the customer belongs to this company, so a client can't attach
     // (and later read back / mutate) another tenant's customer record (IDOR).
@@ -1151,6 +1160,18 @@ export class OrdersService {
       });
       if (products.length !== uniqueProductIds.length) {
         throw new BadRequestException(ErrorMessages.orders.productsNotFound);
+      }
+      const serviceIds = new Set(
+        products.filter((p) => p.type === 'SERVICE').map((p) => p.id),
+      );
+      if (
+        dto.items.some(
+          (it) => it.directDelivery && serviceIds.has(it.productId),
+        )
+      ) {
+        throw new BadRequestException(
+          ErrorMessages.orders.directDeliveryService,
+        );
       }
 
       const { itemsData, subtotal } = this.calculateItemTotals(
