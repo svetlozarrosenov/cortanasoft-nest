@@ -242,6 +242,7 @@ export interface ProductsReportResult {
 }
 
 export interface FinancialSummaryResult {
+  vatRegistered: boolean;
   // Приходи
   revenue: number;
   paid: number; // Реално събрани пари (cash-basis) за същите поръчки
@@ -869,11 +870,21 @@ export class ErpAnalyticsService {
           999,
         );
 
+    // Регистрирана по ДДС (има ДДС номер) → разходите без ДДС, както приходите;
+    // иначе ДДС-то по покупките е реален разход и остава в сумите
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { vatNumber: true },
+    });
+    const vatRegistered = !!company?.vatNumber;
+
     const [profitData, purchaseData, expensesSummary, payrollSummary] =
       await Promise.all([
         this.getProfitAnalytics(companyId, query),
         this.getPurchaseSummary(companyId, query),
-        this.expensesService.getExpensesSummary(companyId, dateFrom, dateTo),
+        this.expensesService.getExpensesSummary(companyId, dateFrom, dateTo, {
+          netOfVat: vatRegistered,
+        }),
         this.getPayrollSummary(companyId, dateFrom, dateTo),
       ]);
 
@@ -927,6 +938,8 @@ export class ErpAnalyticsService {
       // Оперативни разходи
       expenses: expensesSummary,
       payroll: payrollSummary,
+      // За бележката под отчета: сумите на разходите са без/с ДДС
+      vatRegistered,
       totalOperatingExpenses,
 
       // Нетна печалба (accrual)

@@ -4,6 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ExpensesService } from '../expenses/expenses.service';
 
 const mockPrisma = {
+  // ДДС номер → разходите в P&L са без ДДС; по подразбиране регистрирана
+  company: { findUnique: jest.fn().mockResolvedValue({ vatNumber: 'BG123456789' }) },
   order: { findMany: jest.fn() },
   goodsReceipt: { findMany: jest.fn() },
   goodsReceiptItem: { findMany: jest.fn() },
@@ -19,6 +21,7 @@ describe('ErpAnalyticsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockPrisma.company.findUnique.mockResolvedValue({ vatNumber: 'BG123456789' });
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ErpAnalyticsService,
@@ -690,6 +693,27 @@ describe('ErpAnalyticsService', () => {
   });
 
   describe('getFinancialSummary', () => {
+    it('разходите са без ДДС само при фирма с ДДС номер', async () => {
+      mockPrisma.order.findMany.mockResolvedValue([]);
+      mockPrisma.goodsReceipt.findMany.mockResolvedValue([]);
+      mockPrisma.goodsReceiptItem.findMany.mockResolvedValue([]);
+      mockPrisma.payroll.findMany.mockResolvedValue([]);
+      mockExpensesService.getExpensesSummary.mockResolvedValue({ totalExpenses: 0, expenseCount: 0, byCategory: [] });
+
+      const reg = await service.getFinancialSummary('c1', {} as any);
+      expect(reg.vatRegistered).toBe(true);
+      expect(mockExpensesService.getExpensesSummary).toHaveBeenLastCalledWith(
+        'c1', expect.any(Date), expect.any(Date), { netOfVat: true },
+      );
+
+      mockPrisma.company.findUnique.mockResolvedValue({ vatNumber: null });
+      const notReg = await service.getFinancialSummary('c1', {} as any);
+      expect(notReg.vatRegistered).toBe(false);
+      expect(mockExpensesService.getExpensesSummary).toHaveBeenLastCalledWith(
+        'c1', expect.any(Date), expect.any(Date), { netOfVat: false },
+      );
+    });
+
     it('should calculate P&L correctly', async () => {
       // Profit analytics: revenue 10000, cost 6000 → grossProfit 4000
       mockPrisma.order.findMany

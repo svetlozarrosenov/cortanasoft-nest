@@ -549,7 +549,18 @@ export class ExpensesService {
    * себестойността на стоката и влизат в печалбата през COGS при продажбата —
    * иначе транспортът се брои два пъти.
    */
-  async getExpensesSummary(companyId: string, dateFrom: Date, dateTo: Date) {
+  /**
+   * Оперативни разходи за отчета за печалба. При фирма, регистрирана по ДДС,
+   * ДДС-то по покупките се приспада и НЕ е разход → сумите са без ДДС (както
+   * приходите). Без регистрация ДДС-то е реален разход → с ДДС.
+   */
+  async getExpensesSummary(
+    companyId: string,
+    dateFrom: Date,
+    dateTo: Date,
+    opts: { netOfVat?: boolean } = {},
+  ) {
+    const netOfVat = !!opts.netOfVat;
     const expenses = await this.prisma.expense.findMany({
       where: {
         companyId,
@@ -564,6 +575,7 @@ export class ExpensesService {
       select: {
         id: true,
         category: true,
+        amount: true,
         totalAmount: true,
         items: {
           select: {
@@ -584,7 +596,7 @@ export class ExpensesService {
     for (const expense of expenses) {
       if (expense.items.length === 0) {
         // Стар запис без редове (не би трябвало след миграцията)
-        const amount = Number(expense.totalAmount);
+        const amount = Number(netOfVat ? expense.amount : expense.totalAmount);
         totalExpenses += amount;
         byCategory.set(
           expense.category,
@@ -595,7 +607,7 @@ export class ExpensesService {
       for (const it of expense.items) {
         if (it.includeInStockCost) continue;
         const amount =
-          (Number(it.amount) + Number(it.vatAmount)) *
+          (Number(it.amount) + (netOfVat ? 0 : Number(it.vatAmount))) *
           Number(it.exchangeRate || 1);
         totalExpenses += amount;
         byCategory.set(
