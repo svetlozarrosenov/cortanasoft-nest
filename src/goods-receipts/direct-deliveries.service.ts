@@ -10,6 +10,9 @@ import {
   generateReceiptNumber,
   recalcReceiptState,
   RECEIPT_INCLUDE,
+  computeUnitCosts,
+  landedCostLines,
+  syncReceiptExpenses,
 } from './receipt-helpers';
 import {
   UpdateDirectDeliveryDto,
@@ -230,6 +233,54 @@ export class DirectDeliveriesService {
   }
 
   /** При анулиране на продажбата: неизпратените заявки се анулират; изпратените остават (складът решава). */
+  /**
+   * Продажбата е отбелязана „Доставена" → отворените ѝ дропшип заявки стават
+   * доставени със същата дата (решение 2026-09-27: продажбата е екранът на
+   * оператора, заявката го следва). Прави същото като ръчното потвърждаване
+   * на заявката: себестойност в директните редове, последна доставна цена,
+   * разходите следват статуса. Заявки без редове се прескачат.
+   */
+  async markDeliveredForOrder(companyId: string, orderId: string, deliveredAt: Date) {
+    const open = await this.prisma.goodsReceipt.findMany({
+      where: { orderId, companyId, directDelivery: true, status: 'EXPECTED' },
+      include: RECEIPT_INCLUDE,
+    });
+    let marked = 0;
+    for (const receipt of open) {
+      if (!receipt.items || receipt.items.length === 0) continue;
+      await this.prisma.$transaction(async (tx) => {
+        const unitCosts = computeUnitCosts(receipt.items, landedCostLines(receipt.expenses));
+        // Последна доставна цена по продукт (при няколко реда последният печели)
+        const byProduct = new Map<string, number>();
+        for (const item of receipt.items) {
+          if (item.product?.type === 'SERVICE') continue;
+          const cost = unitCosts.get(item.id);
+          if (cost == null || cost <= 0) continue;
+          byProduct.set(item.productId, cost);
+        }
+        for (const [productId, lastLandedCost] of byProduct) {
+          await tx.product.update({
+            where: { id: productId },
+            data: { lastLandedCost, lastLandedCostAt: deliveredAt },
+          });
+        }
+        for (const item of receipt.items) {
+          await tx.orderItem.updateMany({
+            where: { orderId, productId: item.productId, directDelivery: true },
+            data: { unitCost: unitCosts.get(item.id) ?? 0 },
+          });
+        }
+        await tx.goodsReceipt.update({
+          where: { id: receipt.id },
+          data: { status: 'DELIVERED', deliveredAt },
+        });
+        await syncReceiptExpenses(tx, receipt.id);
+      });
+      marked += 1;
+    }
+    return marked;
+  }
+
   async cancelUnsentForOrder(companyId: string, orderId: string) {
     const unsent = await this.prisma.goodsReceipt.findMany({
       where: { orderId, companyId, directDelivery: true, status: 'EXPECTED', sentToSupplierAt: null },
@@ -296,8 +347,17 @@ export class DirectDeliveriesService {
             invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : null,
           }),
           ...(dto.notes !== undefined && { notes: dto.notes || null }),
+          ...(dto.attachmentUrl !== undefined && { attachmentUrl: dto.attachmentUrl || null }),
         },
       });
+      // Фактурата на доставчика е и приложение на разхода към заявката —
+      // така я вижда и счетоводителят в месечния пакет
+      if (dto.attachmentUrl !== undefined) {
+        await tx.expense.updateMany({
+          where: { goodsReceiptId: id },
+          data: { attachmentUrl: dto.attachmentUrl || null },
+        });
+      }
       if (items) {
         await tx.goodsReceiptItem.deleteMany({ where: { goodsReceiptId: id } });
         await tx.goodsReceiptItem.createMany({

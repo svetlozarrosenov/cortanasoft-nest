@@ -87,7 +87,7 @@ describe('OrdersService', () => {
         { provide: PushNotificationsService, useValue: mockPush },
         {
           provide: DirectDeliveriesService,
-          useValue: { ensureForOrder: jest.fn(), cancelUnsentForOrder: jest.fn() },
+          useValue: { ensureForOrder: jest.fn(), cancelUnsentForOrder: jest.fn(), markDeliveredForOrder: jest.fn() },
         },
       ],
     }).compile();

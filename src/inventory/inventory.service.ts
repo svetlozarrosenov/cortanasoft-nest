@@ -766,6 +766,16 @@ export class InventoryService {
               },
             },
           },
+          // Проследяемост: към коя продажба/клиент е отишъл серийният номер
+          orderItems: {
+            where: { order: { status: { not: 'CANCELLED' } } },
+            select: {
+              order: {
+                select: { id: true, orderNumber: true, customerName: true, orderDate: true },
+              },
+            },
+            take: 1,
+          },
         },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,

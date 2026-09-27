@@ -8,7 +8,15 @@ import {
   Delete,
   UseGuards,
   Query,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+  NotFoundException,
+  Res,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
+import { UploadsService } from '../uploads/uploads.service';
 import { GoodsReceiptsService } from './goods-receipts.service';
 import { DirectDeliveriesService } from './direct-deliveries.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -44,6 +52,7 @@ export class CompanyGoodsReceiptsController {
     private readonly goodsReceiptsService: GoodsReceiptsService,
     private readonly paymentsService: PaymentsService,
     private readonly directDeliveries: DirectDeliveriesService,
+    private readonly uploads: UploadsService,
   ) {}
 
   @Post()
@@ -85,6 +94,47 @@ export class CompanyGoodsReceiptsController {
     @Body() dto: EnsureDirectDeliveryDto,
   ) {
     return this.directDeliveries.ensureForOrder(companyId, dto.orderId, user.id);
+  }
+
+  // Фактурата от доставчика към дропшип заявка: качване и преглед зад същото
+  // право като картата (erp.directDelivery), а не зад warehouse.goodsReceipts.
+  @Post('direct/upload-attachment')
+  @RequireAnyPermission(
+    { module: 'warehouse', page: 'goodsReceipts', action: 'edit' },
+    { module: 'erp', page: 'directDelivery', action: 'view' },
+  )
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadDirectAttachment(
+    @Param('companyId') companyId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Не е предоставен файл');
+    return this.uploads.uploadInvoice(companyId, file);
+  }
+
+  @Get('direct/:id/attachment')
+  @RequireAnyPermission(
+    { module: 'warehouse', page: 'goodsReceipts', action: 'view' },
+    { module: 'erp', page: 'directDelivery', action: 'view' },
+  )
+  async directAttachment(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Res() res: Response,
+  ) {
+    const receipt = await this.goodsReceiptsService.findOne(companyId, id);
+    if (!receipt.directDelivery || !receipt.attachmentUrl) {
+      throw new NotFoundException('Заявката няма прикачен файл');
+    }
+    if (/^https?:\/\//i.test(receipt.attachmentUrl)) {
+      return res.redirect(receipt.attachmentUrl);
+    }
+    const { stream, contentType, contentLength } = await this.uploads.getFile(receipt.attachmentUrl);
+    res.set({
+      'Content-Type': contentType,
+      ...(contentLength ? { 'Content-Length': String(contentLength) } : {}),
+    });
+    stream.pipe(res);
   }
 
   @Patch('direct/:id')

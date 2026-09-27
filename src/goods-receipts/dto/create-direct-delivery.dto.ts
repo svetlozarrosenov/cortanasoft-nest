@@ -10,6 +10,7 @@ import {
   IsNotEmpty,
   IsEnum,
   IsBoolean,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { GoodsReceiptStatus } from '@prisma/client';
@@ -93,6 +94,12 @@ export class UpdateDirectDeliveryStatusDto {
 // редове на продажбата. Пълна редакция докато е EXPECTED; при DELIVERED —
 // само фактурата и бележките.
 export class UpdateDirectDeliveryDto {
+  // R2 ключ на прикачената фактура от доставчика ('' / null = премахване)
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @IsOptional()
+  attachmentUrl?: string | null;
+
   @IsString()
   @IsOptional()
   supplierId?: string | null;

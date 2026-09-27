@@ -1076,6 +1076,18 @@ export class OrdersService {
         include: ORDER_INCLUDE,
       });
 
+      // Дропшип: „Доставена" от продажбата отбелязва и отворените заявки към
+      // доставчика със същата дата (не блокира прехода при грешка — логва се).
+      if (dto.status === 'DELIVERED' && updated.deliveredAt) {
+        try {
+          await this.directDeliveries.markDeliveredForOrder(companyId, id, updated.deliveredAt);
+        } catch (err) {
+          this.logger.warn(
+            `Drop-ship receipts of order ${id} not marked delivered: ${(err as Error)?.message}`,
+          );
+        }
+      }
+
       // Issue warranties on DELIVERED — this is when the customer actually
       // takes possession of the goods, so it's the correct moment to start
       // the warranty clock. createWarrantiesForOrder is idempotent.

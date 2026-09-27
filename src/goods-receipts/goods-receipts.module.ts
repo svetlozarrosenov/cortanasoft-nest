@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { UploadsModule } from '../uploads/uploads.module';
 import { GoodsReceiptsService } from './goods-receipts.service';
 import { GoodsReceiptsController } from './goods-receipts.controller';
 import { CompanyGoodsReceiptsController } from './company-goods-receipts.controller';
@@ -8,7 +9,7 @@ import { PaymentsModule } from '../payments/payments.module';
 import { DirectDeliveriesModule } from './direct-deliveries.module';
 
 @Module({
-  imports: [WordPressModule, CloudCartModule, PaymentsModule, DirectDeliveriesModule],
+  imports: [WordPressModule, CloudCartModule, PaymentsModule, DirectDeliveriesModule, UploadsModule],
   controllers: [GoodsReceiptsController, CompanyGoodsReceiptsController],
   providers: [GoodsReceiptsService],
   exports: [GoodsReceiptsService],
