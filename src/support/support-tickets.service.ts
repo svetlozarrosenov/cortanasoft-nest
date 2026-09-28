@@ -356,7 +356,8 @@ export class SupportTicketsService {
 
   /**
    * Праща push до потребителите на OWNER компанията, чиято роля има право
-   * за support тикетите (admin.supportTickets → view). Гейтнато и от
+   * за support тикетите (support.tickets → view — същото право, което
+   * показва страницата Поддръжка). Гейтнато и от
    * Company.pushNotificationsEnabled (мастер ключът в настройките). Best-effort.
    */
   private async notifySupport(
@@ -388,11 +389,14 @@ export class SupportTicketsService {
   }
 
   /**
-   * Има ли ролята право да обработва support тикети (admin.supportTickets → view).
+   * Има ли ролята право да обработва support тикети (support.tickets → view).
+   * Ключовете са тези от permissions.config.ts — модул `support`, страница
+   * `tickets`; преди се проверяваше несъществуващ `admin.supportTickets` и
+   * push никога не стигаше до никого.
    */
   private roleCanHandleSupport(permissions: unknown): boolean {
-    const admin = (permissions as any)?.modules?.admin;
-    const page = admin?.pages?.supportTickets;
-    return Boolean(admin?.enabled && page?.enabled && page?.actions?.view);
+    const support = (permissions as any)?.modules?.support;
+    const page = support?.pages?.tickets;
+    return Boolean(support?.enabled && page?.enabled && page?.actions?.view);
   }
 }

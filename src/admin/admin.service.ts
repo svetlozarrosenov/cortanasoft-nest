@@ -182,6 +182,11 @@ export class AdminService {
       throw new ForbiddenException('Cannot change CLIENT company to OWNER');
     }
 
+    // OWNER фирмата (СВ Софт) не се деактивира — би заключила администрацията
+    if (company.role === CompanyRole.OWNER && dto.isActive === false) {
+      throw new ForbiddenException('Cannot deactivate OWNER company');
+    }
+
     // Проверка за дублиран ЕИК (ако е подаден и е различен)
     if (dto.eik && dto.eik !== company.eik) {
       const existingEik = await this.prisma.company.findUnique({
