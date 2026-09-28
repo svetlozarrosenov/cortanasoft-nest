@@ -3236,6 +3236,8 @@ enum ExpenseCategory {
   SOFTWARE // Софтуер и лицензи
   CONSULTING // Консултантски услуги
   BANKING // Банкови такси
+  FUEL // Гориво
+  MATERIALS // Материали
   OTHER // Други разходи
 }
 

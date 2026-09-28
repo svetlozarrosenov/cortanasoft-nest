@@ -134,7 +134,7 @@ const NON_RECORD_MATCH_LABELS: Partial<
 };
 
 // Описания на категориите за промпта — Claude избира код от списъка
-const EXPENSE_CATEGORY_HINTS = `  DELIVERY: shipping, couriers, transport, fuel for deliveries
+const EXPENSE_CATEGORY_HINTS = `  DELIVERY: shipping, couriers, transport services
   RENT: rent of premises, offices, warehouses
   UTILITIES: electricity, water, heating, gas, waste
   MARKETING: advertising, ads (Google/Meta), printing of promo materials, agencies
@@ -148,6 +148,8 @@ const EXPENSE_CATEGORY_HINTS = `  DELIVERY: shipping, couriers, transport, fuel 
   SOFTWARE: software licences, SaaS subscriptions, cloud, domains
   CONSULTING: accountants, lawyers, consultants, freelancers, professional services
   BANKING: bank fees, card processing fees, interest
+  FUEL: fuel, petrol, diesel, LPG, EV charging for own vehicles and machines
+  MATERIALS: raw materials, building materials, consumables and parts used in production or on sites
   OTHER: anything that does not fit above`;
 const EXPENSE_CATEGORY_CODES: string[] = Object.values(ExpenseCategory);
 // Начини на плащане, които има смисъл да се четат от фактура за разход
