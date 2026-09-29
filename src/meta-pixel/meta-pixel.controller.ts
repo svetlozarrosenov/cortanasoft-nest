@@ -13,7 +13,10 @@ import {
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { SuperAdminGuard } from '../common/guards/super-admin.guard';
 import { MetaPixelService } from './meta-pixel.service';
-import { MetaPixelInsightsService } from './meta-pixel-insights.service';
+import {
+  MAX_INSIGHTS_DAYS,
+  MetaPixelInsightsService,
+} from './meta-pixel-insights.service';
 import { SaveMetaPixelConfigDto } from './dto';
 
 @Controller('admin/meta-pixel')
@@ -42,18 +45,29 @@ export class MetaPixelController {
   }
 
   // Pixel events analytics — Live fetch с 10 min cache в самия service.
+  // Meta дава статистики само за последните 7 дни, затова периодът е ограничен дотам.
   @Get('insights/overview')
   async getInsightsOverview(
-    @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
+    @Query('days', new DefaultValuePipe(MAX_INSIGHTS_DAYS), ParseIntPipe)
+    days: number,
   ) {
-    const safeDays = Math.max(1, Math.min(90, days));
+    const safeDays = Math.max(1, Math.min(MAX_INSIGHTS_DAYS, days));
     const overview = await this.insights.getOverview(safeDays);
     return { success: true, overview };
   }
 
+  // Резултати от рекламите по кампания (Ads Manager) — 7 / 30 / 90 дни.
+  @Get('insights/ads')
+  async getAdsInsights(
+    @Query('days', new DefaultValuePipe(7), ParseIntPipe) days: number,
+  ) {
+    const ads = await this.insights.getAdsOverview(days);
+    return { success: true, ads };
+  }
+
   // Force-refresh за случаи когато искаме да зачистим cache-а ръчно (рядко).
   @Post('insights/refresh')
-  async refreshInsights() {
+  refreshInsights() {
     this.insights.clearCache();
     return { success: true };
   }
