@@ -52,7 +52,7 @@ export class AdminService {
                 lastName: true,
                 middleName: true,
                 phone: true,
-            loginEnabled: true,
+                loginEnabled: true,
                 isActive: true,
               },
             },
@@ -88,7 +88,7 @@ export class AdminService {
                 lastName: true,
                 middleName: true,
                 phone: true,
-            loginEnabled: true,
+                loginEnabled: true,
                 isActive: true,
               },
             },
@@ -152,6 +152,8 @@ export class AdminService {
         bic: dto.bic,
         currencyId: dto.currencyId,
         invoiceDefaultStartNumber: dto.invoiceDefaultStartNumber,
+        pushNotificationsEnabled: dto.pushNotificationsEnabled,
+        enableReviewStatus: dto.enableReviewStatus,
         role: dto.role || CompanyRole.CLIENT,
         isActive: dto.isActive ?? true,
       },
@@ -233,7 +235,11 @@ export class AdminService {
         logoUrl: dto.logoUrl,
         // '' от формата = изчистване → NULL (лилавото на Cortana)
         ...(dto.pdfAccentColor !== undefined
-          ? { pdfAccentColor: dto.pdfAccentColor ? dto.pdfAccentColor.toLowerCase() : null }
+          ? {
+              pdfAccentColor: dto.pdfAccentColor
+                ? dto.pdfAccentColor.toLowerCase()
+                : null,
+            }
           : {}),
         showCortanaBranding: dto.showCortanaBranding,
         invoiceTemplateKey: dto.invoiceTemplateKey,
@@ -242,6 +248,10 @@ export class AdminService {
         acceptanceProtocolTemplateKey: dto.acceptanceProtocolTemplateKey,
         ascertainmentProtocolTemplateKey: dto.ascertainmentProtocolTemplateKey,
         invoiceDefaultStartNumber: dto.invoiceDefaultStartNumber,
+        // Формата ги праща от самото начало, но никога не са се записвали —
+        // push известията оставаха изключени за всяка фирма.
+        pushNotificationsEnabled: dto.pushNotificationsEnabled,
+        enableReviewStatus: dto.enableReviewStatus,
         role: dto.role,
         isActive: dto.isActive,
       },
@@ -1227,7 +1237,9 @@ export class AdminService {
   async welcomeEmailVars(companyId: string, userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
-    const company = await this.prisma.company.findUnique({ where: { id: companyId } });
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+    });
     if (!company) throw new NotFoundException('Company not found');
     const userCompany = await this.prisma.userCompany.findUnique({
       where: { userId_companyId: { userId, companyId } },
