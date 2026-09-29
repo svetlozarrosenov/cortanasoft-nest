@@ -15,7 +15,10 @@ import {
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ContractFileKind } from '@prisma/client';
-import { ContractFilesService } from './contract-files.service';
+import {
+  ContractFilesService,
+  contractFileUrl,
+} from './contract-files.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import {
@@ -57,7 +60,7 @@ export class CompanyContractFilesController {
     );
     return {
       ...created,
-      fileUrl: `/api/companies/${companyId}/contracts/${contractId}/files/${created.id}/file`,
+      fileUrl: contractFileUrl(companyId, contractId, created.id),
     };
   }
 
@@ -70,7 +73,7 @@ export class CompanyContractFilesController {
     const files = await this.service.findByContract(companyId, contractId);
     return files.map((f) => ({
       ...f,
-      fileUrl: `/api/companies/${companyId}/contracts/${contractId}/files/${f.id}/file`,
+      fileUrl: contractFileUrl(companyId, contractId, f.id),
     }));
   }
 
@@ -82,8 +85,10 @@ export class CompanyContractFilesController {
     @Param('id') id: string,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { stream, contentType, fileName } =
-      await this.service.getFileStream(companyId, id);
+    const { stream, contentType, fileName } = await this.service.getFileStream(
+      companyId,
+      id,
+    );
     res.set({
       'Content-Type': contentType,
       'Content-Disposition': `inline; filename="${encodeURIComponent(fileName)}"`,
@@ -94,10 +99,7 @@ export class CompanyContractFilesController {
 
   @Delete(':id')
   @RequireDelete('erp', 'contracts')
-  remove(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-  ) {
+  remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.service.remove(companyId, id);
   }
 }

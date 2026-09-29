@@ -5,11 +5,8 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  CreateContractDto,
-  QueryContractsDto,
-  UpdateContractDto,
-} from './dto';
+import { contractFileUrl } from './contract-files.service';
+import { CreateContractDto, QueryContractsDto, UpdateContractDto } from './dto';
 
 @Injectable()
 export class ContractsService {
@@ -56,7 +53,8 @@ export class ContractsService {
           counterpartyAddress: counterparty.counterpartyAddress ?? null,
           counterpartyContact: counterparty.counterpartyContact ?? null,
           counterpartyVatNumber: counterparty.counterpartyVatNumber ?? null,
-          counterpartyRepresentative: counterparty.counterpartyRepresentative ?? null,
+          counterpartyRepresentative:
+            counterparty.counterpartyRepresentative ?? null,
           counterpartyEmail: counterparty.counterpartyEmail ?? null,
           monthlyFee: dto.monthlyFee ?? null,
           annualFee: dto.annualFee ?? null,
@@ -136,7 +134,15 @@ export class ContractsService {
     if (!contract) {
       throw new NotFoundException('Договорът не е намерен');
     }
-    return contract;
+    // fileUrl в базата е R2 ключът; фронтендът трябва да получи адреса през proxy-то,
+    // иначе линкът става относителен към страницата и връща 404.
+    return {
+      ...contract,
+      files: contract.files.map((f) => ({
+        ...f,
+        fileUrl: contractFileUrl(companyId, contract.id, f.id),
+      })),
+    };
   }
 
   async update(companyId: string, id: string, dto: UpdateContractDto) {
@@ -186,7 +192,10 @@ export class ContractsService {
           ? { counterpartyVatNumber: counterparty.counterpartyVatNumber }
           : {}),
         ...(counterparty.counterpartyRepresentative !== undefined
-          ? { counterpartyRepresentative: counterparty.counterpartyRepresentative }
+          ? {
+              counterpartyRepresentative:
+                counterparty.counterpartyRepresentative,
+            }
           : {}),
         ...(counterparty.counterpartyEmail !== undefined
           ? { counterpartyEmail: counterparty.counterpartyEmail }
@@ -213,7 +222,10 @@ export class ContractsService {
       select: { id: true },
     });
     await this.prisma.contract.delete({ where: { id } });
-    return { message: 'Договорът е изтрит успешно', removedFiles: files.length };
+    return {
+      message: 'Договорът е изтрит успешно',
+      removedFiles: files.length,
+    };
   }
 
   /** Попълва липсващите counterparty полета от запис на клиент. */
@@ -254,15 +266,14 @@ export class ContractsService {
     return {
       counterpartyName: current.counterpartyName || fullName || '',
       counterpartyEik: current.counterpartyEik || customer.eik || undefined,
-      counterpartyAddress:
-        current.counterpartyAddress || address || undefined,
-      counterpartyContact:
-        current.counterpartyContact || contact || undefined,
+      counterpartyAddress: current.counterpartyAddress || address || undefined,
+      counterpartyContact: current.counterpartyContact || contact || undefined,
       counterpartyVatNumber:
         current.counterpartyVatNumber || customer.vatNumber || undefined,
       counterpartyRepresentative:
         current.counterpartyRepresentative || customer.molName || undefined,
-      counterpartyEmail: current.counterpartyEmail || customer.email || undefined,
+      counterpartyEmail:
+        current.counterpartyEmail || customer.email || undefined,
     };
   }
 

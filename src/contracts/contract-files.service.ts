@@ -1,11 +1,21 @@
-import {
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { ContractFileKind } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { decodeUploadedFileName } from '../common/utils/upload-filename';
+
+/**
+ * Адресът, от който фронтендът тегли файла през backend proxy-то (auth + tenant check).
+ * В базата `fileUrl` пази R2 ключа, който не е публичен — затова адресът се смята тук
+ * и се подава навсякъде, където се връщат файлове на договор.
+ */
+export function contractFileUrl(
+  companyId: string,
+  contractId: string,
+  fileId: string,
+): string {
+  return `/api/companies/${companyId}/contracts/${contractId}/files/${fileId}/file`;
+}
 
 @Injectable()
 export class ContractFilesService {
