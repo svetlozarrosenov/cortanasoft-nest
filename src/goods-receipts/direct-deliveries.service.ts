@@ -344,6 +344,9 @@ export class DirectDeliveriesService {
         data: {
           ...(dto.supplierId !== undefined && { supplierId: dto.supplierId || null }),
           ...(dto.receiptDate && { receiptDate: new Date(dto.receiptDate) }),
+          ...(dto.expectedShipDate !== undefined && {
+            expectedShipDate: dto.expectedShipDate ? new Date(dto.expectedShipDate) : null,
+          }),
           ...(dto.invoiceNumber !== undefined && { invoiceNumber: dto.invoiceNumber || null }),
           ...(dto.invoiceDate !== undefined && {
             invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : null,

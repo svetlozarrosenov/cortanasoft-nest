@@ -19,6 +19,11 @@ export class UpdateGoodsReceiptDto {
   @IsOptional()
   receiptDate?: string;
 
+  // Очаквана дата на товарене (планиране)
+  @IsDateString()
+  @IsOptional()
+  expectedShipDate?: string | null;
+
   @IsString()
   @IsOptional()
   locationId?: string;

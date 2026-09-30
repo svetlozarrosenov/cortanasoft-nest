@@ -4,6 +4,7 @@ import {
   createFullPermissions,
   stripAdminModuleFromPermissions,
   RolePermissions,
+  normalizePermissions,
 } from './permissions.config';
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
@@ -18,7 +19,12 @@ function buildPermissions(
         string,
         {
           enabled: boolean;
-          actions: { view: boolean; create: boolean; edit: boolean; delete: boolean };
+          actions: {
+            view: boolean;
+            create: boolean;
+            edit: boolean;
+            delete: boolean;
+          };
           tables?: Record<string, { enabled: boolean; columns: string[] }>;
         }
       >;
@@ -29,14 +35,23 @@ function buildPermissions(
 }
 
 /** Simulate what the frontend usePermissions hook does */
-function canAccessModule(permissions: RolePermissions, moduleKey: string, isSuperAdmin = false): boolean {
+function canAccessModule(
+  permissions: RolePermissions,
+  moduleKey: string,
+  isSuperAdmin = false,
+): boolean {
   if (isSuperAdmin) return true;
   if (moduleKey === 'admin') return false;
   const mod = permissions.modules[moduleKey];
   return mod?.enabled || false;
 }
 
-function canAccessPage(permissions: RolePermissions, moduleKey: string, pageKey: string, isSuperAdmin = false): boolean {
+function canAccessPage(
+  permissions: RolePermissions,
+  moduleKey: string,
+  pageKey: string,
+  isSuperAdmin = false,
+): boolean {
   if (isSuperAdmin) return true;
   if (moduleKey === 'admin') return false;
   const mod = permissions.modules[moduleKey];
@@ -67,7 +82,10 @@ function getVisibleColumns(
   pageKey: string,
   tableKey: string,
 ): string[] {
-  return permissions.modules[moduleKey]?.pages?.[pageKey]?.tables?.[tableKey]?.columns || [];
+  return (
+    permissions.modules[moduleKey]?.pages?.[pageKey]?.tables?.[tableKey]
+      ?.columns || []
+  );
 }
 
 // ─── PERMISSIONS_CONFIG STRUCTURE ───────────────────────────────────────────
@@ -144,7 +162,9 @@ describe('PERMISSIONS_CONFIG structure', () => {
     expect(customersPage.tables).toBeDefined();
     expect(customersPage.tables!.length).toBeGreaterThan(0);
 
-    const customersList = customersPage.tables!.find((t) => t.key === 'customersList')!;
+    const customersList = customersPage.tables!.find(
+      (t) => t.key === 'customersList',
+    )!;
     expect(customersList).toBeDefined();
 
     const colKeys = customersList.columns.map((c) => c.key);
@@ -284,7 +304,15 @@ describe('createFullPermissions', () => {
 
   it('ERP ordersList should have all 7 columns by default', () => {
     const cols = getVisibleColumns(full, 'erp', 'orders', 'ordersList');
-    expect(cols).toEqual(['orderNumber', 'customer', 'date', 'total', 'status', 'paymentStatus', 'credit']);
+    expect(cols).toEqual([
+      'orderNumber',
+      'customer',
+      'date',
+      'total',
+      'status',
+      'paymentStatus',
+      'credit',
+    ]);
   });
 });
 
@@ -306,7 +334,12 @@ describe('stripAdminModuleFromPermissions', () => {
     const full = createFullPermissions();
     const stripped = stripAdminModuleFromPermissions(full);
 
-    const cols = getVisibleColumns(stripped, 'crm', 'customers', 'customersList');
+    const cols = getVisibleColumns(
+      stripped,
+      'crm',
+      'customers',
+      'customersList',
+    );
     expect(cols).toContain('name');
     expect(cols).toContain('email');
     expect(cols.length).toBe(6);
@@ -385,8 +418,42 @@ describe('Column visibility', () => {
       },
     });
 
-    const cols = getVisibleColumns(permissions, 'crm', 'customers', 'customersList');
+    const cols = getVisibleColumns(
+      permissions,
+      'crm',
+      'customers',
+      'customersList',
+    );
     expect(cols).toEqual(['name']);
+  });
+
+  it('does not auto-grant opt-in columns to roles that lack them', () => {
+    const stored = {
+      modules: {
+        warehouse: {
+          enabled: true,
+          pages: {
+            goodsReceipts: {
+              enabled: true,
+              actions: { view: true, create: true, edit: true, delete: true },
+              tables: {
+                goodsReceiptsList: {
+                  enabled: true,
+                  columns: ['receiptNumber', 'date'],
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const normalized = normalizePermissions(stored as any) as any;
+    const columns: string[] =
+      normalized.modules.warehouse.pages.goodsReceipts.tables.goodsReceiptsList
+        .columns;
+    expect(columns).not.toContain('expectedShipDate');
+    // обикновените колони, които липсват в старата роля, се допълват както досега
+    expect(columns).toContain('status');
   });
 
   it('missing table key returns empty array', () => {
@@ -402,13 +469,23 @@ describe('Column visibility', () => {
       },
     });
 
-    const cols = getVisibleColumns(permissions, 'crm', 'customers', 'customersList');
+    const cols = getVisibleColumns(
+      permissions,
+      'crm',
+      'customers',
+      'customersList',
+    );
     expect(cols).toEqual([]);
   });
 
   it('missing module returns empty array', () => {
     const permissions = buildPermissions({});
-    const cols = getVisibleColumns(permissions, 'crm', 'customers', 'customersList');
+    const cols = getVisibleColumns(
+      permissions,
+      'crm',
+      'customers',
+      'customersList',
+    );
     expect(cols).toEqual([]);
   });
 
@@ -422,15 +499,22 @@ describe('Column visibility', () => {
             actions: { view: true, create: false, edit: false, delete: false },
             tables: {
               recentActivity: { enabled: true, columns: ['date', 'action'] },
-              statistics: { enabled: true, columns: ['metric', 'value', 'change'] },
+              statistics: {
+                enabled: true,
+                columns: ['metric', 'value', 'change'],
+              },
             },
           },
         },
       },
     });
 
-    expect(getVisibleColumns(permissions, 'dashboard', 'overview', 'recentActivity')).toEqual(['date', 'action']);
-    expect(getVisibleColumns(permissions, 'dashboard', 'overview', 'statistics')).toEqual(['metric', 'value', 'change']);
+    expect(
+      getVisibleColumns(permissions, 'dashboard', 'overview', 'recentActivity'),
+    ).toEqual(['date', 'action']);
+    expect(
+      getVisibleColumns(permissions, 'dashboard', 'overview', 'statistics'),
+    ).toEqual(['metric', 'value', 'change']);
   });
 });
 
@@ -452,7 +536,9 @@ describe('Module and page access', () => {
 
     expect(canAccessModule(permissions, 'crm')).toBe(false);
     expect(canAccessPage(permissions, 'crm', 'customers')).toBe(false);
-    expect(canPerformAction(permissions, 'crm', 'customers', 'view')).toBe(false);
+    expect(canPerformAction(permissions, 'crm', 'customers', 'view')).toBe(
+      false,
+    );
   });
 
   it('enabled module with disabled page blocks page access', () => {
@@ -470,7 +556,9 @@ describe('Module and page access', () => {
 
     expect(canAccessModule(permissions, 'crm')).toBe(true);
     expect(canAccessPage(permissions, 'crm', 'customers')).toBe(false);
-    expect(canPerformAction(permissions, 'crm', 'customers', 'view')).toBe(false);
+    expect(canPerformAction(permissions, 'crm', 'customers', 'view')).toBe(
+      false,
+    );
   });
 
   it('page enabled but view=false blocks page access', () => {
@@ -500,7 +588,14 @@ describe('Module and page access', () => {
             tables: {
               ordersList: {
                 enabled: true,
-                columns: ['orderNumber', 'customer', 'date', 'total', 'status', 'paymentStatus'],
+                columns: [
+                  'orderNumber',
+                  'customer',
+                  'date',
+                  'total',
+                  'status',
+                  'paymentStatus',
+                ],
               },
             },
           },
@@ -509,11 +604,17 @@ describe('Module and page access', () => {
     });
 
     expect(canPerformAction(permissions, 'erp', 'orders', 'view')).toBe(true);
-    expect(canPerformAction(permissions, 'erp', 'orders', 'create')).toBe(false);
+    expect(canPerformAction(permissions, 'erp', 'orders', 'create')).toBe(
+      false,
+    );
     expect(canPerformAction(permissions, 'erp', 'orders', 'edit')).toBe(false);
-    expect(canPerformAction(permissions, 'erp', 'orders', 'delete')).toBe(false);
+    expect(canPerformAction(permissions, 'erp', 'orders', 'delete')).toBe(
+      false,
+    );
     // But can still see columns
-    expect(getVisibleColumns(permissions, 'erp', 'orders', 'ordersList').length).toBe(6);
+    expect(
+      getVisibleColumns(permissions, 'erp', 'orders', 'ordersList').length,
+    ).toBe(6);
   });
 
   it('admin module is always blocked for non-super-admin', () => {
@@ -531,7 +632,9 @@ describe('Module and page access', () => {
 
     expect(canAccessModule(permissions, 'admin')).toBe(false);
     expect(canAccessPage(permissions, 'admin', 'companies')).toBe(false);
-    expect(canPerformAction(permissions, 'admin', 'companies', 'view')).toBe(false);
+    expect(canPerformAction(permissions, 'admin', 'companies', 'view')).toBe(
+      false,
+    );
   });
 
   it('super admin bypasses all checks', () => {
@@ -540,7 +643,9 @@ describe('Module and page access', () => {
     expect(canAccessModule(empty, 'crm', true)).toBe(true);
     expect(canAccessModule(empty, 'admin', true)).toBe(true);
     expect(canAccessPage(empty, 'erp', 'orders', true)).toBe(true);
-    expect(canPerformAction(empty, 'crm', 'customers', 'delete', true)).toBe(true);
+    expect(canPerformAction(empty, 'crm', 'customers', 'delete', true)).toBe(
+      true,
+    );
   });
 
   it('non-existent module returns false', () => {
@@ -568,7 +673,14 @@ describe('Multi-company role isolation', () => {
           tables: {
             customersList: {
               enabled: true,
-              columns: ['name', 'email', 'phone', 'type', 'status', 'createdAt'], // all columns
+              columns: [
+                'name',
+                'email',
+                'phone',
+                'type',
+                'status',
+                'createdAt',
+              ], // all columns
             },
           },
         },
@@ -590,7 +702,14 @@ describe('Multi-company role isolation', () => {
           tables: {
             ordersList: {
               enabled: true,
-              columns: ['orderNumber', 'customer', 'date', 'total', 'status', 'paymentStatus'],
+              columns: [
+                'orderNumber',
+                'customer',
+                'date',
+                'total',
+                'status',
+                'paymentStatus',
+              ],
             },
           },
         },
@@ -646,20 +765,38 @@ describe('Multi-company role isolation', () => {
   describe('Company A role (full CRM + ERP, no HR)', () => {
     it('has full CRM access with all customer columns', () => {
       expect(canAccessModule(companyA_role, 'crm')).toBe(true);
-      expect(canPerformAction(companyA_role, 'crm', 'customers', 'create')).toBe(true);
-      expect(canPerformAction(companyA_role, 'crm', 'customers', 'delete')).toBe(false);
-      expect(getVisibleColumns(companyA_role, 'crm', 'customers', 'customersList').length).toBe(6);
+      expect(
+        canPerformAction(companyA_role, 'crm', 'customers', 'create'),
+      ).toBe(true);
+      expect(
+        canPerformAction(companyA_role, 'crm', 'customers', 'delete'),
+      ).toBe(false);
+      expect(
+        getVisibleColumns(companyA_role, 'crm', 'customers', 'customersList')
+          .length,
+      ).toBe(6);
     });
 
     it('has limited contacts (view-only, 2 columns)', () => {
-      expect(canPerformAction(companyA_role, 'crm', 'contacts', 'view')).toBe(true);
-      expect(canPerformAction(companyA_role, 'crm', 'contacts', 'create')).toBe(false);
-      const cols = getVisibleColumns(companyA_role, 'crm', 'contacts', 'contactsList');
+      expect(canPerformAction(companyA_role, 'crm', 'contacts', 'view')).toBe(
+        true,
+      );
+      expect(canPerformAction(companyA_role, 'crm', 'contacts', 'create')).toBe(
+        false,
+      );
+      const cols = getVisibleColumns(
+        companyA_role,
+        'crm',
+        'contacts',
+        'contactsList',
+      );
       expect(cols).toEqual(['name', 'email']);
     });
 
     it('has full ERP orders but no invoices', () => {
-      expect(canPerformAction(companyA_role, 'erp', 'orders', 'delete')).toBe(true);
+      expect(canPerformAction(companyA_role, 'erp', 'orders', 'delete')).toBe(
+        true,
+      );
       expect(canAccessPage(companyA_role, 'erp', 'invoices')).toBe(false);
     });
 
@@ -671,10 +808,19 @@ describe('Multi-company role isolation', () => {
   describe('Company B role (limited CRM, no ERP, has HR)', () => {
     it('has CRM customers but only name+status visible', () => {
       expect(canAccessModule(companyB_role, 'crm')).toBe(true);
-      expect(canPerformAction(companyB_role, 'crm', 'customers', 'view')).toBe(true);
-      expect(canPerformAction(companyB_role, 'crm', 'customers', 'edit')).toBe(false);
+      expect(canPerformAction(companyB_role, 'crm', 'customers', 'view')).toBe(
+        true,
+      );
+      expect(canPerformAction(companyB_role, 'crm', 'customers', 'edit')).toBe(
+        false,
+      );
 
-      const cols = getVisibleColumns(companyB_role, 'crm', 'customers', 'customersList');
+      const cols = getVisibleColumns(
+        companyB_role,
+        'crm',
+        'customers',
+        'customersList',
+      );
       expect(cols).toEqual(['name', 'status']);
       expect(cols.includes('email')).toBe(false);
       expect(cols.includes('phone')).toBe(false);
@@ -683,15 +829,26 @@ describe('Multi-company role isolation', () => {
     it('cannot access ERP at all', () => {
       expect(canAccessModule(companyB_role, 'erp')).toBe(false);
       expect(canAccessPage(companyB_role, 'erp', 'orders')).toBe(false);
-      expect(getVisibleColumns(companyB_role, 'erp', 'orders', 'ordersList')).toEqual([]);
+      expect(
+        getVisibleColumns(companyB_role, 'erp', 'orders', 'ordersList'),
+      ).toEqual([]);
     });
 
     it('has HR employees with 4 columns', () => {
       expect(canAccessModule(companyB_role, 'hr')).toBe(true);
-      expect(canPerformAction(companyB_role, 'hr', 'employees', 'edit')).toBe(true);
-      expect(canPerformAction(companyB_role, 'hr', 'employees', 'delete')).toBe(false);
+      expect(canPerformAction(companyB_role, 'hr', 'employees', 'edit')).toBe(
+        true,
+      );
+      expect(canPerformAction(companyB_role, 'hr', 'employees', 'delete')).toBe(
+        false,
+      );
 
-      const cols = getVisibleColumns(companyB_role, 'hr', 'employees', 'employeesList');
+      const cols = getVisibleColumns(
+        companyB_role,
+        'hr',
+        'employees',
+        'employeesList',
+      );
       expect(cols).toEqual(['name', 'position', 'department', 'email']);
     });
   });
@@ -710,8 +867,18 @@ describe('Multi-company role isolation', () => {
     });
 
     it('same page (crm/customers) has different columns per company', () => {
-      const colsA = getVisibleColumns(companyA_role, 'crm', 'customers', 'customersList');
-      const colsB = getVisibleColumns(companyB_role, 'crm', 'customers', 'customersList');
+      const colsA = getVisibleColumns(
+        companyA_role,
+        'crm',
+        'customers',
+        'customersList',
+      );
+      const colsB = getVisibleColumns(
+        companyB_role,
+        'crm',
+        'customers',
+        'customersList',
+      );
 
       expect(colsA.length).toBe(6);
       expect(colsB.length).toBe(2);
@@ -719,8 +886,12 @@ describe('Multi-company role isolation', () => {
     });
 
     it('same page (crm/customers) has different action rights per company', () => {
-      expect(canPerformAction(companyA_role, 'crm', 'customers', 'create')).toBe(true);
-      expect(canPerformAction(companyB_role, 'crm', 'customers', 'create')).toBe(false);
+      expect(
+        canPerformAction(companyA_role, 'crm', 'customers', 'create'),
+      ).toBe(true);
+      expect(
+        canPerformAction(companyB_role, 'crm', 'customers', 'create'),
+      ).toBe(false);
     });
   });
 });
@@ -732,7 +903,9 @@ describe('Edge cases', () => {
     const empty: RolePermissions = { modules: {} };
     expect(canAccessModule(empty, 'crm')).toBe(false);
     expect(canAccessPage(empty, 'crm', 'customers')).toBe(false);
-    expect(getVisibleColumns(empty, 'crm', 'customers', 'customersList')).toEqual([]);
+    expect(
+      getVisibleColumns(empty, 'crm', 'customers', 'customersList'),
+    ).toEqual([]);
   });
 
   it('module with no pages defined', () => {
@@ -788,7 +961,9 @@ describe('Edge cases', () => {
     expect(canAccessModule(full, 'hr')).toBe(false);
     expect(canAccessPage(full, 'hr', 'employees')).toBe(false);
     // Columns still exist in the data but module access is blocked
-    expect(getVisibleColumns(full, 'hr', 'employees', 'employeesList').length).toBeGreaterThan(0);
+    expect(
+      getVisibleColumns(full, 'hr', 'employees', 'employeesList').length,
+    ).toBeGreaterThan(0);
   });
 
   it('createEmptyPermissions then selectively enable one page', () => {
@@ -799,13 +974,18 @@ describe('Edge cases', () => {
     empty.modules.crm.pages.customers.actions.view = true;
     if (empty.modules.crm.pages.customers.tables) {
       empty.modules.crm.pages.customers.tables.customersList.enabled = true;
-      empty.modules.crm.pages.customers.tables.customersList.columns = ['name', 'status'];
+      empty.modules.crm.pages.customers.tables.customersList.columns = [
+        'name',
+        'status',
+      ];
     }
 
     expect(canAccessModule(empty, 'crm')).toBe(true);
     expect(canAccessPage(empty, 'crm', 'customers')).toBe(true);
     expect(canPerformAction(empty, 'crm', 'customers', 'create')).toBe(false);
-    expect(getVisibleColumns(empty, 'crm', 'customers', 'customersList')).toEqual(['name', 'status']);
+    expect(
+      getVisibleColumns(empty, 'crm', 'customers', 'customersList'),
+    ).toEqual(['name', 'status']);
 
     // Other CRM pages still disabled
     expect(canAccessPage(empty, 'crm', 'contacts')).toBe(false);
@@ -839,7 +1019,14 @@ describe('Realistic role scenarios', () => {
             tables: {
               customersList: {
                 enabled: true,
-                columns: ['name', 'email', 'phone', 'type', 'status', 'createdAt'],
+                columns: [
+                  'name',
+                  'email',
+                  'phone',
+                  'type',
+                  'status',
+                  'createdAt',
+                ],
               },
             },
           },
@@ -849,7 +1036,14 @@ describe('Realistic role scenarios', () => {
             tables: {
               contactsList: {
                 enabled: true,
-                columns: ['name', 'email', 'phone', 'company', 'status', 'createdAt'],
+                columns: [
+                  'name',
+                  'email',
+                  'phone',
+                  'company',
+                  'status',
+                  'createdAt',
+                ],
               },
             },
           },
@@ -859,7 +1053,14 @@ describe('Realistic role scenarios', () => {
             tables: {
               dealsList: {
                 enabled: true,
-                columns: ['name', 'contact', 'value', 'stage', 'probability', 'expectedCloseDate'],
+                columns: [
+                  'name',
+                  'contact',
+                  'value',
+                  'stage',
+                  'probability',
+                  'expectedCloseDate',
+                ],
               },
             },
           },
@@ -882,12 +1083,23 @@ describe('Realistic role scenarios', () => {
       },
     });
 
-    expect(canPerformAction(salesManager, 'crm', 'customers', 'edit')).toBe(true);
-    expect(canPerformAction(salesManager, 'crm', 'customers', 'delete')).toBe(false);
+    expect(canPerformAction(salesManager, 'crm', 'customers', 'edit')).toBe(
+      true,
+    );
+    expect(canPerformAction(salesManager, 'crm', 'customers', 'delete')).toBe(
+      false,
+    );
     expect(canPerformAction(salesManager, 'erp', 'orders', 'view')).toBe(true);
-    expect(canPerformAction(salesManager, 'erp', 'orders', 'create')).toBe(false);
+    expect(canPerformAction(salesManager, 'erp', 'orders', 'create')).toBe(
+      false,
+    );
 
-    const orderCols = getVisibleColumns(salesManager, 'erp', 'orders', 'ordersList');
+    const orderCols = getVisibleColumns(
+      salesManager,
+      'erp',
+      'orders',
+      'ordersList',
+    );
     expect(orderCols).toEqual(['orderNumber', 'customer', 'total', 'status']);
     expect(orderCols.includes('date')).toBe(false);
     expect(orderCols.includes('paymentStatus')).toBe(false);
@@ -914,7 +1126,13 @@ describe('Realistic role scenarios', () => {
             tables: {
               goodsReceiptsList: {
                 enabled: true,
-                columns: ['receiptNumber', 'supplier', 'location', 'date', 'status'],
+                columns: [
+                  'receiptNumber',
+                  'supplier',
+                  'location',
+                  'date',
+                  'status',
+                ],
               },
             },
           },
@@ -926,10 +1144,19 @@ describe('Realistic role scenarios', () => {
     expect(canAccessModule(warehouseWorker, 'erp')).toBe(false);
     expect(canAccessModule(warehouseWorker, 'warehouse')).toBe(true);
 
-    expect(canPerformAction(warehouseWorker, 'warehouse', 'inventory', 'view')).toBe(true);
-    expect(canPerformAction(warehouseWorker, 'warehouse', 'inventory', 'edit')).toBe(false);
+    expect(
+      canPerformAction(warehouseWorker, 'warehouse', 'inventory', 'view'),
+    ).toBe(true);
+    expect(
+      canPerformAction(warehouseWorker, 'warehouse', 'inventory', 'edit'),
+    ).toBe(false);
 
-    const invCols = getVisibleColumns(warehouseWorker, 'warehouse', 'inventory', 'inventoryList');
+    const invCols = getVisibleColumns(
+      warehouseWorker,
+      'warehouse',
+      'inventory',
+      'inventoryList',
+    );
     expect(invCols).toEqual(['product', 'warehouse', 'quantity', 'available']);
     expect(invCols.includes('reserved')).toBe(false);
   });
@@ -945,7 +1172,15 @@ describe('Realistic role scenarios', () => {
             tables: {
               employeesList: {
                 enabled: true,
-                columns: ['name', 'position', 'department', 'email', 'phone', 'startDate', 'status'],
+                columns: [
+                  'name',
+                  'position',
+                  'department',
+                  'email',
+                  'phone',
+                  'startDate',
+                  'status',
+                ],
               },
             },
           },
@@ -955,7 +1190,15 @@ describe('Realistic role scenarios', () => {
             tables: {
               payrollList: {
                 enabled: true,
-                columns: ['employee', 'period', 'baseSalary', 'bonuses', 'deductions', 'netSalary', 'status'],
+                columns: [
+                  'employee',
+                  'period',
+                  'baseSalary',
+                  'bonuses',
+                  'deductions',
+                  'netSalary',
+                  'status',
+                ],
               },
             },
           },
@@ -965,7 +1208,13 @@ describe('Realistic role scenarios', () => {
             tables: {
               attendanceList: {
                 enabled: true,
-                columns: ['employee', 'date', 'checkIn', 'checkOut', 'totalHours'],
+                columns: [
+                  'employee',
+                  'date',
+                  'checkIn',
+                  'checkOut',
+                  'totalHours',
+                ],
               },
             },
           },
@@ -978,11 +1227,21 @@ describe('Realistic role scenarios', () => {
     expect(canPerformAction(hrManager, 'hr', 'employees', 'delete')).toBe(true);
     expect(canPerformAction(hrManager, 'hr', 'payroll', 'delete')).toBe(false);
 
-    const payrollCols = getVisibleColumns(hrManager, 'hr', 'payroll', 'payrollList');
+    const payrollCols = getVisibleColumns(
+      hrManager,
+      'hr',
+      'payroll',
+      'payrollList',
+    );
     expect(payrollCols.length).toBe(7);
     expect(payrollCols).toContain('netSalary');
 
-    const attendanceCols = getVisibleColumns(hrManager, 'hr', 'attendance', 'attendanceList');
+    const attendanceCols = getVisibleColumns(
+      hrManager,
+      'hr',
+      'attendance',
+      'attendanceList',
+    );
     expect(attendanceCols).not.toContain('status'); // explicitly excluded
   });
 });

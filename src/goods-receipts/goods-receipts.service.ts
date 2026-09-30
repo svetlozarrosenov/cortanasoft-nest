@@ -133,6 +133,9 @@ export class GoodsReceiptsService {
       supplierId: dto.supplierId || undefined,
       createdById: userId,
       receiptDate: dto.receiptDate ? new Date(dto.receiptDate) : new Date(),
+      expectedShipDate: dto.expectedShipDate
+        ? new Date(dto.expectedShipDate)
+        : undefined,
       reverseChargeVat: !!dto.reverseChargeVat,
       items: {
         create: dto.items.map((item) => ({
@@ -454,7 +457,11 @@ export class GoodsReceiptsService {
             orderBy: { paidAt: 'asc' },
           },
         },
-        orderBy: { [sortBy]: sortOrder },
+        // Очакваната дата може да е празна — празните винаги накрая
+        orderBy:
+          sortBy === 'expectedShipDate'
+            ? { expectedShipDate: { sort: sortOrder, nulls: 'last' } }
+            : { [sortBy]: sortOrder },
         skip: (page - 1) * limit,
         take: limit,
       }),
@@ -624,6 +631,11 @@ export class GoodsReceiptsService {
         where: { id },
         data: {
           ...(dto.receiptDate && { receiptDate: new Date(dto.receiptDate) }),
+          ...(dto.expectedShipDate !== undefined && {
+            expectedShipDate: dto.expectedShipDate
+              ? new Date(dto.expectedShipDate)
+              : null,
+          }),
           ...(dto.locationId && { locationId: dto.locationId }),
           ...(dto.supplierId !== undefined && {
             supplierId: dto.supplierId || null,

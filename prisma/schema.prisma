@@ -1374,6 +1374,8 @@ model GoodsReceipt {
   // Кога заявката е изпратена на доставчика (само при directDelivery).
   // null = още е „заявка" (чака доставчик/цени); стъпка 2 от 3 в UI.
   sentToSupplierAt DateTime?
+  // Очаквана дата на товарене при доставчика (планиране; за всички доставки).
+  expectedShipDate DateTime?
 
   createdById String?
   createdBy   User?   @relation("GoodsReceiptCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -1385,6 +1387,7 @@ model GoodsReceipt {
 
   @@unique([companyId, receiptNumber])
   @@index([companyId, status])
+  @@index([companyId, expectedShipDate])
   @@index([orderId])
   @@map("goods_receipts")
 }

@@ -61,7 +61,7 @@ export class QueryGoodsReceiptsDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['createdAt', 'receiptDate', 'receiptNumber', 'status'])
+  @IsIn(['createdAt', 'receiptDate', 'receiptNumber', 'status', 'expectedShipDate'])
   sortBy?: string;
 
   @IsString()

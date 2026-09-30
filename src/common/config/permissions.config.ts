@@ -4,6 +4,9 @@
 export interface ColumnPermission {
   key: string;
   labelKey: string;
+  // Колона, която се дава само изрично от редактора на ролите: не се добавя
+  // автоматично към стари роли при нормализация и не е отметната по подразбиране.
+  optIn?: boolean;
 }
 
 export interface TablePermission {
@@ -475,7 +478,14 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
               { key: 'receiptNumber', labelKey: 'modules.erp.receiptNumber' },
               { key: 'supplier', labelKey: 'modules.erp.supplier' },
               { key: 'location', labelKey: 'modules.erp.location' },
-              { key: 'date', labelKey: 'common.date' },
+              { key: 'date', labelKey: 'modules.erp.grOrderedAt' },
+              { key: 'deliveredAt', labelKey: 'modules.erp.grReceivedAt' },
+              // Колоната И полето „Очаквана дата на товарене“ (формата следва същото право)
+              {
+                key: 'expectedShipDate',
+                labelKey: 'modules.erp.expectedShipDate',
+                optIn: true,
+              },
               { key: 'status', labelKey: 'common.status' },
             ],
           },
@@ -1278,7 +1288,9 @@ export function normalizePermissions(
             // Таблицата липсва — добавяме я с всички колони видими
             pg.tables[table.key] = {
               enabled: true,
-              columns: table.columns.map((col) => col.key),
+              columns: table.columns
+                .filter((col) => !col.optIn)
+                .map((col) => col.key),
             };
           } else {
             // Таблицата съществува, но конфигът може да е получил нови
@@ -1286,6 +1298,7 @@ export function normalizePermissions(
             // за да не "изчезват" нови UI колони при стари роли.
             const stored = pg.tables[table.key].columns || [];
             const missing = table.columns
+              .filter((col) => !col.optIn)
               .map((col) => col.key)
               .filter((key) => !stored.includes(key));
             if (missing.length > 0) {

@@ -108,6 +108,11 @@ export class UpdateDirectDeliveryDto {
   @IsOptional()
   receiptDate?: string;
 
+  // Очаквана дата на товарене (планиране)
+  @IsDateString()
+  @IsOptional()
+  expectedShipDate?: string | null;
+
   @IsString()
   @IsOptional()
   invoiceNumber?: string | null;
