@@ -164,6 +164,8 @@ model Company {
   // Номер на първата фактура на компанията (Администрация > Компании). Ползва се
   // само докато няма издадени фактури — за клиент, който продължава номерация.
   invoiceDefaultStartNumber Int @default(1)
+  // Същото за проформите — те имат собствена, независима номерация.
+  proformaDefaultStartNumber Int @default(1)
   serviceProtocolTemplateKey       String?
 
   // Контакти

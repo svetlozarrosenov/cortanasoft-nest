@@ -4,11 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  CreateProformaDto,
-  UpdateProformaDto,
-  QueryProformasDto,
-} from './dto';
+import { CreateProformaDto, UpdateProformaDto, QueryProformasDto } from './dto';
 import { Prisma } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
 
@@ -45,8 +41,18 @@ export class ProformasService {
       orderBy: { proformaNumber: 'desc' },
       select: { proformaNumber: true },
     });
-    const lastNum = last ? parseInt(last.proformaNumber, 10) : 0;
-    const next = Number.isFinite(lastNum) ? lastNum + 1 : 1;
+    let next: number;
+    if (last) {
+      const lastNum = parseInt(last.proformaNumber, 10);
+      next = Number.isFinite(lastNum) ? lastNum + 1 : 1;
+    } else {
+      // Първа проформа: номерът, зададен за компанията в Администрация (по подразбиране 1)
+      const company = await db.company.findUnique({
+        where: { id: companyId },
+        select: { proformaDefaultStartNumber: true },
+      });
+      next = company?.proformaDefaultStartNumber ?? 1;
+    }
     return next.toString().padStart(10, '0');
   }
 
@@ -101,7 +107,8 @@ export class ProformasService {
         : null;
       const productVatRate = product ? Number(product.vatRate) : defaultVatRate;
       const itemVatRate =
-        item.vatRate ?? (isNaN(productVatRate) ? defaultVatRate : productVatRate);
+        item.vatRate ??
+        (isNaN(productVatRate) ? defaultVatRate : productVatRate);
       const itemDiscount = item.discount ?? 0;
       const itemSubtotal = item.quantity * item.unitPrice - itemDiscount;
       const itemVat = itemSubtotal * (itemVatRate / 100);
@@ -135,7 +142,9 @@ export class ProformasService {
       return tx.proforma.create({
         data: {
           proformaNumber,
-          proformaDate: dto.invoiceDate ? new Date(dto.invoiceDate) : new Date(),
+          proformaDate: dto.invoiceDate
+            ? new Date(dto.invoiceDate)
+            : new Date(),
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
           status: 'DRAFT',
           customerId: dto.customerId || null,

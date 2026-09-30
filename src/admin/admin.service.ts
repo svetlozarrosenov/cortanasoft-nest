@@ -152,6 +152,7 @@ export class AdminService {
         bic: dto.bic,
         currencyId: dto.currencyId,
         invoiceDefaultStartNumber: dto.invoiceDefaultStartNumber,
+        proformaDefaultStartNumber: dto.proformaDefaultStartNumber,
         pushNotificationsEnabled: dto.pushNotificationsEnabled,
         enableReviewStatus: dto.enableReviewStatus,
         role: dto.role || CompanyRole.CLIENT,
@@ -248,6 +249,7 @@ export class AdminService {
         acceptanceProtocolTemplateKey: dto.acceptanceProtocolTemplateKey,
         ascertainmentProtocolTemplateKey: dto.ascertainmentProtocolTemplateKey,
         invoiceDefaultStartNumber: dto.invoiceDefaultStartNumber,
+        proformaDefaultStartNumber: dto.proformaDefaultStartNumber,
         // Формата ги праща от самото начало, но никога не са се записвали —
         // push известията оставаха изключени за всяка фирма.
         pushNotificationsEnabled: dto.pushNotificationsEnabled,

@@ -75,6 +75,38 @@ describe('ProformasService', () => {
       expect(result.proformaNumber).toBe('0000000001');
     });
 
+    it('starts from the company proforma start number when there are no proformas yet', async () => {
+      mockPrisma.company.findUnique.mockResolvedValue({
+        ...companyWithVat,
+        proformaDefaultStartNumber: 250,
+      });
+      mockPrisma.proforma.findFirst.mockResolvedValue(null);
+      mockPrisma.proforma.create.mockImplementation(({ data }) =>
+        Promise.resolve({ id: 'pf1', ...data }),
+      );
+
+      const result = await service.create('c1', 'u1', baseDto as any);
+
+      expect(result.proformaNumber).toBe('0000000250');
+    });
+
+    it('ignores the start number once a proforma exists', async () => {
+      mockPrisma.company.findUnique.mockResolvedValue({
+        ...companyWithVat,
+        proformaDefaultStartNumber: 250,
+      });
+      mockPrisma.proforma.findFirst.mockResolvedValue({
+        proformaNumber: '0000000003',
+      });
+      mockPrisma.proforma.create.mockImplementation(({ data }) =>
+        Promise.resolve({ id: 'pf1', ...data }),
+      );
+
+      const result = await service.create('c1', 'u1', baseDto as any);
+
+      expect(result.proformaNumber).toBe('0000000004');
+    });
+
     it('should increment proforma number when previous exists', async () => {
       mockPrisma.company.findUnique.mockResolvedValue(companyWithVat);
       mockPrisma.proforma.findFirst.mockResolvedValue({
@@ -142,9 +174,9 @@ describe('ProformasService', () => {
     it('should throw NotFoundException when company not found', async () => {
       mockPrisma.company.findUnique.mockResolvedValue(null);
 
-      await expect(
-        service.create('c1', 'u1', baseDto as any),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.create('c1', 'u1', baseDto as any)).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw BadRequestException when a productId does not exist in the company', async () => {
@@ -153,9 +185,9 @@ describe('ProformasService', () => {
 
       const dto = makeDtoWithProduct();
 
-      await expect(
-        service.create('c1', 'u1', dto as any),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.create('c1', 'u1', dto as any)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should use company default VAT rate (20) when item vatRate not provided and company has vatNumber', async () => {
@@ -266,7 +298,12 @@ describe('ProformasService', () => {
       const dto = {
         customerName: 'Client',
         items: [
-          { productId: 'p1', description: 'Product A', quantity: 1, unitPrice: 100 },
+          {
+            productId: 'p1',
+            description: 'Product A',
+            quantity: 1,
+            unitPrice: 100,
+          },
         ],
       };
 
@@ -285,7 +322,12 @@ describe('ProformasService', () => {
       const dto = {
         customerName: 'Client',
         items: [
-          { description: 'Service', quantity: 10, unitPrice: 100, discount: 50 },
+          {
+            description: 'Service',
+            quantity: 10,
+            unitPrice: 100,
+            discount: 50,
+          },
         ],
       };
 

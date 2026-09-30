@@ -121,7 +121,9 @@ export class CreateCompanyDto {
 
   // Основен цвят на стандартните PDF документи; '' или null = лилавото на Cortana
   @ValidateIf((_, v) => v !== null && v !== '')
-  @Matches(/^#[0-9a-fA-F]{6}$/, { message: 'Цветът трябва да е hex, напр. #1e6fd9' })
+  @Matches(/^#[0-9a-fA-F]{6}$/, {
+    message: 'Цветът трябва да е hex, напр. #1e6fd9',
+  })
   @IsOptional()
   pdfAccentColor?: string | null;
 
@@ -141,6 +143,13 @@ export class CreateCompanyDto {
   @Min(1)
   @IsOptional()
   invoiceDefaultStartNumber?: number;
+
+  // Номер на първата проформа (по подразбиране 1)
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  proformaDefaultStartNumber?: number;
 
   @IsString()
   @IsOptional()
