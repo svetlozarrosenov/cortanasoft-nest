@@ -23,6 +23,7 @@ const currencies = [
 // Списък с държави
 const countries = [
   { code: 'BG', name: 'Bulgaria', nativeName: 'България', phoneCode: '+359', isEU: true },
+  { code: 'IL', name: 'Israel', nativeName: 'ישראל', phoneCode: '+972', isEU: false },
   { code: 'DE', name: 'Germany', nativeName: 'Deutschland', phoneCode: '+49', isEU: true },
   { code: 'AT', name: 'Austria', nativeName: 'Österreich', phoneCode: '+43', isEU: true },
   { code: 'BE', name: 'Belgium', nativeName: 'België', phoneCode: '+32', isEU: true },
