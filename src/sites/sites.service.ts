@@ -94,6 +94,16 @@ export class SitesService {
   async summary(companyId: string, id: string, query: QuerySiteSummaryDto) {
     const site = await this.findOne(companyId, id);
 
+    // Както в отчета „Приходи и разходи": при фирма, регистрирана по ДДС, данъкът е
+    // транзитен и сумите са без ДДС от двете страни; при нерегистрирана фирма
+    // платеното ДДС по разходите е реален разход, а продажбите и без това са без ДДС.
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { vatNumber: true },
+    });
+    const vatRegistered = !!company?.vatNumber;
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+
     const dateFrom = query.dateFrom ? new Date(query.dateFrom) : undefined;
     const dateTo = query.dateTo
       ? new Date(query.dateTo + 'T23:59:59.999Z')
@@ -105,7 +115,12 @@ export class SitesService {
           companyId,
           siteId: id,
           ...(dateFrom || dateTo
-            ? { orderDate: { ...(dateFrom && { gte: dateFrom }), ...(dateTo && { lte: dateTo }) } }
+            ? {
+                orderDate: {
+                  ...(dateFrom && { gte: dateFrom }),
+                  ...(dateTo && { lte: dateTo }),
+                },
+              }
             : {}),
         },
         select: {
@@ -117,6 +132,7 @@ export class SitesService {
           customerId: true,
           customerName: true,
           total: true,
+          vatAmount: true,
           paidAmount: true,
         },
         orderBy: { orderDate: 'desc' },
@@ -126,13 +142,20 @@ export class SitesService {
           companyId,
           siteId: id,
           ...(dateFrom || dateTo
-            ? { expenseDate: { ...(dateFrom && { gte: dateFrom }), ...(dateTo && { lte: dateTo }) } }
+            ? {
+                expenseDate: {
+                  ...(dateFrom && { gte: dateFrom }),
+                  ...(dateTo && { lte: dateTo }),
+                },
+              }
             : {}),
         },
         select: {
           id: true,
           description: true,
           category: true,
+          amount: true,
+          vatAmount: true,
           totalAmount: true,
           expenseDate: true,
           status: true,
@@ -145,36 +168,63 @@ export class SitesService {
 
     // Приход по конвенцията на dashboard/erp-analytics: само реални продажби
     // (CONFIRMED+). DRAFT/PENDING остават видими в списъка, но не влизат в сумите.
-    const REVENUE_STATUSES = ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'];
+    const REVENUE_STATUSES = [
+      'CONFIRMED',
+      'PROCESSING',
+      'SHIPPED',
+      'DELIVERED',
+    ];
     const revenueOrders = orders.filter((o) =>
       REVENUE_STATUSES.includes(o.status),
     );
-    const revenue = revenueOrders.reduce((sum, o) => sum + Number(o.total), 0);
+    const orderAmount = (o: { total: unknown; vatAmount: unknown }) =>
+      vatRegistered ? Number(o.total) - Number(o.vatAmount) : Number(o.total);
+    const expenseAmount = (e: { amount: unknown; totalAmount: unknown }) =>
+      Number(vatRegistered ? e.amount : e.totalAmount);
+
+    const revenue = round2(
+      revenueOrders.reduce((sum, o) => sum + orderAmount(o), 0),
+    );
+    // Брутно (с ДДС) — за „за плащане“ спрямо реално платеното
+    const revenueGross = round2(
+      revenueOrders.reduce((sum, o) => sum + Number(o.total), 0),
+    );
     const paid = revenueOrders.reduce(
       (sum, o) => sum + Number(o.paidAmount ?? 0),
       0,
     );
     const activeExpenses = expenses.filter((e) => e.status !== 'CANCELLED');
-    const expensesTotal = activeExpenses.reduce(
-      (sum, e) => sum + Number(e.totalAmount),
-      0,
+    const expensesTotal = round2(
+      activeExpenses.reduce((sum, e) => sum + expenseAmount(e), 0),
     );
 
     // Месечна разбивка за графиката (само редовете, които участват в сумите)
     const monthKey = (d: Date) =>
       `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    const monthlyMap = new Map<string, { revenue: number; expenses: number; labor: number }>();
-    const bump = (key: string, field: 'revenue' | 'expenses' | 'labor', amount: number) => {
-      const entry = monthlyMap.get(key) || { revenue: 0, expenses: 0, labor: 0 };
+    const monthlyMap = new Map<
+      string,
+      { revenue: number; expenses: number; labor: number }
+    >();
+    const bump = (
+      key: string,
+      field: 'revenue' | 'expenses' | 'labor',
+      amount: number,
+    ) => {
+      const entry = monthlyMap.get(key) || {
+        revenue: 0,
+        expenses: 0,
+        labor: 0,
+      };
       entry[field] += amount;
       monthlyMap.set(key, entry);
     };
-    const bumpLabor = (key: string, amount: number) => bump(key, 'labor', amount);
+    const bumpLabor = (key: string, amount: number) =>
+      bump(key, 'labor', amount);
     for (const o of revenueOrders) {
-      bump(monthKey(new Date(o.orderDate)), 'revenue', Number(o.total));
+      bump(monthKey(new Date(o.orderDate)), 'revenue', orderAmount(o));
     }
     for (const e of activeExpenses) {
-      bump(monthKey(new Date(e.expenseDate)), 'expenses', Number(e.totalAmount));
+      bump(monthKey(new Date(e.expenseDate)), 'expenses', expenseAmount(e));
     }
 
     // Присъствия на обекта за периода (HR > Присъствия е източникът) —
@@ -184,7 +234,12 @@ export class SitesService {
     // часове, иначе поравно (същата логика като попъпа в Присъствие).
     const dateFilter =
       dateFrom || dateTo
-        ? { date: { ...(dateFrom && { gte: dateFrom }), ...(dateTo && { lte: dateTo }) } }
+        ? {
+            date: {
+              ...(dateFrom && { gte: dateFrom }),
+              ...(dateTo && { lte: dateTo }),
+            },
+          }
         : {};
     const siteRecords = await this.prisma.attendance.findMany({
       where: { companyId, siteId: id, ...dateFilter },
@@ -233,15 +288,22 @@ export class SitesService {
       }
       return here.length / recs.length;
     };
-
-    const round2 = (n: number) => Math.round(n * 100) / 100;
     const attendance = userIds
       .map((userId) => {
         const mem = members.find((m) => m.userId === userId);
-        const dates = [...new Set(siteRecords.filter((r) => r.userId === userId).map((r) => dayKey(r.date)))].sort();
-        const days = round2(dates.reduce((sum, d) => sum + siteShare(userId, d), 0));
+        const dates = [
+          ...new Set(
+            siteRecords
+              .filter((r) => r.userId === userId)
+              .map((r) => dayKey(r.date)),
+          ),
+        ].sort();
+        const days = round2(
+          dates.reduce((sum, d) => sum + siteShare(userId, d), 0),
+        );
         const rate = mem?.hourlyRate ?? mem?.position?.hourlyRate ?? null;
-        const dailyRate = rate != null ? round2(Number(rate) * workDayHours) : null;
+        const dailyRate =
+          rate != null ? round2(Number(rate) * workDayHours) : null;
         return {
           userId,
           firstName: mem?.user.firstName ?? '',
@@ -254,7 +316,9 @@ export class SitesService {
       })
       .sort((a, b) => b.days - a.days);
     const labor = round2(attendance.reduce((sum, a) => sum + (a.cost ?? 0), 0));
-    const laborUnrated = attendance.filter((a) => a.cost == null && a.days > 0).length;
+    const laborUnrated = attendance.filter(
+      (a) => a.cost == null && a.days > 0,
+    ).length;
 
     // Трудът влиза и в месечната графика: разпределен по дните на присъствие
     for (const a of attendance) {
@@ -269,6 +333,7 @@ export class SitesService {
 
     return {
       site,
+      vatRegistered,
       orders,
       expenses,
       monthly,
@@ -276,6 +341,7 @@ export class SitesService {
       workDayHours,
       totals: {
         revenue,
+        revenueGross,
         paid,
         expenses: expensesTotal,
         labor,
