@@ -3238,6 +3238,7 @@ enum ExpenseCategory {
   BANKING // Банкови такси
   FUEL // Гориво
   MATERIALS // Материали
+  VEHICLES // Автомобили
   OTHER // Други разходи
 }
 

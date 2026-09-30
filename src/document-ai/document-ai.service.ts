@@ -150,6 +150,7 @@ const EXPENSE_CATEGORY_HINTS = `  DELIVERY: shipping, couriers, transport servic
   BANKING: bank fees, card processing fees, interest
   FUEL: fuel, petrol, diesel, LPG, EV charging for own vehicles and machines
   MATERIALS: raw materials, building materials, consumables and parts used in production or on sites
+  VEHICLES: company cars and vans — leasing, repairs, tyres, parking, vignettes, car wash, road tax (fuel goes to FUEL)
   OTHER: anything that does not fit above`;
 const EXPENSE_CATEGORY_CODES: string[] = Object.values(ExpenseCategory);
 // Начини на плащане, които има смисъл да се четат от фактура за разход
