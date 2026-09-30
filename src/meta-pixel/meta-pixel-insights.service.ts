@@ -25,7 +25,12 @@ const REPORT_TIME_ZONE = 'Europe/Sofia';
 export const MAX_INSIGHTS_DAYS = 7;
 export const ADS_DAYS_OPTIONS = [7, 30, 90] as const;
 
-type Aggregation = 'event' | 'event_source' | 'browser_type' | 'device_os';
+type Aggregation =
+  | 'event'
+  | 'event_source'
+  | 'browser_type'
+  | 'device_os'
+  | 'url';
 
 interface GraphError {
   message: string;
@@ -94,6 +99,8 @@ export interface PixelOverview {
   bySource: Array<{ source: string; count: number }>;
   byBrowser: Array<{ browser: string; count: number }>;
   byDeviceOs: Array<{ deviceOs: string; count: number }>;
+  // Най-посещавани страници: pixel събития по адрес (без домейн и параметри), обикновено PageView
+  byUrl: Array<{ url: string; count: number }>;
   // Дневна серия за всеки event (последните N дни, без дупки — дни без събития са с 0).
   daily: PixelDailyPoint[];
   // Разбивки, които Meta отказа (съобщението на Graph API). Основната по event
@@ -251,11 +258,13 @@ export class MetaPixelInsightsService {
       }
     };
 
-    const [bySource, byBrowser, byDeviceOs] = await Promise.all([
+    const [bySource, byBrowser, byDeviceOs, byUrlRaw] = await Promise.all([
       optional('event_source'),
       optional('browser_type'),
       optional('device_os'),
+      optional('url'),
     ]);
+    const byUrl = groupByPath(byUrlRaw);
 
     const byEvent = totalsByValue(eventNodes);
     const totalEvents = byEvent.reduce((sum, x) => sum + x.count, 0);
@@ -269,6 +278,7 @@ export class MetaPixelInsightsService {
         deviceOs: x.value,
         count: x.count,
       })),
+      byUrl,
       daily: dailySeries(eventNodes, startTimeMs, endTimeMs),
       warnings,
       rangeStart: new Date(startTimeMs).toISOString(),
@@ -491,6 +501,28 @@ export class MetaPixelInsightsService {
     if (err instanceof Error) return `Meta Graph API: ${err.message}`;
     return `Meta Graph API: ${String(err)}`;
   }
+}
+
+// Пълните адреси от Meta стават пътища („/kontakti“), за да се съберат дублите
+// (http/https, www, параметри като fbclid).
+function groupByPath(buckets: Bucket[]): Array<{ url: string; count: number }> {
+  const totals = new Map<string, number>();
+  for (const b of buckets) {
+    let path = b.value;
+    try {
+      const u = new URL(
+        b.value.includes('://') ? b.value : `https://${b.value}`,
+      );
+      path = u.pathname || '/';
+    } catch {
+      path = b.value.replace(/[?#].*$/, '') || '/';
+    }
+    if (path.length > 1) path = path.replace(/\/+$/, '');
+    totals.set(path, (totals.get(path) ?? 0) + b.count);
+  }
+  return [...totals.entries()]
+    .map(([url, count]) => ({ url, count }))
+    .sort((a, b) => b.count - a.count);
 }
 
 function totalsByValue(nodes: GraphStatsNode[]): Bucket[] {

@@ -83,8 +83,36 @@ describe('MetaPixelInsightsService', () => {
     // Само валидни Meta агрегации (browser_type, не browser).
     const aggregations = fetchMock.mock.calls.map(([u]) => aggregationOf(u));
     expect(new Set(aggregations)).toEqual(
-      new Set(['event', 'event_source', 'browser_type', 'device_os']),
+      new Set(['event', 'event_source', 'browser_type', 'device_os', 'url']),
     );
+  });
+
+  it('groups page urls by path, ignoring host, scheme and query', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      const aggregation = aggregationOf(url);
+      if (aggregation === 'url') {
+        return jsonResponse({
+          data: [
+            bucket('url', [
+              {
+                value: 'https://cortanasoft.com/kontakti?fbclid=abc',
+                count: 3,
+              },
+              { value: 'http://www.cortanasoft.com/kontakti/', count: 2 },
+              { value: 'https://cortanasoft.com/', count: 10 },
+            ]),
+          ],
+        });
+      }
+      return jsonResponse({ data: [] });
+    });
+
+    const overview = await service.getOverview(7);
+
+    expect(overview.byUrl).toEqual([
+      { url: '/', count: 10 },
+      { url: '/kontakti', count: 5 },
+    ]);
   });
 
   it('surfaces the Meta error when the event aggregation is refused', async () => {
