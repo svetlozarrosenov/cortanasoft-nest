@@ -20,11 +20,7 @@ import {
   PermissionsGuard,
   RequireView,
 } from '../common/guards/permissions.guard';
-import {
-  DocumentAIService,
-  ParsedInvoiceData,
-  DeliveryScanResult,
-} from './document-ai.service';
+import { DocumentAIService, ParsedInvoiceData } from './document-ai.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -353,10 +349,10 @@ export class DocumentAIController {
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }),
   )
-  async scanDeliveryFile(
+  scanDeliveryFile(
     @Param('companyId') companyId: string,
     @UploadedFile() file: Express.Multer.File,
-  ): Promise<DeliveryScanResult> {
+  ): { jobId: string } {
     if (!file) {
       throw new BadRequestException('Липсва файл');
     }
@@ -373,11 +369,24 @@ export class DocumentAIController {
       );
     }
 
-    return this.documentAIService.parseDeliveryInvoice(
+    // Агентното сканиране отнема 30-90 сек → фонова задача + polling
+    // (виж коментара при задачите в service-а)
+    const jobId = this.documentAIService.startDeliveryScanJob(
       companyId,
       file.buffer.toString('base64'),
       file.mimetype,
     );
+    return { jobId };
+  }
+
+  /** Статус/резултат на сканиране на доставка — само за компанията, която го е пуснала */
+  @Get('scan-delivery-jobs/:jobId')
+  @RequireView('ai', 'invoiceScanning')
+  getDeliveryScanJob(
+    @Param('companyId') companyId: string,
+    @Param('jobId') jobId: string,
+  ) {
+    return this.documentAIService.getDeliveryScanJob(companyId, jobId);
   }
 
   /**

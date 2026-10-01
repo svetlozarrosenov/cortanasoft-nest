@@ -1140,6 +1140,53 @@ describe('DocumentAIService', () => {
     });
   });
 
+  describe('delivery scan as a background job', () => {
+    it('runs parseDeliveryInvoice in the background and hands the result out once', async () => {
+      mockCreate.mockResolvedValue({
+        stop_reason: 'tool_use',
+        content: [
+          {
+            type: 'tool_use',
+            id: 't1',
+            name: 'submit_result',
+            input: {
+              supplier: { name: 'Fancom', matchedSupplierId: null },
+              lineItems: [],
+              confidence: 0.9,
+            },
+          },
+        ],
+      });
+
+      const jobId = service.startDeliveryScanJob('c1', 'base64pdf', 'application/pdf');
+      expect(service.getDeliveryScanJob('c1', jobId).status).toBe('running');
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const done = service.getDeliveryScanJob('c1', jobId);
+      expect(done.status).toBe('done');
+      expect(done.result?.supplier?.name).toBe('Fancom');
+      expect(() => service.getDeliveryScanJob('c1', jobId)).toThrow(BadRequestException);
+    });
+
+    it('is scoped to the company and to the job kind', async () => {
+      mockCreate.mockReturnValue(new Promise(() => undefined));
+      const jobId = service.startDeliveryScanJob('c1', 'base64pdf', 'application/pdf');
+      expect(() => service.getDeliveryScanJob('c2', jobId)).toThrow(BadRequestException);
+      expect(() => service.getReconcileJob('c1', jobId)).toThrow(BadRequestException);
+    });
+
+    it('turns an Anthropic error into a readable message', async () => {
+      mockCreate.mockRejectedValue(new Error('boom'));
+      const jobId = service.startDeliveryScanJob('c1', 'base64pdf', 'application/pdf');
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      const job = service.getDeliveryScanJob('c1', jobId);
+      expect(job.status).toBe('error');
+      expect(job.message).toBe('Сканирането не успя. Опитайте отново.');
+    });
+  });
+
   describe('when API key is NOT configured', () => {
     beforeEach(async () => {
       jest.clearAllMocks();

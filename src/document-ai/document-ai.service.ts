@@ -83,6 +83,17 @@ export interface ReconcileRow {
   match?: ReconcileRowMatch | null;
 }
 
+type AiJobKind = 'reconcile' | 'delivery-scan';
+
+interface AiJob<T> {
+  companyId: string;
+  kind: AiJobKind;
+  status: 'running' | 'done' | 'error';
+  result?: T;
+  message?: string;
+  createdAt: number;
+}
+
 export interface ReconcileResult {
   rows: ReconcileRow[];
   confidence: number;
@@ -260,71 +271,95 @@ export class DocumentAIService {
     throw error;
   }
 
-  // ==================== Асинхронни съгласувания ====================
-  // Съгласуването отнема 1-2 минути — не може да живее в отворена HTTP
-  // заявка (проксита я убиват). POST стартира задача и връща веднага;
+  // ==================== Фонови AI задачи ====================
+  // Дългите AI операции (съгласуване 1-2 мин, агентно сканиране на доставка
+  // 30-90 сек) не могат да живеят в отворена HTTP заявка — прокситата
+  // (Next.js rewrite 30 сек, nginx 60 сек) я убиват и клиентът получава голо
+  // „Internal Server Error". POST стартира задача и връща jobId веднага;
   // frontend-ът пита за резултата. In-memory е достатъчно (един процес).
-  private reconcileJobs = new Map<
-    string,
-    {
-      companyId: string;
-      status: 'running' | 'done' | 'error';
-      result?: ReconcileResult;
-      message?: string;
-      createdAt: number;
-    }
-  >();
+  private readonly jobs = new Map<string, AiJob<unknown>>();
 
-  startReconcileJob(companyId: string, base64Pdf: string): string {
+  private startJob<T>(
+    companyId: string,
+    kind: AiJobKind,
+    work: () => Promise<T>,
+    failMessage: string,
+  ): string {
     // Чистим задачи по-стари от 30 мин
     const cutoff = Date.now() - 30 * 60 * 1000;
-    for (const [id, job] of this.reconcileJobs) {
-      if (job.createdAt < cutoff) this.reconcileJobs.delete(id);
+    for (const [id, job] of this.jobs) {
+      if (job.createdAt < cutoff) this.jobs.delete(id);
     }
 
     const jobId = randomUUID();
-    this.reconcileJobs.set(jobId, {
+    const job: AiJob<T> = {
       companyId,
+      kind,
       status: 'running',
       createdAt: Date.now(),
-    });
+    };
+    this.jobs.set(jobId, job);
 
-    void this.reconcileBankStatement(companyId, base64Pdf)
+    void work()
       .then((result) => {
-        const job = this.reconcileJobs.get(jobId);
-        if (job) {
-          job.status = 'done';
-          job.result = result;
-        }
+        job.status = 'done';
+        job.result = result;
       })
       .catch((error: unknown) => {
-        const job = this.reconcileJobs.get(jobId);
-        if (job) {
-          job.status = 'error';
-          job.message =
-            error instanceof BadRequestException
-              ? (error.getResponse() as { message?: string }).message ||
-                error.message
-              : 'Съгласуването не успя. Опитайте отново.';
-        }
-        this.logger.error('Reconcile job failed', error as Error);
+        job.status = 'error';
+        job.message =
+          error instanceof BadRequestException
+            ? (error.getResponse() as { message?: string }).message ||
+              error.message
+            : failMessage;
+        this.logger.error(`AI job ${kind} failed`, error as Error);
       });
 
     return jobId;
   }
 
   /** Резултатът се дава САМО на компанията, стартирала задачата */
-  getReconcileJob(companyId: string, jobId: string) {
-    const job = this.reconcileJobs.get(jobId);
-    if (!job || job.companyId !== companyId) {
+  private readJob<T>(companyId: string, kind: AiJobKind, jobId: string) {
+    const job = this.jobs.get(jobId) as AiJob<T> | undefined;
+    if (!job || job.companyId !== companyId || job.kind !== kind) {
       throw new BadRequestException('Задачата не е намерена');
     }
     // Краен статус се чете точно веднъж (polling-ът спира на done/error) —
     // изтриваме записа веднага, за да не виси в паметта до следващия старт.
     if (job.status !== 'running') {
-      this.reconcileJobs.delete(jobId);
+      this.jobs.delete(jobId);
     }
     return { status: job.status, result: job.result, message: job.message };
+  }
+
+  startReconcileJob(companyId: string, base64Pdf: string): string {
+    return this.startJob(
+      companyId,
+      'reconcile',
+      () => this.reconcileBankStatement(companyId, base64Pdf),
+      'Съгласуването не успя. Опитайте отново.',
+    );
+  }
+
+  getReconcileJob(companyId: string, jobId: string) {
+    return this.readJob<ReconcileResult>(companyId, 'reconcile', jobId);
+  }
+
+  startDeliveryScanJob(
+    companyId: string,
+    base64Data: string,
+    mimeType: string,
+  ): string {
+    return this.startJob(
+      companyId,
+      'delivery-scan',
+      () => this.parseDeliveryInvoice(companyId, base64Data, mimeType),
+      'Сканирането не успя. Опитайте отново.',
+    );
+  }
+
+  getDeliveryScanJob(companyId: string, jobId: string) {
+    return this.readJob<DeliveryScanResult>(companyId, 'delivery-scan', jobId);
   }
 
   /** True if an IP literal is loopback, private, link-local or CGNAT. */
