@@ -64,10 +64,8 @@ export const ErrorMessages = {
     directDeliveryService:
       'Услуга не може да бъде директна доставка — няма какво да се достави от доставчик',
     canOnlyUpdatePending: 'Може да редактирате само чакащи поръчки',
-    canOnlyConfirmPending: 'Може да потвърдите само чакащи поръчки',
     cannotConfirmWithoutItems: 'Не може да потвърдите поръчка без артикули',
     alreadyCancelled: 'Поръчката вече е отменена',
-    cannotCancelDelivered: 'Не може да отмените доставени поръчки',
     canOnlyDeletePending: 'Може да изтриете само чакащи поръчки',
     invalidStatusTransition: 'Невалиден преход на статус',
     canOnlyReopenCancelled: 'Само анулирани поръчки могат да бъдат възстановени',

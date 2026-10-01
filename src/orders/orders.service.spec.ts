@@ -51,6 +51,7 @@ const mockPrisma = {
   orderItem: {
     update: jest.fn(),
     deleteMany: jest.fn(),
+    findMany: jest.fn(),
   },
   inventorySerial: {
     findFirst: jest.fn(),
@@ -306,9 +307,19 @@ describe('OrdersService', () => {
       ...overrides,
     });
 
-    it('should throw BadRequestException when confirming non-PENDING order', async () => {
-      mockPrisma.order.findFirst.mockResolvedValue(makeOrder({ status: 'CONFIRMED' }));
+    it('confirming a CANCELLED order is refused; CONFIRMED is a no-op; SHIPPED only flips status', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue(makeOrder({ status: 'CANCELLED' }));
       await expect(service.confirm('c1', 'o1')).rejects.toThrow(BadRequestException);
+
+      mockPrisma.order.findFirst.mockResolvedValue(makeOrder({ status: 'CONFIRMED' }));
+      await service.confirm('c1', 'o1');
+      expect(mockPrisma.inventoryBatch.update).not.toHaveBeenCalled();
+
+      mockPrisma.order.findFirst.mockResolvedValue(makeOrder({ status: 'SHIPPED' }));
+      mockPrisma.order.update.mockResolvedValue({ status: 'CONFIRMED' });
+      await service.confirm('c1', 'o1');
+      expect(mockPrisma.inventoryBatch.update).not.toHaveBeenCalled();
+      expect(mockPrisma.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'CONFIRMED' } }));
     });
 
     it('should throw BadRequestException when confirming order with no items', async () => {
@@ -485,9 +496,19 @@ describe('OrdersService', () => {
       await expect(service.cancel('c1', 'o1')).rejects.toThrow(BadRequestException);
     });
 
-    it('should throw BadRequestException when cancelling DELIVERED order', async () => {
+    it('cancelling a DELIVERED order restores stock and voids warranties', async () => {
       mockPrisma.order.findFirst.mockResolvedValue(makeOrder({ status: 'DELIVERED' }));
-      await expect(service.cancel('c1', 'o1')).rejects.toThrow(BadRequestException);
+      mockPrisma.product.findUnique.mockResolvedValue({ id: 'p1', type: 'PRODUCT', trackInventory: true });
+      mockPrisma.inventoryBatch.update.mockResolvedValue({});
+      mockPrisma.order.update.mockResolvedValue({ status: 'CANCELLED' });
+
+      await service.cancel('c1', 'o1');
+
+      expect(mockPrisma.inventoryBatch.update).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { quantity: { increment: 30 } },
+      });
+      expect(mockWarranties.voidWarrantiesForOrder).toHaveBeenCalled();
     });
 
     it('should restore inventory to specific batch on cancel', async () => {
@@ -683,6 +704,166 @@ describe('OrdersService', () => {
         where: { id: 'i2' },
         data: { stockDeducted: true },
       });
+    });
+
+    it('редакция на CONFIRMED поръчка връща старите редове и изписва новите наново по FIFO (без фантомна наличност)', async () => {
+      // Стар ред: 2 бр. изписани по разпределение от партида b1
+      const confirmed = {
+        id: 'o1',
+        companyId: 'c1',
+        status: 'CONFIRMED',
+        locationId: 'loc1',
+        subtotal: 10,
+        total: 12,
+        items: [
+          { id: 'i1', productId: 'p1', quantity: 2, inventoryBatchId: null, inventorySerialId: null, stockDeducted: true, product: { id: 'p1', type: 'PRODUCT' } },
+        ],
+      };
+      mockPrisma.order.findFirst
+        .mockResolvedValueOnce(confirmed)
+        .mockResolvedValueOnce({ ...confirmed, items: [] });
+      mockPrisma.company.findUnique.mockResolvedValue({ id: 'c1', vatNumber: 'BG1', currencyId: 'cur' });
+      mockPrisma.product.findMany.mockResolvedValue([{ id: 'p1', type: 'PRODUCT', name: 'P', salePrice: 5, vatRate: 20 }]);
+      mockPrisma.orderItemBatchAllocation.findMany.mockResolvedValue([{ id: 'a1', inventoryBatchId: 'b1', quantity: 2 }]);
+      mockPrisma.inventoryBatch.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.orderItem.deleteMany.mockResolvedValue({ count: 1 });
+      // Новият ред (пак 2 бр., без избрана партида) се пресъздава със stockDeducted по подразбиране
+      mockPrisma.order.update.mockResolvedValue({
+        ...confirmed,
+        items: [{ id: 'i2', productId: 'p1', quantity: 2, inventoryBatchId: null, inventorySerialId: null, stockDeducted: true, locationId: 'loc1', directDelivery: false }],
+      });
+      mockPrisma.inventoryBatch.findMany.mockResolvedValue([{ id: 'b1', batchNumber: 'B1', quantity: 12, expiryDate: null }]);
+      mockPrisma.inventoryBatch.update.mockResolvedValue({});
+
+      await service.update('c1', 'o1', { items: [{ productId: 'p1', quantity: 2, unitPrice: 5 }] } as any);
+
+      // 1) старото изписване е върнато по разпределението
+      expect(mockPrisma.inventoryBatch.updateMany).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { quantity: { increment: 2 } },
+      });
+      // 2) новият ред е изписан наново по FIFO и има ново разпределение
+      expect(mockPrisma.inventoryBatch.update).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { quantity: { decrement: 2 } },
+      });
+      expect(mockPrisma.orderItemBatchAllocation.createMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: [expect.objectContaining({ orderItemId: 'i2', inventoryBatchId: 'b1', quantity: 2 })] }),
+      );
+      expect(mockPrisma.orderItem.update).toHaveBeenCalledWith({ where: { id: 'i2' }, data: { stockDeducted: true } });
+    });
+  });
+
+  describe('update (status: групи със/без стока)', () => {
+    // Потвърдена поръчка държи стока (stockDeducted: true, разпределение по партида)
+    const heldOrder = (overrides = {}) => ({
+      id: 'o1',
+      companyId: 'c1',
+      status: 'CONFIRMED',
+      locationId: 'loc1',
+      items: [
+        { id: 'i1', productId: 'p1', quantity: 1, inventoryBatchId: null, inventorySerialId: null, stockDeducted: true, locationId: 'loc1', product: { id: 'p1', type: 'PRODUCT', name: 'P' } },
+      ],
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      mockPrisma.product.findUnique.mockResolvedValue({ id: 'p1', type: 'PRODUCT', trackInventory: true });
+      mockPrisma.inventoryBatch.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.inventoryBatch.update.mockResolvedValue({});
+      mockPrisma.orderItem.findMany.mockResolvedValue([]);
+      mockPrisma.order.update.mockImplementation(({ data }: any) => Promise.resolve({ ...heldOrder(), ...data }));
+      mockPrisma.order.findUniqueOrThrow = jest.fn().mockResolvedValue(heldOrder());
+    });
+
+    it('CONFIRMED → DRAFT връща изписаното по разпределенията и маха stockDeducted', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue(heldOrder());
+      mockPrisma.orderItemBatchAllocation.findMany.mockResolvedValue([
+        { id: 'a1', inventoryBatchId: 'b1', quantity: 1 },
+      ]);
+
+      const result = await service.update('c1', 'o1', { status: 'DRAFT' } as any);
+
+      expect(mockPrisma.inventoryBatch.updateMany).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { quantity: { increment: 1 } },
+      });
+      expect(mockPrisma.orderItemBatchAllocation.deleteMany).toHaveBeenCalledWith({ where: { orderItemId: 'i1' } });
+      expect(mockPrisma.orderItem.update).toHaveBeenCalledWith({
+        where: { id: 'i1' },
+        data: { stockDeducted: false },
+      });
+      expect(result?.status).toBe('DRAFT');
+    });
+
+    it('SHIPPED → PENDING също връща стоката (и анулира гаранциите)', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue(
+        heldOrder({ status: 'SHIPPED', items: [{ id: 'i1', productId: 'p1', quantity: 2, inventoryBatchId: 'b1', stockDeducted: true, product: { id: 'p1', type: 'PRODUCT' } }] }),
+      );
+
+      await service.update('c1', 'o1', { status: 'PENDING' } as any);
+
+      expect(mockPrisma.inventoryBatch.update).toHaveBeenCalledWith({
+        where: { id: 'b1' },
+        data: { quantity: { increment: 2 } },
+      });
+      expect(mockWarranties.voidWarrantiesForOrder).toHaveBeenCalledWith('c1', 'o1', mockPrisma);
+    });
+
+    it('DELIVERED → DRAFT връща серийния номер в наличност', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue(
+        heldOrder({ status: 'DELIVERED', items: [{ id: 'i1', productId: 's1', quantity: 1, inventorySerialId: 'sn1', stockDeducted: true, product: { id: 's1', type: 'SERIAL' } }] }),
+      );
+      mockPrisma.product.findUnique.mockResolvedValue({ id: 's1', type: 'SERIAL' });
+
+      await service.update('c1', 'o1', { status: 'DRAFT' } as any);
+
+      expect(mockPrisma.inventorySerial.update).toHaveBeenCalledWith({ where: { id: 'sn1' }, data: { status: 'IN_STOCK' } });
+      expect(mockPrisma.orderItem.update).toHaveBeenCalledWith({ where: { id: 'i1' }, data: { stockDeducted: false } });
+    });
+
+    it('DRAFT → CONFIRMED изписва по FIFO с разпределение', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue(heldOrder({ status: 'DRAFT' }));
+      mockPrisma.inventoryBatch.findMany.mockResolvedValue([{ id: 'b1', batchNumber: 'B1', quantity: 5, expiryDate: null }]);
+
+      await service.update('c1', 'o1', { status: 'CONFIRMED' } as any);
+
+      expect(mockPrisma.inventoryBatch.update).toHaveBeenCalledWith({ where: { id: 'b1' }, data: { quantity: { decrement: 1 } } });
+      expect(mockPrisma.orderItem.update).toHaveBeenCalledWith({ where: { id: 'i1' }, data: { stockDeducted: true } });
+      expect(mockPrisma.orderItemBatchAllocation.createMany).toHaveBeenCalled();
+    });
+
+    it('DRAFT → SHIPPED при недостиг: редът става backorder и преходът се отказва', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue(heldOrder({ status: 'DRAFT' }));
+      mockPrisma.inventoryBatch.findMany.mockResolvedValue([]); // няма наличност
+      mockPrisma.orderItem.findMany.mockResolvedValue([
+        { id: 'i1', productId: 'p1', stockDeducted: false, directDelivery: false, inventorySerialId: null, product: { type: 'PRODUCT' } },
+      ]);
+
+      await expect(service.update('c1', 'o1', { status: 'SHIPPED' } as any)).rejects.toThrow(/неизписани/);
+    });
+
+    it('DRAFT → PENDING и CONFIRMED → PROCESSING не пипат склада', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue(heldOrder({ status: 'DRAFT' }));
+      await service.update('c1', 'o1', { status: 'PENDING' } as any);
+      mockPrisma.order.findFirst.mockResolvedValue(heldOrder({ status: 'CONFIRMED' }));
+      await service.update('c1', 'o1', { status: 'PROCESSING' } as any);
+      expect(mockPrisma.inventoryBatch.update).not.toHaveBeenCalled();
+      expect(mockPrisma.inventoryBatch.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.inventoryBatch.findMany).not.toHaveBeenCalled();
+    });
+
+    it('status CANCELLED през update минава през cancel() (връща стоката)', async () => {
+      const order = heldOrder({ items: [{ id: 'i1', productId: 'p1', quantity: 3, inventoryBatchId: 'b1', stockDeducted: true, product: { id: 'p1', type: 'PRODUCT' } }] });
+      mockPrisma.order.findFirst.mockResolvedValue(order);
+      await service.update('c1', 'o1', { status: 'CANCELLED' } as any);
+      expect(mockPrisma.inventoryBatch.update).toHaveBeenCalledWith({ where: { id: 'b1' }, data: { quantity: { increment: 3 } } });
+      expect(mockPrisma.order.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'CANCELLED' } }));
+    });
+
+    it('от CANCELLED не се сменя статус директно', async () => {
+      mockPrisma.order.findFirst.mockResolvedValue(heldOrder({ status: 'CANCELLED' }));
+      await expect(service.update('c1', 'o1', { status: 'DRAFT' } as any)).rejects.toThrow(BadRequestException);
     });
   });
 

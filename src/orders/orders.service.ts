@@ -14,7 +14,7 @@ import {
   QueryUnfulfilledDto,
   FulfillOrderDto,
 } from './dto';
-import { Prisma } from '@prisma/client';
+import { OrderItem, OrderStatus, Prisma, Product } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
 import { calculateDocumentTotals } from '../common/utils/document-totals';
 import { WarrantiesService } from '../warranties/warranties.service';
@@ -27,6 +27,14 @@ import { DirectDeliveriesService } from '../goods-receipts/direct-deliveries.ser
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+// Статуси, в които поръчката държи изписана стока (виж update() → смяна на статус)
+const STOCK_HELD_STATUSES: OrderStatus[] = [
+  'CONFIRMED',
+  'PROCESSING',
+  'SHIPPED',
+  'DELIVERED',
+];
 
 const ORDER_INCLUDE = {
   location: true,
@@ -718,7 +726,9 @@ export class OrdersService {
     return { ...order, deliveryStatus: computeDeliveryStatus(order) };
   }
 
-  // Walk every order in an open state (not CANCELLED / DELIVERED / DRAFT)
+  // Walk every order in an open state (not CANCELLED / DELIVERED; черновите
+  // влизат — продажба без наличност се записва като чернова и иначе не се
+  // вижда никъде, че чака стока)
   // and surface each OrderItem whose product is inventory-tracked but
   // hasn't yet had a serial / batch assigned. The frontend tags each row
   // RED / AMBER / GRAY based on stock availability + payment status so
@@ -741,7 +751,7 @@ export class OrdersService {
     const orders = await this.prisma.order.findMany({
       where: {
         companyId,
-        status: { notIn: ['CANCELLED', 'DELIVERED', 'DRAFT'] },
+        status: { notIn: ['CANCELLED', 'DELIVERED'] },
         items: { some: pendingItemWhere },
       },
       orderBy: { orderDate: 'asc' },
@@ -1031,59 +1041,92 @@ export class OrdersService {
       }
     }
 
-    // Status change
+    // Status change. Правилото е по групи, не по конкретни преходи:
+    //   без стока  = DRAFT, PENDING
+    //   със стока  = CONFIRMED, PROCESSING, SHIPPED, DELIVERED (изписана при
+    //                влизане в групата)
+    //   CANCELLED  = стоката е върната; единствен изход е reopen()
+    // „без → със" изписва както confirm(); „със → без" връща както cancel()
+    // (и анулира гаранциите, издадени при „Доставена"); вътре в група е само
+    // статус. Така потребителят може да сменя статусите свободно и складът
+    // винаги отговаря на статуса — без „изчезнали" или фантомни бройки.
     if (dto.status && dto.status !== order.status) {
-      // Анулирана поръчка е терминална за директни смени: cancel() е върнал
-      // стоката в склада, така че единственият валиден изход е reopen()
-      // (→ PENDING), откъдето confirm() изписва наличностите наново.
       if (order.status === 'CANCELLED') {
         throw new BadRequestException(ErrorMessages.orders.cancelledUseReopen);
       }
-
-      // „Изпратена/Доставена" означава, че стоката физически излиза → всички
-      // проследими редове трябва да са изписани преди това: партидните — със
-      // stockDeducted, серийните — със закачен сериен номер. Не можеш да
-      // доставиш каквото не си извадил от склада. Директните редове не минават
-      // през склад — доставчикът ги праща право при клиента.
-      if (dto.status === 'SHIPPED' || dto.status === 'DELIVERED') {
-        const unfulfilled = order.items.filter(
-          (it) =>
-            it.product &&
-            !it.directDelivery &&
-            it.product.type !== 'SERVICE' &&
-            (it.product.type === 'SERIAL'
-              ? !it.inventorySerialId
-              : !it.stockDeducted),
-        );
-        if (unfulfilled.length > 0) {
-          throw new BadRequestException(
-            'Поръчката има неизписани редове. Окомплектовайте (изберете партиди/серийни номера), преди да я маркирате като изпратена/доставена.',
-          );
-        }
+      if (dto.status === 'CANCELLED') {
+        return this.cancel(companyId, id);
       }
 
-      // Simple status transitions (CONFIRMED→PROCESSING, PROCESSING→SHIPPED, SHIPPED→DELIVERED)
-      // При преход към SHIPPED/DELIVERED записваме и реалната дата на
-      // изпращане/доставка: подадената от модала или момента на прехода.
-      // Веднъж попълнена дата не се презаписва автоматично при повторен преход.
-      const updated = await this.prisma.order.update({
-        where: { id },
-        data: {
-          status: dto.status,
-          ...(dto.status === 'SHIPPED' && {
-            shippedAt: dto.shippedAt
-              ? new Date(dto.shippedAt)
-              : order.shippedAt || new Date(),
-          }),
-          ...(dto.status === 'DELIVERED' && {
-            ...(dto.shippedAt && { shippedAt: new Date(dto.shippedAt) }),
-            deliveredAt: dto.deliveredAt
-              ? new Date(dto.deliveredAt)
-              : order.deliveredAt || new Date(),
-          }),
+      const fromHeld = STOCK_HELD_STATUSES.includes(order.status);
+      const toHeld = STOCK_HELD_STATUSES.includes(dto.status);
+
+      const updated = await this.prisma.$transaction(
+        async (tx) => {
+          if (!fromHeld && toHeld) {
+            for (const item of order.items) {
+              const product =
+                item.product ??
+                (await tx.product.findUnique({ where: { id: item.productId } }));
+              if (!product) continue;
+              await this.deductItemStock(tx, companyId, order, item, product);
+            }
+          } else if (fromHeld && !toHeld) {
+            await this.restoreHeldStock(tx, companyId, order);
+            await this.warrantiesService.voidWarrantiesForOrder(companyId, id, tx);
+          }
+
+          // „Изпратена/Доставена" означава, че стоката физически излиза → всички
+          // проследими редове трябва да са изписани преди това: партидните — със
+          // stockDeducted, серийните — със закачен сериен номер. Не можеш да
+          // доставиш каквото не си извадил от склада. Директните редове не минават
+          // през склад — доставчикът ги праща право при клиента. Проверява се след
+          // изписването по-горе, за да хване backorder редовете (недостиг).
+          if (dto.status === 'SHIPPED' || dto.status === 'DELIVERED') {
+            const items = await tx.orderItem.findMany({
+              where: { orderId: id },
+              include: { product: true },
+            });
+            const unfulfilled = items.filter(
+              (it) =>
+                it.product &&
+                !it.directDelivery &&
+                it.product.type !== 'SERVICE' &&
+                (it.product.type === 'SERIAL'
+                  ? !it.inventorySerialId
+                  : !it.stockDeducted),
+            );
+            if (unfulfilled.length > 0) {
+              throw new BadRequestException(
+                'Поръчката има неизписани редове. Окомплектовайте (изберете партиди/серийни номера), преди да я маркирате като изпратена/доставена.',
+              );
+            }
+          }
+
+          // При преход към SHIPPED/DELIVERED записваме и реалната дата на
+          // изпращане/доставка: подадената от модала или момента на прехода.
+          // Веднъж попълнена дата не се презаписва автоматично при повторен преход.
+          return tx.order.update({
+            where: { id },
+            data: {
+              status: dto.status,
+              ...(dto.status === 'SHIPPED' && {
+                shippedAt: dto.shippedAt
+                  ? new Date(dto.shippedAt)
+                  : order.shippedAt || new Date(),
+              }),
+              ...(dto.status === 'DELIVERED' && {
+                ...(dto.shippedAt && { shippedAt: new Date(dto.shippedAt) }),
+                deliveredAt: dto.deliveredAt
+                  ? new Date(dto.deliveredAt)
+                  : order.deliveredAt || new Date(),
+              }),
+            },
+            include: ORDER_INCLUDE,
+          });
         },
-        include: ORDER_INCLUDE,
-      });
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
 
       // Дропшип: „Доставена" от продажбата отбелязва и отворените заявки към
       // доставчика със същата дата (не блокира прехода при грешка — логва се).
@@ -1105,6 +1148,17 @@ export class OrdersService {
           await this.warrantiesService.createWarrantiesForOrder(companyId, id);
         } catch {
           // Non-blocking: warranty failure should not block the status flip.
+        }
+      }
+
+      if (fromHeld !== toHeld) {
+        await this.webhookDispatcher.emitOrderChanged(companyId, id);
+        // Влизане в „със стока" = потвърждаване → дропшип заявките както при confirm()
+        if (toHeld && (await this.syncDirectDeliveries(companyId, id))) {
+          return this.prisma.order.findUniqueOrThrow({
+            where: { id },
+            include: ORDER_INCLUDE,
+          });
         }
       }
 
@@ -1353,91 +1407,18 @@ export class OrdersService {
           );
         }
 
-        // 4. Apply inventory deduction for new items that carry an explicit
-        //    allocation (inventorySerialId / inventoryBatchId). Items without
-        //    allocation stay as backorder. Mirrors confirm()'s SERIAL/BATCH
-        //    branches; FIFO auto-allocation is intentionally NOT done here —
-        //    that's confirm()'s responsibility, not update()'s. За непотвърдена
-        //    поръчка не се изписва нищо — това ще направи confirm().
+        // 4. Поръчка, която държи стока (потвърдена и нагоре): стъпка 1 върна
+        //    старите редове в склада, затова новите се изписват наново по
+        //    същите правила като confirm() — сериен номер, конкретна партида
+        //    или FEFO/FIFO; при недостиг редът остава backorder. Без това
+        //    редовете се пресъздават със stockDeducted=true (DB default) без
+        //    реално изписване и всяка следваща редакция „връща" още веднъж
+        //    (фантомна наличност). За непотвърдена поръчка не се пипа нищо.
         for (const newItem of stockHeld ? updatedOrder.items : []) {
           const newProduct = productById.get(newItem.productId);
-          if (
-            !newProduct ||
-            newItem.directDelivery ||
-            newProduct.type === 'SERVICE'
-          ) {
-            continue;
-          }
-
-          if (newProduct.type === 'SERIAL') {
-            if (!newItem.inventorySerialId) continue;
-            const serial = await tx.inventorySerial.findFirst({
-              where: {
-                id: newItem.inventorySerialId,
-                companyId,
-                productId: newItem.productId,
-              },
-            });
-            if (!serial) {
-              throw new BadRequestException(
-                ErrorMessages.inventory.serialNotFound,
-              );
-            }
-            if (serial.status !== 'IN_STOCK') {
-              throw new BadRequestException(
-                `${ErrorMessages.inventory.serialNotInStock}: "${newProduct.name}" - SN: ${serial.serialNumber}`,
-              );
-            }
-            await tx.inventorySerial.update({
-              where: { id: newItem.inventorySerialId },
-              data: { status: 'SOLD' },
-            });
-            await tx.orderItem.update({
-              where: { id: newItem.id },
-              data: { stockDeducted: true },
-            });
-            continue;
-          }
-
-          if (newItem.inventoryBatchId) {
-            const newQty = Number(newItem.quantity);
-            // Scope by companyId + productId to prevent cross-tenant batch IDOR.
-            const batch = await tx.inventoryBatch.findFirst({
-              where: {
-                id: newItem.inventoryBatchId,
-                companyId,
-                productId: newItem.productId,
-              },
-            });
-            if (!batch) {
-              throw new BadRequestException(
-                `Партидата за продукт "${newProduct.name}" не е намерена`,
-              );
-            }
-            if (Number(batch.quantity) < newQty) {
-              throw new BadRequestException(
-                `${ErrorMessages.inventory.insufficientStock}: "${newProduct.name}" - ` +
-                  `налични: ${Number(batch.quantity)}, заявени: ${newQty}`,
-              );
-            }
-            await tx.inventoryBatch.update({
-              where: { id: batch.id },
-              data: { quantity: { decrement: newQty } },
-            });
-            await tx.orderItem.update({
-              where: { id: newItem.id },
-              data: { stockDeducted: true },
-            });
-            await this.createBatchAllocations(tx, newItem.id, [
-              {
-                batchId: batch.id,
-                batchNumber: batch.batchNumber,
-                quantity: newQty,
-              },
-            ]);
-          }
+          if (!newProduct) continue;
+          await this.deductItemStock(tx, companyId, updatedOrder, newItem, newProduct);
         }
-
         // Re-fetch so stockDeducted updates land in the returned payload.
         return tx.order.findFirst({
           where: { id },
@@ -1859,21 +1840,213 @@ export class OrdersService {
     }
   }
 
+  /**
+   * Изписва един ред от склада по правилата на потвърждаването: услуга и
+   * директна доставка не пипат склада; сериен продукт продава закачения номер
+   * (без номер = backorder); партиден — конкретната партида или FEFO/FIFO при
+   * няколко, с разпределения по партиди; при недостиг редът остава backorder
+   * (stockDeducted=false) за „Очакват изписване". Общ за confirm() и за
+   * редакция на потвърдена поръчка (update), за да изписват еднакво.
+   */
+  private async deductItemStock(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    order: { locationId: string | null },
+    item: OrderItem,
+    product: Product,
+  ) {
+    // Skip inventory deduction for services
+    if (product.type === 'SERVICE') {
+      return;
+    }
+
+    // Директна доставка: стоката не минава през наш склад — нищо за
+    // изписване, редът не е и backorder (не се показва в „Чакащи").
+    if (item.directDelivery) {
+      await tx.orderItem.update({
+        where: { id: item.id },
+        data: { stockDeducted: false },
+      });
+      return;
+    }
+
+    // Handle SERIAL products
+    if (product.type === 'SERIAL') {
+      if (!item.inventorySerialId) {
+        // Backorder: no serial assigned yet. Leave stockDeducted=false
+        // so cancel() won't restore something that was never deducted.
+        await tx.orderItem.update({
+          where: { id: item.id },
+          data: { stockDeducted: false },
+        });
+        return;
+      }
+
+      const serial = await tx.inventorySerial.findFirst({
+        where: {
+          id: item.inventorySerialId,
+          companyId,
+          productId: item.productId,
+        },
+      });
+
+      if (!serial) {
+        throw new BadRequestException(
+          ErrorMessages.inventory.serialNotFound,
+        );
+      }
+
+      if (serial.status !== 'IN_STOCK') {
+        throw new BadRequestException(
+          `${ErrorMessages.inventory.serialNotInStock}: "${product.name}" - SN: ${serial.serialNumber}`,
+        );
+      }
+
+      await tx.inventorySerial.update({
+        where: { id: item.inventorySerialId },
+        data: { status: 'SOLD' },
+      });
+      await tx.orderItem.update({
+        where: { id: item.id },
+        data: { stockDeducted: true },
+      });
+
+      return;
+    }
+
+    const quantity = Number(item.quantity);
+
+    if (item.inventoryBatchId) {
+      // Deduct from specific batch using atomic decrement.
+      // Scope by companyId + productId so a client can't pass another
+      // tenant's batch id and decrement their stock (IDOR).
+      const batch = await tx.inventoryBatch.findFirst({
+        where: {
+          id: item.inventoryBatchId,
+          companyId,
+          productId: item.productId,
+        },
+      });
+
+      if (!batch) {
+        throw new BadRequestException(
+          `Партидата за продукт "${product.name}" не е намерена`,
+        );
+      }
+
+      if (Number(batch.quantity) < quantity) {
+        throw new BadRequestException(
+          `${ErrorMessages.inventory.insufficientStock}: "${product.name}" - ` +
+            `налични: ${Number(batch.quantity)}, заявени: ${quantity}`,
+        );
+      }
+
+      await tx.inventoryBatch.update({
+        where: { id: item.inventoryBatchId },
+        data: { quantity: { decrement: quantity } },
+      });
+      await tx.orderItem.update({
+        where: { id: item.id },
+        data: { stockDeducted: true },
+      });
+      await this.createBatchAllocations(tx, item.id, [
+        {
+          batchId: batch.id,
+          batchNumber: batch.batchNumber,
+          quantity,
+        },
+      ]);
+    } else {
+      // Auto-deduct using FEFO (first-expired-first-out) — за стоки със
+      // срок излиза първо най-скоро изтичащата; без срок → най-старата (FIFO).
+      // Prefer item-level locationId, fall back to order-level
+      const deductLocationId = item.locationId || order.locationId;
+      const batches = await tx.inventoryBatch.findMany({
+        where: {
+          companyId,
+          productId: item.productId,
+          quantity: { gt: 0 },
+          ...(deductLocationId && { locationId: deductLocationId }),
+        },
+        orderBy: [
+          { expiryDate: { sort: 'asc', nulls: 'last' } },
+          { createdAt: 'asc' },
+        ], // FEFO, после FIFO
+      });
+
+      const totalAvailable = batches.reduce(
+        (sum, b) => sum + Number(b.quantity),
+        0,
+      );
+
+      if (totalAvailable < quantity) {
+        // Backorder: insufficient stock. Skip deduction; the row stays
+        // in "Awaiting fulfilment" until a goods receipt arrives.
+        await tx.orderItem.update({
+          where: { id: item.id },
+          data: { stockDeducted: false },
+        });
+        return;
+      }
+
+      let remaining = quantity;
+      const consumed: {
+        batchId: string;
+        batchNumber: string;
+        quantity: number;
+      }[] = [];
+      for (const batch of batches) {
+        if (remaining <= 0) break;
+
+        const batchQty = Number(batch.quantity);
+        const deduct = Math.min(batchQty, remaining);
+
+        await tx.inventoryBatch.update({
+          where: { id: batch.id },
+          data: { quantity: { decrement: deduct } },
+        });
+        consumed.push({
+          batchId: batch.id,
+          batchNumber: batch.batchNumber,
+          quantity: deduct,
+        });
+
+        remaining -= deduct;
+      }
+      await tx.orderItem.update({
+        where: { id: item.id },
+        data: { stockDeducted: true },
+      });
+      await this.createBatchAllocations(tx, item.id, consumed);
+    }
+  }
+
   async confirm(companyId: string, id: string) {
     const order = await this.findOne(companyId, id);
 
-    if (
-      order.status !== 'DRAFT' &&
-      order.status !== 'PENDING' &&
-      order.status !== 'PROCESSING'
-    ) {
-      throw new BadRequestException(ErrorMessages.orders.canOnlyConfirmPending);
+    if (order.status === 'CANCELLED') {
+      throw new BadRequestException(ErrorMessages.orders.cancelledUseReopen);
+    }
+    if (order.status === 'CONFIRMED') {
+      return order;
     }
 
     if (!order.items || order.items.length === 0) {
       throw new BadRequestException(
         ErrorMessages.orders.cannotConfirmWithoutItems,
       );
+    }
+
+    // Поръчка, която вече държи стока (в обработка/изпратена/доставена), само
+    // сменя статуса — складът е изписан при влизането в групата.
+    if (STOCK_HELD_STATUSES.includes(order.status)) {
+      const back = await this.prisma.order.update({
+        where: { id },
+        data: { status: 'CONFIRMED' },
+        include: ORDER_INCLUDE,
+      });
+      await this.webhookDispatcher.emitOrderChanged(companyId, id);
+      return back;
     }
 
     // Deduct inventory where possible; items without stock/serial become
@@ -1886,174 +2059,8 @@ export class OrdersService {
           const product = await tx.product.findUnique({
             where: { id: item.productId },
           });
-
-          // Skip inventory deduction for services
-          if (
-            !product ||
-            product.type === 'SERVICE'
-          ) {
-            continue;
-          }
-
-          // Директна доставка: стоката не минава през наш склад — нищо за
-          // изписване, редът не е и backorder (не се показва в „Чакащи").
-          if (item.directDelivery) {
-            await tx.orderItem.update({
-              where: { id: item.id },
-              data: { stockDeducted: false },
-            });
-            continue;
-          }
-
-          // Handle SERIAL products
-          if (product.type === 'SERIAL') {
-            if (!item.inventorySerialId) {
-              // Backorder: no serial assigned yet. Leave stockDeducted=false
-              // so cancel() won't restore something that was never deducted.
-              await tx.orderItem.update({
-                where: { id: item.id },
-                data: { stockDeducted: false },
-              });
-              continue;
-            }
-
-            const serial = await tx.inventorySerial.findFirst({
-              where: {
-                id: item.inventorySerialId,
-                companyId,
-                productId: item.productId,
-              },
-            });
-
-            if (!serial) {
-              throw new BadRequestException(
-                ErrorMessages.inventory.serialNotFound,
-              );
-            }
-
-            if (serial.status !== 'IN_STOCK') {
-              throw new BadRequestException(
-                `${ErrorMessages.inventory.serialNotInStock}: "${product.name}" - SN: ${serial.serialNumber}`,
-              );
-            }
-
-            await tx.inventorySerial.update({
-              where: { id: item.inventorySerialId },
-              data: { status: 'SOLD' },
-            });
-            await tx.orderItem.update({
-              where: { id: item.id },
-              data: { stockDeducted: true },
-            });
-
-            continue;
-          }
-
-          const quantity = Number(item.quantity);
-
-          if (item.inventoryBatchId) {
-            // Deduct from specific batch using atomic decrement.
-            // Scope by companyId + productId so a client can't pass another
-            // tenant's batch id and decrement their stock (IDOR).
-            const batch = await tx.inventoryBatch.findFirst({
-              where: {
-                id: item.inventoryBatchId,
-                companyId,
-                productId: item.productId,
-              },
-            });
-
-            if (!batch) {
-              throw new BadRequestException(
-                `Партидата за продукт "${product.name}" не е намерена`,
-              );
-            }
-
-            if (Number(batch.quantity) < quantity) {
-              throw new BadRequestException(
-                `${ErrorMessages.inventory.insufficientStock}: "${product.name}" - ` +
-                  `налични: ${Number(batch.quantity)}, заявени: ${quantity}`,
-              );
-            }
-
-            await tx.inventoryBatch.update({
-              where: { id: item.inventoryBatchId },
-              data: { quantity: { decrement: quantity } },
-            });
-            await tx.orderItem.update({
-              where: { id: item.id },
-              data: { stockDeducted: true },
-            });
-            await this.createBatchAllocations(tx, item.id, [
-              {
-                batchId: batch.id,
-                batchNumber: batch.batchNumber,
-                quantity,
-              },
-            ]);
-          } else {
-            // Auto-deduct using FEFO (first-expired-first-out) — за стоки със
-            // срок излиза първо най-скоро изтичащата; без срок → най-старата (FIFO).
-            // Prefer item-level locationId, fall back to order-level
-            const deductLocationId = item.locationId || order.locationId;
-            const batches = await tx.inventoryBatch.findMany({
-              where: {
-                companyId,
-                productId: item.productId,
-                quantity: { gt: 0 },
-                ...(deductLocationId && { locationId: deductLocationId }),
-              },
-              orderBy: [
-                { expiryDate: { sort: 'asc', nulls: 'last' } },
-                { createdAt: 'asc' },
-              ], // FEFO, после FIFO
-            });
-
-            const totalAvailable = batches.reduce(
-              (sum, b) => sum + Number(b.quantity),
-              0,
-            );
-
-            if (totalAvailable < quantity) {
-              // Backorder: insufficient stock. Skip deduction; the row stays
-              // in "Awaiting fulfilment" until a goods receipt arrives.
-              await tx.orderItem.update({
-                where: { id: item.id },
-                data: { stockDeducted: false },
-              });
-              continue;
-            }
-
-            let remaining = quantity;
-            const consumed: {
-              batchId: string;
-              batchNumber: string;
-              quantity: number;
-            }[] = [];
-            for (const batch of batches) {
-              if (remaining <= 0) break;
-
-              const batchQty = Number(batch.quantity);
-              const deduct = Math.min(batchQty, remaining);
-
-              await tx.inventoryBatch.update({
-                where: { id: batch.id },
-                data: { quantity: { decrement: deduct } },
-              });
-              consumed.push({
-                batchId: batch.id,
-                batchNumber: batch.batchNumber,
-                quantity: deduct,
-              });
-
-              remaining -= deduct;
-            }
-            await tx.orderItem.update({
-              where: { id: item.id },
-              data: { stockDeducted: true },
-            });
-            await this.createBatchAllocations(tx, item.id, consumed);
-          }
+          if (!product) continue;
+          await this.deductItemStock(tx, companyId, order, item, product);
         }
 
         // Update order status
@@ -2100,88 +2107,14 @@ export class OrdersService {
       throw new BadRequestException(ErrorMessages.orders.alreadyCancelled);
     }
 
-    if (order.status === 'DELIVERED') {
-      throw new BadRequestException(ErrorMessages.orders.cannotCancelDelivered);
-    }
-
-    // Restore inventory if order was confirmed (stock was deducted)
-    const needsRestore = ['CONFIRMED', 'PROCESSING', 'SHIPPED'].includes(
-      order.status,
-    );
+    // Restore inventory if the order holds stock (deducted when it entered the
+    // CONFIRMED+ group). „Доставена" също се анулира — стоката се връща и
+    // гаранциите се анулират; физическото връщане е грижа на потребителя.
+    const needsRestore = STOCK_HELD_STATUSES.includes(order.status);
 
     const result = await this.prisma.$transaction(async (tx) => {
       if (needsRestore) {
-        for (const item of order.items) {
-          const product = await tx.product.findUnique({
-            where: { id: item.productId },
-          });
-
-          // Skip for services or non-tracked products
-          if (
-            !product ||
-            product.type === 'SERVICE'
-          ) {
-            continue;
-          }
-
-          // Backorder items never had their stock decremented at confirm — nothing to restore.
-          // Direct-delivery items never touch our stock at all.
-          if (!item.stockDeducted || item.directDelivery) {
-            continue;
-          }
-
-          // Restore SERIAL products
-          if (product.type === 'SERIAL' && item.inventorySerialId) {
-            await tx.inventorySerial.update({
-              where: { id: item.inventorySerialId },
-              data: { status: 'IN_STOCK' },
-            });
-            await tx.orderItem.update({
-              where: { id: item.id },
-              data: { stockDeducted: false },
-            });
-            continue;
-          }
-
-          const quantity = Number(item.quantity);
-
-          // Ново: ако имаме точни разпределения по партиди — връщаме по тях.
-          const restoredByAllocations = await this.restoreBatchAllocations(
-            tx,
-            item.id,
-          );
-          if (restoredByAllocations) {
-            // нищо повече — разпределенията върнаха точните количества
-          } else if (item.inventoryBatchId) {
-            // Restore to the specific batch using atomic increment
-            await tx.inventoryBatch.update({
-              where: { id: item.inventoryBatchId },
-              data: { quantity: { increment: quantity } },
-            });
-          } else {
-            // If no specific batch, restore to the oldest batch of this product at the item/order location
-            const restoreLocationId = item.locationId || order.locationId;
-            const batch = await tx.inventoryBatch.findFirst({
-              where: {
-                companyId,
-                productId: item.productId,
-                ...(restoreLocationId && { locationId: restoreLocationId }),
-              },
-              orderBy: { createdAt: 'asc' },
-            });
-
-            if (batch) {
-              await tx.inventoryBatch.update({
-                where: { id: batch.id },
-                data: { quantity: { increment: quantity } },
-              });
-            }
-          }
-          await tx.orderItem.update({
-            where: { id: item.id },
-            data: { stockDeducted: false },
-          });
-        }
+        await this.restoreHeldStock(tx, companyId, order);
       }
 
       // Void any warranties this order had issued. After today only DELIVERED
@@ -2205,6 +2138,88 @@ export class OrdersService {
   // склада — cancel() вече е върнал количествата, а повторното изписване
   // става по нормалния път при confirm() (с всички проверки за наличност).
   // Гаранциите не се възстановяват (издават се наново при DELIVERED).
+  /**
+   * Връща в склада всичко, което редовете на поръчката държат (изписано при
+   * confirm): серийните номера стават IN_STOCK, партидите се увеличават по
+   * записаните разпределения (или по конкретната/най-старата партида, ако
+   * няма разпределения) и stockDeducted пада на false. Общ код за cancel() и
+   * за връщане на потвърдена поръчка в чернова — за да няма две версии.
+   */
+  private async restoreHeldStock(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    order: { locationId: string | null; items: OrderItem[] },
+  ) {
+    for (const item of order.items) {
+      const product = await tx.product.findUnique({
+        where: { id: item.productId },
+      });
+
+      // Skip for services or non-tracked products
+      if (!product || product.type === 'SERVICE') {
+        continue;
+      }
+
+      // Backorder items never had their stock decremented at confirm — nothing to restore.
+      // Direct-delivery items never touch our stock at all.
+      if (!item.stockDeducted || item.directDelivery) {
+        continue;
+      }
+
+      // Restore SERIAL products
+      if (product.type === 'SERIAL' && item.inventorySerialId) {
+        await tx.inventorySerial.update({
+          where: { id: item.inventorySerialId },
+          data: { status: 'IN_STOCK' },
+        });
+        await tx.orderItem.update({
+          where: { id: item.id },
+          data: { stockDeducted: false },
+        });
+        continue;
+      }
+
+      const quantity = Number(item.quantity);
+
+      // Ново: ако имаме точни разпределения по партиди — връщаме по тях.
+      const restoredByAllocations = await this.restoreBatchAllocations(
+        tx,
+        item.id,
+      );
+      if (restoredByAllocations) {
+        // нищо повече — разпределенията върнаха точните количества
+      } else if (item.inventoryBatchId) {
+        // Restore to the specific batch using atomic increment
+        await tx.inventoryBatch.update({
+          where: { id: item.inventoryBatchId },
+          data: { quantity: { increment: quantity } },
+        });
+      } else {
+        // If no specific batch, restore to the oldest batch of this product at the item/order location
+        const restoreLocationId = item.locationId || order.locationId;
+        const batch = await tx.inventoryBatch.findFirst({
+          where: {
+            companyId,
+            productId: item.productId,
+            ...(restoreLocationId && { locationId: restoreLocationId }),
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        if (batch) {
+          await tx.inventoryBatch.update({
+            where: { id: batch.id },
+            data: { quantity: { increment: quantity } },
+          });
+        }
+      }
+      await tx.orderItem.update({
+        where: { id: item.id },
+        data: { stockDeducted: false },
+      });
+    }
+  }
+
   async reopen(companyId: string, id: string) {
     const order = await this.findOne(companyId, id);
 
