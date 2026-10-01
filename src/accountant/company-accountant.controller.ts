@@ -99,6 +99,27 @@ export class CompanyAccountantController {
     return this.accountantService.statements(companyId, query);
   }
 
+  // Файлът на извлечението (PDF/CSV) се качва тук, със същото право като самото
+  // извлечение. Преди минаваше през uploads/invoice и наследяваше правото за
+  // Склад > Доставки, което счетоводител без склад няма.
+  @Post('bank-statements/upload')
+  @RequireCreate('accountant', 'bankStatements')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadStatementFile(
+    @Param('companyId') companyId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Не е предоставен файл');
+    }
+    const { key } = await this.uploads.uploadFile(
+      companyId,
+      'bank-statements',
+      file,
+    );
+    return { url: key, key };
+  }
+
   @Post('bank-statements')
   @RequireCreate('accountant', 'bankStatements')
   createStatement(
