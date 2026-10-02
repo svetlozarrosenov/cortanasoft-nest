@@ -18,6 +18,9 @@ const mockPrisma: any = {
   product: {
     findMany: jest.fn(),
   },
+  customer: {
+    findFirst: jest.fn(),
+  },
   $transaction: jest.fn(async (cb: any) => cb(mockPrisma)),
 };
 
@@ -380,6 +383,105 @@ describe('ProformasService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('update', () => {
+    const existing = (overrides = {}) => ({
+      id: 'pf1',
+      companyId: 'c1',
+      status: 'ISSUED',
+      discount: 0,
+      items: [
+        {
+          productId: null,
+          description: 'Service A',
+          quantity: 2,
+          unitPrice: 100,
+          vatRate: 20,
+          discount: 0,
+        },
+      ],
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      mockPrisma.company.findUnique.mockResolvedValue({
+        vatNumber: 'BG123456789',
+      });
+      mockPrisma.proforma.update.mockResolvedValue({});
+    });
+
+    it('replaces the lines and recalculates the totals of an issued proforma', async () => {
+      mockPrisma.proforma.findFirst.mockResolvedValue(existing());
+
+      await service.update('c1', 'pf1', {
+        customerName: 'New Client',
+        customerId: null as any,
+        invoiceDate: '2026-10-05',
+        discount: 50,
+        items: [
+          { description: 'Service B', quantity: 3, unitPrice: 100, vatRate: 20 },
+        ],
+      });
+
+      const { where, data } = mockPrisma.proforma.update.mock.calls[0][0];
+      expect(where).toEqual({ id: 'pf1' });
+      expect(data.customerName).toBe('New Client');
+      expect(data.customerId).toBeNull();
+      expect(data.proformaDate).toEqual(new Date('2026-10-05'));
+      expect(data.subtotal).toBe(300);
+      expect(data.discount).toBe(50);
+      expect(data.vatAmount).toBe(50);
+      expect(data.total).toBe(300);
+      expect(data.items.deleteMany).toEqual({});
+      expect(data.items.create).toHaveLength(1);
+      expect(data.items.create[0].description).toBe('Service B');
+      // Номерът и статусът не се пипат при редакция на съдържанието
+      expect(data).not.toHaveProperty('proformaNumber');
+      expect(data).not.toHaveProperty('status');
+    });
+
+    it('recalculates from the stored lines when only the document discount changes', async () => {
+      mockPrisma.proforma.findFirst.mockResolvedValue(existing());
+
+      await service.update('c1', 'pf1', { discount: 100 });
+
+      const { data } = mockPrisma.proforma.update.mock.calls[0][0];
+      expect(data.subtotal).toBe(200);
+      expect(data.vatAmount).toBe(20);
+      expect(data.total).toBe(120);
+      expect(data).not.toHaveProperty('items');
+    });
+
+    it('changes only the status without touching the totals', async () => {
+      mockPrisma.proforma.findFirst.mockResolvedValue(existing());
+
+      await service.update('c1', 'pf1', { status: 'PAID' });
+
+      const { data } = mockPrisma.proforma.update.mock.calls[0][0];
+      expect(data).toEqual({ status: 'PAID' });
+    });
+
+    it('rejects editing a cancelled proforma', async () => {
+      mockPrisma.proforma.findFirst.mockResolvedValue(
+        existing({ status: 'CANCELLED' }),
+      );
+
+      await expect(
+        service.update('c1', 'pf1', { notes: 'changed' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.proforma.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a customer from another company', async () => {
+      mockPrisma.proforma.findFirst.mockResolvedValue(existing());
+      mockPrisma.customer.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.update('c1', 'pf1', { customerId: 'foreign' }),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockPrisma.proforma.update).not.toHaveBeenCalled();
     });
   });
 

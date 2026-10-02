@@ -4,7 +4,12 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateProformaDto, UpdateProformaDto, QueryProformasDto } from './dto';
+import {
+  CreateProformaDto,
+  CreateProformaItemDto,
+  UpdateProformaDto,
+  QueryProformasDto,
+} from './dto';
 import { Prisma } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
 
@@ -56,28 +61,15 @@ export class ProformasService {
     return next.toString().padStart(10, '0');
   }
 
-  async create(companyId: string, userId: string, dto: CreateProformaDto) {
-    const company = await this.prisma.company.findUnique({
-      where: { id: companyId },
-      select: { vatNumber: true, currencyId: true },
-    });
-    if (!company) {
-      throw new NotFoundException('Компанията не е намерена');
-    }
-
-    // Verify the customer belongs to this company (cross-tenant IDOR guard).
-    if (dto.customerId) {
-      const customer = await this.prisma.customer.findFirst({
-        where: { id: dto.customerId, companyId },
-        select: { id: true },
-      });
-      if (!customer) throw new NotFoundException('Клиентът не е намерен');
-    }
-
-    const defaultVatRate = company.vatNumber ? 20 : 0;
-
+  // Редовете и сумите на документа — обща сметка за създаване и редакция.
+  private async calculateItems(
+    companyId: string,
+    items: CreateProformaItemDto[],
+    documentDiscount: number,
+    defaultVatRate: number,
+  ) {
     // Validate products if productId is provided
-    const productIds = dto.items
+    const productIds = items
       .filter((item) => item.productId)
       .map((item) => item.productId!);
 
@@ -95,13 +87,11 @@ export class ProformasService {
       }
     }
 
-    const currencyId = dto.currencyId || company.currencyId;
-
     // Calculate totals
     let subtotal = 0;
     let vatAmount = 0;
 
-    const itemsData = dto.items.map((item) => {
+    const itemsData = items.map((item) => {
       const product = item.productId
         ? products.find((p) => p.id === item.productId)
         : null;
@@ -130,11 +120,52 @@ export class ProformasService {
     // Document-level discount reduces the taxable base; VAT is recomputed on the
     // reduced base so the tax is charged on the actual amount due.
     const round2 = (n: number) => Math.round(n * 100) / 100;
-    const invoiceDiscount = dto.discount ?? 0;
-    const discountedBase = subtotal - invoiceDiscount;
+    const discountedBase = subtotal - documentDiscount;
     const vatFactor = subtotal > 0 ? discountedBase / subtotal : 1;
     const adjustedVat = round2(vatAmount * vatFactor);
     const total = round2(discountedBase + adjustedVat);
+
+    return {
+      itemsData,
+      subtotal,
+      vatAmount: adjustedVat,
+      discount: documentDiscount,
+      total,
+    };
+  }
+
+  async create(companyId: string, userId: string, dto: CreateProformaDto) {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { vatNumber: true, currencyId: true },
+    });
+    if (!company) {
+      throw new NotFoundException('Компанията не е намерена');
+    }
+
+    // Verify the customer belongs to this company (cross-tenant IDOR guard).
+    if (dto.customerId) {
+      const customer = await this.prisma.customer.findFirst({
+        where: { id: dto.customerId, companyId },
+        select: { id: true },
+      });
+      if (!customer) throw new NotFoundException('Клиентът не е намерен');
+    }
+
+    const currencyId = dto.currencyId || company.currencyId;
+
+    const {
+      itemsData,
+      subtotal,
+      vatAmount: adjustedVat,
+      discount: invoiceDiscount,
+      total,
+    } = await this.calculateItems(
+      companyId,
+      dto.items,
+      dto.discount ?? 0,
+      company.vatNumber ? 20 : 0,
+    );
 
     return this.prisma.$transaction(async (tx) => {
       const proformaNumber = await this.generateProformaNumber(companyId, tx);
@@ -243,18 +274,100 @@ export class ProformasService {
     return proforma;
   }
 
-  // Proformas are not tax documents — their status can be changed freely.
+  // Proformas are not tax documents — their status can be changed freely, and
+  // so can everything else (клиент, дати, редове, суми) във всеки статус освен
+  // „Анулирана". Номерът не се сменя.
   async update(companyId: string, id: string, dto: UpdateProformaDto) {
-    await this.findOne(companyId, id);
+    const proforma = await this.findOne(companyId, id);
+
+    const { status, ...content } = dto;
+    const editsContent = Object.values(content).some((v) => v !== undefined);
+    if (editsContent && proforma.status === 'CANCELLED') {
+      throw new BadRequestException(
+        ErrorMessages.invoices.cannotEditCancelledProforma,
+      );
+    }
+
+    // Verify the customer belongs to this company (cross-tenant IDOR guard).
+    if (dto.customerId) {
+      const customer = await this.prisma.customer.findFirst({
+        where: { id: dto.customerId, companyId },
+        select: { id: true },
+      });
+      if (!customer) throw new NotFoundException('Клиентът не е намерен');
+    }
+
+    // Нови редове или нова отстъпка на документа → сумите се смятат наново
+    let totals: Awaited<
+      ReturnType<ProformasService['calculateItems']>
+    > | null = null;
+    if (dto.items || dto.discount != null) {
+      const company = await this.prisma.company.findUnique({
+        where: { id: companyId },
+        select: { vatNumber: true },
+      });
+      const items: CreateProformaItemDto[] =
+        dto.items ??
+        proforma.items.map((item) => ({
+          productId: item.productId ?? undefined,
+          description: item.description,
+          quantity: Number(item.quantity),
+          unitPrice: Number(item.unitPrice),
+          vatRate: Number(item.vatRate),
+          discount: Number(item.discount),
+        }));
+      totals = await this.calculateItems(
+        companyId,
+        items,
+        dto.discount ?? Number(proforma.discount),
+        company?.vatNumber ? 20 : 0,
+      );
+    }
 
     return this.prisma.proforma.update({
       where: { id },
       data: {
-        ...(dto.status && { status: dto.status }),
+        ...(status && { status }),
+        ...(dto.invoiceDate && { proformaDate: new Date(dto.invoiceDate) }),
         ...(dto.dueDate !== undefined && {
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         }),
+        ...(dto.customerId !== undefined && {
+          customerId: dto.customerId || null,
+        }),
+        ...(dto.customerName?.trim()
+          ? { customerName: dto.customerName }
+          : {}),
+        ...(dto.customerEik !== undefined && {
+          customerEik: dto.customerEik || null,
+        }),
+        ...(dto.customerVatNumber !== undefined && {
+          customerVatNumber: dto.customerVatNumber || null,
+        }),
+        ...(dto.customerAddress !== undefined && {
+          customerAddress: dto.customerAddress || null,
+        }),
+        ...(dto.customerCity !== undefined && {
+          customerCity: dto.customerCity || null,
+        }),
+        ...(dto.customerPostalCode !== undefined && {
+          customerPostalCode: dto.customerPostalCode || null,
+        }),
+        ...(dto.paymentMethod !== undefined && {
+          paymentMethod: dto.paymentMethod || null,
+        }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
+        ...(dto.currencyId && { currencyId: dto.currencyId }),
+        ...(totals && {
+          subtotal: totals.subtotal,
+          vatAmount: totals.vatAmount,
+          discount: totals.discount,
+          total: totals.total,
+        }),
+        ...(dto.items &&
+          totals && {
+            items: { deleteMany: {}, create: totals.itemsData },
+          }),
       },
       include: this.proformaInclude,
     });

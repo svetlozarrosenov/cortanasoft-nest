@@ -1,15 +1,11 @@
-import { IsString, IsOptional, IsDateString, IsIn } from 'class-validator';
+import { IsOptional, IsIn } from 'class-validator';
+import { PartialType } from '@nestjs/mapped-types';
 import { InvoiceStatus } from '@prisma/client';
+import { CreateProformaDto } from './create-proforma.dto';
 
-export class UpdateProformaDto {
-  @IsOptional()
-  @IsDateString()
-  dueDate?: string;
-
-  @IsOptional()
-  @IsString()
-  notes?: string;
-
+// Проформата не е данъчен документ — редактира се всичко от създаването.
+// null в незадължително поле (напр. customerId, dueDate) го изчиства.
+export class UpdateProformaDto extends PartialType(CreateProformaDto) {
   @IsOptional()
   @IsIn(['DRAFT', 'ISSUED', 'PAID', 'PARTIALLY_PAID', 'CANCELLED'])
   status?: InvoiceStatus;
