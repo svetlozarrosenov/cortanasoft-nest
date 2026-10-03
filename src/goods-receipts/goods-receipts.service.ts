@@ -411,6 +411,8 @@ export class GoodsReceiptsService {
         OR: [
           { receiptNumber: { contains: search, mode: 'insensitive' } },
           { invoiceNumber: { contains: search, mode: 'insensitive' } },
+          // По доставчик — по-лесно се намира от кода на доставката
+          { supplier: { name: { contains: search, mode: 'insensitive' } } },
         ],
       }),
     };
