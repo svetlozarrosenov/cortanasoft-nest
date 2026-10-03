@@ -149,6 +149,12 @@ export class CreateCustomerDto {
   @IsOptional()
   tags?: string[];
 
+  // Категории клиенти (id-та от crm.customerCategories на същата фирма)
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  categoryIds?: string[];
+
   // Ключови думи за търсене (търговски имена/псевдоними) — виж schema.prisma
   @IsString()
   @IsOptional()

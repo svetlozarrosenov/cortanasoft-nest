@@ -115,6 +115,13 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         ],
       },
       {
+        // Категории клиенти (сектор, група). Без „преглед" фирмата не вижда
+        // нито страницата, нито филтъра/колоната в Клиенти.
+        key: 'customerCategories',
+        labelKey: 'modules.crm.customerCategories',
+        actions: ['view', 'create', 'edit', 'delete'],
+      },
+      {
         key: 'contacts',
         labelKey: 'modules.crm.contacts',
         actions: ['view', 'create', 'edit', 'delete'],

@@ -13,10 +13,30 @@ import {
 } from './dto';
 import { Prisma, CustomerType } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
+import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
+
+// Категориите на клиента идват през връзката и се подават на клиента като
+// плосък списък `categories: [{ id, name }]`
+const CATEGORY_LINKS_INCLUDE = {
+  select: { category: { select: { id: true, name: true } } },
+  orderBy: { category: { name: 'asc' as const } },
+};
+
+type WithCategoryLinks = {
+  categoryLinks?: { category: { id: string; name: string } }[];
+};
+
+function withCategories<T extends WithCategoryLinks>(customer: T) {
+  const { categoryLinks, ...rest } = customer;
+  return { ...rest, categories: (categoryLinks ?? []).map((l) => l.category) };
+}
 
 @Injectable()
 export class CustomersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private customerCategories: CustomerCategoriesService,
+  ) {}
 
   // Инварианти на партньорския модел (Odoo-style resellers):
   //  - партньор (isPartner) не може сам да е „доведен от" друг партньор
@@ -116,6 +136,12 @@ export class CustomersService {
       referredById,
     });
 
+    const categoryIds = [...new Set(dto.categoryIds ?? [])];
+    await this.customerCategories.assertAllBelongToCompany(
+      companyId,
+      categoryIds,
+    );
+
     const customer = await this.prisma.customer.create({
       data: {
         type: dto.type,
@@ -151,6 +177,9 @@ export class CustomersService {
         isPartner,
         referredById,
         companyId,
+        categoryLinks: {
+          create: categoryIds.map((categoryId) => ({ categoryId, companyId })),
+        },
       },
       include: {
         country: true,
@@ -164,11 +193,12 @@ export class CustomersService {
             lastName: true,
           },
         },
+        categoryLinks: CATEGORY_LINKS_INCLUDE,
         _count: { select: { orders: true, referrals: true } },
       },
     });
 
-    return customer;
+    return withCategories(customer);
   }
 
   async findAll(
@@ -184,6 +214,7 @@ export class CustomersService {
       source,
       isPartner,
       referredById,
+      categoryId,
       createdFrom,
       createdTo,
       page = 1,
@@ -200,6 +231,7 @@ export class CustomersService {
       ...(source && { source }),
       ...(isPartner !== undefined && { isPartner }),
       ...(referredById && { referredById }),
+      ...(categoryId && { categoryLinks: { some: { categoryId } } }),
       // Партньорски акаунт вижда само своя партньорски картон + доведените
       // от него клиенти. AND, за да не се смеси с OR-а на search.
       ...(partnerScopeId && {
@@ -244,6 +276,7 @@ export class CustomersService {
               lastName: true,
             },
           },
+          categoryLinks: CATEGORY_LINKS_INCLUDE,
           _count: { select: { orders: true, referrals: true } },
         },
         orderBy: { [sortBy]: sortOrder },
@@ -254,7 +287,7 @@ export class CustomersService {
     ]);
 
     return {
-      data,
+      data: data.map(withCategories),
       meta: {
         total,
         page,
@@ -297,6 +330,7 @@ export class CustomersService {
             total: true,
           },
         },
+        categoryLinks: CATEGORY_LINKS_INCLUDE,
         _count: { select: { orders: true, referrals: true } },
       },
     });
@@ -305,7 +339,7 @@ export class CustomersService {
       throw new NotFoundException(ErrorMessages.customers.notFound);
     }
 
-    return customer;
+    return withCategories(customer);
   }
 
   async update(
@@ -416,7 +450,16 @@ export class CustomersService {
       }
     }
 
-    return this.prisma.customer.update({
+    const categoryIds =
+      dto.categoryIds !== undefined ? [...new Set(dto.categoryIds)] : undefined;
+    if (categoryIds) {
+      await this.customerCategories.assertAllBelongToCompany(
+        companyId,
+        categoryIds,
+      );
+    }
+
+    const updated = await this.prisma.customer.update({
       where: { id },
       data: {
         ...(dto.type && { type: dto.type }),
@@ -457,6 +500,16 @@ export class CustomersService {
         ...(dto.referredById !== undefined && {
           referredById: dto.referredById || null,
         }),
+        // Подадени категории = новият пълен списък
+        ...(categoryIds && {
+          categoryLinks: {
+            deleteMany: {},
+            create: categoryIds.map((categoryId) => ({
+              categoryId,
+              companyId,
+            })),
+          },
+        }),
       },
       include: {
         country: true,
@@ -469,9 +522,11 @@ export class CustomersService {
             lastName: true,
           },
         },
+        categoryLinks: CATEGORY_LINKS_INCLUDE,
         _count: { select: { orders: true, referrals: true } },
       },
     });
+    return withCategories(updated);
   }
 
   async remove(companyId: string, id: string, partnerScopeId?: string | null) {

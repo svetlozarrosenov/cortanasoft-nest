@@ -45,6 +45,11 @@ export class QueryCustomersDto {
   @IsOptional()
   referredById?: string;
 
+  // Клиенти в дадена категория (crm.customerCategories)
+  @IsString()
+  @IsOptional()
+  categoryId?: string;
+
   @IsDateString()
   @IsOptional()
   createdFrom?: string;

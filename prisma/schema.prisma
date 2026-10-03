@@ -297,6 +297,9 @@ model Company {
   // Казуси — клиентски тикети на самата фирма (виж CustomerCase)
   customerCases CustomerCase[]
 
+  customerCategories    CustomerCategory[]
+  customerCategoryLinks CustomerCategoryLink[]
+
   @@map("companies")
 }
 
@@ -1555,6 +1558,7 @@ model Customer {
   creditApplications     CreditApplication[]
   contracts              Contract[]
   customerCases          CustomerCase[]
+  categoryLinks          CustomerCategoryLink[]
 
   @@unique([companyId, eik])
   @@index([companyId, type])
@@ -5565,4 +5569,41 @@ model CaseAttachment {
   @@index([caseId])
   @@index([messageId])
   @@map("case_attachments")
+}
+
+// Категории клиенти — по фирма, няколко на клиент (сектор „Птицевъдство",
+// група „Градус"…). Като категориите на продуктите, но без йерархия.
+// Собствено право crm.customerCategories: без него фирмата не вижда нищо.
+model CustomerCategory {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  customers CustomerCategoryLink[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, name])
+  @@map("customer_categories")
+}
+
+// Връзка клиент ↔ категория. companyId и тук, както навсякъде.
+model CustomerCategoryLink {
+  customerId String
+  customer   Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   CustomerCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([customerId, categoryId])
+  @@index([companyId, categoryId])
+  @@map("customer_category_links")
 }

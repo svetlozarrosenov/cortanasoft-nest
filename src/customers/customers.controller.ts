@@ -120,10 +120,15 @@ export class CustomersController {
       { header: 'City', key: 'city', width: 15 },
       { header: 'Stage', key: 'stage', width: 12 },
       { header: 'Active', key: 'isActive', width: 10 },
+      { header: 'Categories', key: 'categoriesText', width: 30 },
     ];
+    const rows = data.map((c) => ({
+      ...c,
+      categoriesText: c.categories.map((cat) => cat.name).join(', '),
+    }));
     const buffer = await this.exportService.generateFile(
       columns,
-      data,
+      rows,
       format,
       'Customers',
     );

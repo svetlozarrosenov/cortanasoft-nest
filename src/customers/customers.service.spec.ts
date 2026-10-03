@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { CustomersService } from './customers.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CustomerCategoriesService } from '../customer-categories/customer-categories.service';
 
 const mockPrisma = {
   customer: {
@@ -27,6 +28,10 @@ describe('CustomersService', () => {
       providers: [
         CustomersService,
         { provide: PrismaService, useValue: mockPrisma },
+        {
+          provide: CustomerCategoriesService,
+          useValue: { assertAllBelongToCompany: jest.fn() },
+        },
       ],
     }).compile();
     service = module.get<CustomersService>(CustomersService);
@@ -39,7 +44,7 @@ describe('CustomersService', () => {
       mockPrisma.customer.create.mockResolvedValue(expected);
 
       const result = await service.create('c1', dto as any);
-      expect(result).toEqual(expected);
+      expect(result).toEqual({ ...expected, categories: [] });
       expect(mockPrisma.customer.create).toHaveBeenCalled();
     });
 
@@ -53,7 +58,7 @@ describe('CustomersService', () => {
       mockPrisma.customer.create.mockResolvedValue(expected);
 
       const result = await service.create('c1', dto as any);
-      expect(result).toEqual(expected);
+      expect(result).toEqual({ ...expected, categories: [] });
     });
 
     it('should throw BadRequestException when duplicate EIK in same company', async () => {
@@ -102,7 +107,7 @@ describe('CustomersService', () => {
       mockPrisma.customer.findFirst.mockResolvedValue(customer);
 
       const result = await service.findOne('c1', '1');
-      expect(result).toEqual(customer);
+      expect(result).toEqual({ ...customer, categories: [] });
     });
   });
 
