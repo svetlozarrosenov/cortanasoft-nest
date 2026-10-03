@@ -22,6 +22,11 @@ import { PaymentsService } from '../payments/payments.service';
 import { WebhookDispatcherService } from '../webhooks/webhook-dispatcher.service';
 import { PushNotificationsService } from '../push-notifications/push-notifications.service';
 import { DirectDeliveriesService } from '../goods-receipts/direct-deliveries.service';
+import {
+  compareByInvoicingUrgency,
+  computeInvoicingState,
+  invoiceDueDate,
+} from './invoicing-state';
 
 /** Round a number to 2 decimal places to avoid floating-point drift */
 function round2(n: number): number {
@@ -672,18 +677,44 @@ export class OrdersService {
         ? where
         : { AND: [where, { status: { not: 'CANCELLED' } }] };
 
-    const [data, total, sums] = await Promise.all([
-      this.prisma.order.findMany({
+    // „Доставена на" подрежда по спешност на фактурата (виж invoicing-state).
+    // Редът зависи от сравнение на две колони (фактурирано < общо), което
+    // orderBy не може — подреждаме леките редове в паметта и зареждаме
+    // пълните данни само за страницата.
+    let pageIds: string[] | null = null;
+    if (sortBy === 'deliveredAt') {
+      const light = await this.prisma.order.findMany({
         where,
-        include: ORDER_INCLUDE,
-        // Вторичен ключ — orderDate е ден без час, иначе редът в деня е случаен
-        orderBy:
-          sortBy === 'createdAt'
-            ? { createdAt: sortOrder }
-            : [{ [sortBy]: sortOrder }, { createdAt: 'desc' }],
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
+        select: {
+          id: true,
+          status: true,
+          deliveredAt: true,
+          total: true,
+          invoicedAmount: true,
+          createdAt: true,
+        },
+      });
+      light.sort((a, b) => compareByInvoicingUrgency(a, b, sortOrder));
+      pageIds = light.slice((page - 1) * limit, page * limit).map((o) => o.id);
+    }
+
+    const [found, total, sums] = await Promise.all([
+      pageIds
+        ? this.prisma.order.findMany({
+            where: { id: { in: pageIds } },
+            include: ORDER_INCLUDE,
+          })
+        : this.prisma.order.findMany({
+            where,
+            include: ORDER_INCLUDE,
+            // Вторичен ключ — orderDate е ден без час, иначе редът в деня е случаен
+            orderBy:
+              sortBy === 'createdAt'
+                ? { createdAt: sortOrder }
+                : [{ [sortBy]: sortOrder }, { createdAt: 'desc' }],
+            skip: (page - 1) * limit,
+            take: limit,
+          }),
       this.prisma.order.count({ where }),
       this.prisma.order.aggregate({
         where: totalsWhere,
@@ -694,10 +725,16 @@ export class OrdersService {
     const sumPaid = Number(sums._sum.paidAmount || 0);
     const sumDue = Math.max(0, sumTotal - sumPaid);
 
+    const data = pageIds
+      ? pageIds.flatMap((id) => found.filter((o) => o.id === id))
+      : found;
+
     return {
       data: data.map((o) => ({
         ...o,
         deliveryStatus: computeDeliveryStatus(o),
+        invoicingState: computeInvoicingState(o),
+        invoiceDueAt: o.deliveredAt ? invoiceDueDate(o.deliveredAt) : null,
       })),
       totals: {
         total: Math.round(sumTotal * 100) / 100,

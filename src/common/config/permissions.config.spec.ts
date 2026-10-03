@@ -188,6 +188,10 @@ describe('PERMISSIONS_CONFIG structure', () => {
     expect(colKeys).toContain('total');
     expect(colKeys).toContain('status');
     expect(colKeys).toContain('paymentStatus');
+    // „Доставена на" се дава само изрично от редактора на ролите
+    expect(ordersList.columns.find((c) => c.key === 'deliveredAt')?.optIn).toBe(
+      true,
+    );
   });
 });
 
@@ -302,7 +306,7 @@ describe('createFullPermissions', () => {
     expect(cols.length).toBe(6);
   });
 
-  it('ERP ordersList should have all 7 columns by default', () => {
+  it('ERP ordersList should have all 8 columns with full permissions', () => {
     const cols = getVisibleColumns(full, 'erp', 'orders', 'ordersList');
     expect(cols).toEqual([
       'orderNumber',
@@ -310,6 +314,7 @@ describe('createFullPermissions', () => {
       'date',
       'total',
       'status',
+      'deliveredAt',
       'paymentStatus',
       'credit',
     ]);

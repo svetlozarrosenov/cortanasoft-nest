@@ -239,6 +239,14 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
               { key: 'date', labelKey: 'common.date' },
               { key: 'total', labelKey: 'modules.erp.total' },
               { key: 'status', labelKey: 'common.status' },
+              // Колоната „Доставена на" + оцветяването на реда според фактурата
+              // (5 дни от доставката). Изрично право: фирмите, които не
+              // фактурират тук, иначе биха видели целия списък в червено.
+              {
+                key: 'deliveredAt',
+                labelKey: 'modules.erp.orderDeliveredAtColumn',
+                optIn: true,
+              },
               { key: 'paymentStatus', labelKey: 'modules.erp.paymentStatus' },
               // Видима само за роли с erp.credits.view — отделна гард в UI-а.
               { key: 'credit', labelKey: 'modules.erp.credits.panelTitle' },
@@ -1032,7 +1040,9 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
       {
         key: 'tickets',
         labelKey: 'modules.support.tickets',
-        actions: ['view', 'create', 'edit'],
+        // delete = само за СВ Софт (изтриване на тикет/прикачен файл); клиентската
+        // страна няма такива endpoint-и. Без него правото не можеше да се даде изобщо.
+        actions: ['view', 'create', 'edit', 'delete'],
         tables: [
           {
             key: 'ticketsList',
