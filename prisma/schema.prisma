@@ -638,6 +638,7 @@ model User {
   createdSupportTickets  SupportTicket[]        @relation("SupportTicketCreator")
   assignedSupportTickets SupportTicket[]        @relation("SupportTicketAssignee")
   supportTicketMessages  SupportTicketMessage[] @relation("SupportTicketMessageAuthor")
+  supportTicketReads     SupportTicketRead[]
 
   // Казуси (клиентски тикети на фирмата)
   createdCases  CustomerCase[] @relation("CaseCreator")
@@ -5373,6 +5374,7 @@ model SupportTicket {
 
   messages    SupportTicketMessage[]
   attachments SupportTicketAttachment[]
+  reads       SupportTicketRead[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -5382,6 +5384,22 @@ model SupportTicket {
   @@index([status])
   @@index([createdAt])
   @@map("support_tickets")
+}
+
+// Кога потребителят за последно е отворил тикета. „Непрочетено" = съобщение
+// от отсрещната страна (или самият нов тикет) след този момент. На ниво
+// потребител, за да не се губи новото, когато колега го е отворил.
+model SupportTicketRead {
+  ticketId String
+  ticket   SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  lastReadAt DateTime
+
+  @@id([ticketId, userId])
+  @@index([userId])
+  @@map("support_ticket_reads")
 }
 
 // Съобщение в нишката на тикет (реплика напред-назад: клиент ↔ support)

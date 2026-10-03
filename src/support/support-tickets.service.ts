@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushNotificationsService } from '../push-notifications/push-notifications.service';
+import { UploadsService } from '../uploads/uploads.service';
+import { decodeUploadedFileName } from '../common/utils/upload-filename';
 import {
   CreateSupportTicketDto,
   CreateSupportTicketMessageDto,
@@ -27,6 +29,13 @@ const messageInclude = {
   attachments: true,
 } satisfies Prisma.SupportTicketMessageInclude;
 
+// Кой гледа тикетите: фирмата-клиент или екипът на СВ Софт. Непрочетено е
+// само това, което идва от отсрещната страна.
+export interface Viewer {
+  userId: string;
+  side: 'customer' | 'support';
+}
+
 @Injectable()
 export class SupportTicketsService {
   private readonly logger = new Logger(SupportTicketsService.name);
@@ -34,6 +43,7 @@ export class SupportTicketsService {
   constructor(
     private prisma: PrismaService,
     private pushService: PushNotificationsService,
+    private uploads: UploadsService,
   ) {}
 
   // ==================== КЛИЕНТСКА СТРАНА (company-scoped) ====================
@@ -86,15 +96,29 @@ export class SupportTicketsService {
   /**
    * Списък с тикети на конкретна фирма (нейните потребители виждат само своите).
    */
-  async findAllForCompany(companyId: string, query: QuerySupportTicketsDto) {
+  async findAllForCompany(
+    companyId: string,
+    userId: string,
+    query: QuerySupportTicketsDto,
+  ) {
     const where = this.buildWhere({ ...query, companyId });
-    return this.paginate(where, query);
+    return this.paginate(where, query, { userId, side: 'customer' });
+  }
+
+  /** Брой тикети на фирмата с непрочетени отговори от СВ Софт (бадж в менюто) */
+  async countUnreadForCompany(companyId: string, userId: string) {
+    const unread = await this.unreadByTicket(
+      { userId, side: 'customer' },
+      { companyId },
+    );
+    return unread.size;
   }
 
   /**
    * Един тикет на фирмата (с цялата нишка). Хвърля 404 ако не е на тази фирма.
+   * Отварянето го маркира като прочетен за този потребител.
    */
-  async findOneForCompany(companyId: string, id: string) {
+  async findOneForCompany(companyId: string, userId: string, id: string) {
     const ticket = await this.prisma.supportTicket.findFirst({
       where: { id, companyId },
       include: this.detailInclude(),
@@ -102,6 +126,7 @@ export class SupportTicketsService {
     if (!ticket) {
       throw new NotFoundException('Тикетът не е намерен');
     }
+    await this.markRead(id, userId);
     return ticket;
   }
 
@@ -142,6 +167,8 @@ export class SupportTicketsService {
       data: reopen ? { status: SupportTicketStatus.IN_PROGRESS } : {},
     });
 
+    await this.markRead(id, userId);
+
     this.notifySupport(id, {
       title: `Нов отговор по тикет #${ticket.number}`,
       body: ticket.subject,
@@ -157,12 +184,12 @@ export class SupportTicketsService {
   /**
    * Всички тикети от всички компании (само за OWNER). Поддържа филтър по фирма.
    */
-  async findAllAdmin(query: QuerySupportTicketsDto) {
+  async findAllAdmin(userId: string, query: QuerySupportTicketsDto) {
     const where = this.buildWhere(query);
-    return this.paginate(where, query, /* withCompany */ true);
+    return this.paginate(where, query, { userId, side: 'support' }, true);
   }
 
-  async findOneAdmin(id: string) {
+  async findOneAdmin(userId: string, id: string) {
     const ticket = await this.prisma.supportTicket.findUnique({
       where: { id },
       include: this.detailInclude(/* withCompany */ true),
@@ -170,6 +197,7 @@ export class SupportTicketsService {
     if (!ticket) {
       throw new NotFoundException('Тикетът не е намерен');
     }
+    await this.markRead(id, userId);
     return ticket;
   }
 
@@ -181,7 +209,9 @@ export class SupportTicketsService {
     id: string,
     dto: CreateSupportTicketMessageDto,
   ) {
-    const ticket = await this.prisma.supportTicket.findUnique({ where: { id } });
+    const ticket = await this.prisma.supportTicket.findUnique({
+      where: { id },
+    });
     if (!ticket) {
       throw new NotFoundException('Тикетът не е намерен');
     }
@@ -208,7 +238,15 @@ export class SupportTicketsService {
       },
     });
 
-    // Клиентът няма имейл/push известие — вижда отговора в самото приложение.
+    await this.markRead(id, userId);
+
+    // Push до фирмата-клиент; отваря направо тикета
+    this.notifyCustomer(ticket.companyId, ticket.id, {
+      title: `Отговор по тикет #${ticket.number}`,
+      body: ticket.subject,
+    }).catch((err) =>
+      this.logger.error('Failed to push customer of support reply', err),
+    );
 
     return message;
   }
@@ -217,7 +255,9 @@ export class SupportTicketsService {
    * Промяна на статус/приоритет/категория/assignee (само admin).
    */
   async updateAdmin(id: string, dto: UpdateSupportTicketDto) {
-    const ticket = await this.prisma.supportTicket.findUnique({ where: { id } });
+    const ticket = await this.prisma.supportTicket.findUnique({
+      where: { id },
+    });
     if (!ticket) {
       throw new NotFoundException('Тикетът не е намерен');
     }
@@ -258,7 +298,9 @@ export class SupportTicketsService {
   }
 
   async removeAdmin(id: string) {
-    const ticket = await this.prisma.supportTicket.findUnique({ where: { id } });
+    const ticket = await this.prisma.supportTicket.findUnique({
+      where: { id },
+    });
     if (!ticket) {
       throw new NotFoundException('Тикетът не е намерен');
     }
@@ -268,7 +310,8 @@ export class SupportTicketsService {
   /**
    * Статистика по статус — за бадж/брояч в админ менюто.
    */
-  async getStats() {
+  async getStats(userId: string) {
+    const unread = await this.unreadByTicket({ userId, side: 'support' }, {});
     const grouped = await this.prisma.supportTicket.groupBy({
       by: ['status'],
       _count: { _all: true },
@@ -281,7 +324,79 @@ export class SupportTicketsService {
       (byStatus[SupportTicketStatus.NEW] ?? 0) +
       (byStatus[SupportTicketStatus.IN_PROGRESS] ?? 0) +
       (byStatus[SupportTicketStatus.WAITING_CUSTOMER] ?? 0);
-    return { byStatus, open };
+    return { byStatus, open, unread: unread.size };
+  }
+
+  // ==================== ПРИКАЧЕНИ ФАЙЛОВЕ ====================
+  // Същият модел като при казусите: R2 (private bucket), преглед през бекенда.
+  // companyId = клиентска страна (само тикети на фирмата); без него — СВ Софт.
+
+  async addAttachment(
+    id: string,
+    file: Express.Multer.File,
+    messageId?: string,
+    companyId?: string,
+  ) {
+    const ticket = await this.prisma.supportTicket.findFirst({
+      where: { id, ...(companyId && { companyId }) },
+      select: { id: true, companyId: true },
+    });
+    if (!ticket) throw new NotFoundException('Тикетът не е намерен');
+    if (messageId) {
+      const msg = await this.prisma.supportTicketMessage.findFirst({
+        where: { id: messageId, ticketId: ticket.id },
+        select: { id: true },
+      });
+      if (!msg) throw new NotFoundException('Съобщението не е намерено');
+    }
+
+    const { key } = await this.uploads.uploadFile(
+      ticket.companyId,
+      'support',
+      file,
+    );
+    return this.prisma.supportTicketAttachment.create({
+      data: {
+        ticketId: ticket.id,
+        messageId: messageId ?? null,
+        fileName: decodeUploadedFileName(file.originalname),
+        fileUrl: key,
+        fileKey: key,
+        fileSize: file.size,
+        mimeType: file.mimetype,
+      },
+    });
+  }
+
+  async getAttachmentStream(
+    id: string,
+    attachmentId: string,
+    companyId?: string,
+  ) {
+    const att = await this.prisma.supportTicketAttachment.findFirst({
+      where: {
+        id: attachmentId,
+        ticketId: id,
+        ...(companyId && { ticket: { companyId } }),
+      },
+    });
+    if (!att) throw new NotFoundException('Файлът не е намерен');
+    const { stream, contentType } = await this.uploads.getFile(att.fileKey);
+    return { stream, contentType, fileName: att.fileName };
+  }
+
+  async removeAttachment(id: string, attachmentId: string) {
+    const att = await this.prisma.supportTicketAttachment.findFirst({
+      where: { id: attachmentId, ticketId: id },
+    });
+    if (!att) throw new NotFoundException('Файлът не е намерен');
+    await this.prisma.supportTicketAttachment.delete({ where: { id: att.id } });
+    await this.uploads
+      .deleteFile(att.fileKey)
+      .catch((err) =>
+        this.logger.warn(`R2 delete failed ${att.fileKey}: ${err}`),
+      );
+    return { success: true };
   }
 
   // ==================== ПОМОЩНИ ====================
@@ -303,9 +418,13 @@ export class SupportTicketsService {
     return where;
   }
 
+  // Тикетите с непрочетено за потребителя излизат най-отгоре, после останалите
+  // в поискания ред. Партицията става в паметта по id-та (тикетите са малко),
+  // пълните данни се зареждат само за страницата.
   private async paginate(
     where: Prisma.SupportTicketWhereInput,
     query: QuerySupportTicketsDto,
+    viewer: Viewer,
     withCompany = false,
   ) {
     const page = query.page ?? 1;
@@ -313,28 +432,103 @@ export class SupportTicketsService {
     const sortBy = query.sortBy ?? 'createdAt';
     const sortOrder = query.sortOrder ?? 'desc';
 
-    const [data, total] = await this.prisma.$transaction([
+    const [ordered, unread] = await Promise.all([
       this.prisma.supportTicket.findMany({
         where,
-        include: {
-          createdBy: { select: authorSelect },
-          assignedTo: { select: authorSelect },
-          ...(withCompany
-            ? { company: { select: { id: true, name: true } } }
-            : {}),
-          _count: { select: { messages: true } },
-        },
+        select: { id: true },
         orderBy: { [sortBy]: sortOrder },
-        skip: (page - 1) * limit,
-        take: limit,
       }),
-      this.prisma.supportTicket.count({ where }),
+      this.unreadByTicket(viewer, { where }),
     ]);
+    const ids = [
+      ...ordered.filter((t) => unread.has(t.id)),
+      ...ordered.filter((t) => !unread.has(t.id)),
+    ]
+      .slice((page - 1) * limit, page * limit)
+      .map((t) => t.id);
 
+    const rows = await this.prisma.supportTicket.findMany({
+      where: { id: { in: ids } },
+      include: {
+        createdBy: { select: authorSelect },
+        assignedTo: { select: authorSelect },
+        ...(withCompany
+          ? { company: { select: { id: true, name: true } } }
+          : {}),
+        _count: { select: { messages: true } },
+      },
+    });
+    const data = ids.flatMap((id) =>
+      rows
+        .filter((r) => r.id === id)
+        .map((r) => ({ ...r, unreadCount: unread.get(id) ?? 0 })),
+    );
+
+    const total = ordered.length;
     return {
       data,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
+  }
+
+  // ----- Непрочетени (на ниво потребител) -----
+
+  /** Отварянето/отговарянето маркира тикета като прочетен за потребителя */
+  private async markRead(ticketId: string, userId: string) {
+    const lastReadAt = new Date();
+    await this.prisma.supportTicketRead.upsert({
+      where: { ticketId_userId: { ticketId, userId } },
+      create: { ticketId, userId, lastReadAt },
+      update: { lastReadAt },
+    });
+  }
+
+  /**
+   * id на тикет → брой непрочетени за потребителя. Непрочетено е съобщение от
+   * отсрещната страна след последното отваряне; за екипа на СВ Софт и самият
+   * тикет, ако никога не е отварян (описанието е първото съобщение).
+   */
+  private async unreadByTicket(
+    viewer: Viewer,
+    scope: { companyId?: string; where?: Prisma.SupportTicketWhereInput },
+  ): Promise<Map<string, number>> {
+    const where = scope.where ?? { companyId: scope.companyId };
+    const tickets = await this.prisma.supportTicket.findMany({
+      where,
+      select: { id: true, createdAt: true },
+    });
+    if (tickets.length === 0) return new Map();
+    const ids = tickets.map((t) => t.id);
+
+    const [reads, messages] = await Promise.all([
+      this.prisma.supportTicketRead.findMany({
+        where: { userId: viewer.userId, ticketId: { in: ids } },
+      }),
+      this.prisma.supportTicketMessage.findMany({
+        where: {
+          ticketId: { in: ids },
+          isFromSupport: viewer.side === 'customer',
+        },
+        select: { ticketId: true, createdAt: true },
+      }),
+    ]);
+    const lastRead = new Map(
+      reads.map((r) => [r.ticketId, r.lastReadAt.getTime()]),
+    );
+
+    const unread = new Map<string, number>();
+    const bump = (ticketId: string) =>
+      unread.set(ticketId, (unread.get(ticketId) ?? 0) + 1);
+    if (viewer.side === 'support') {
+      for (const t of tickets) {
+        if (t.createdAt.getTime() > (lastRead.get(t.id) ?? 0)) bump(t.id);
+      }
+    }
+    for (const m of messages) {
+      if (m.createdAt.getTime() > (lastRead.get(m.ticketId) ?? 0))
+        bump(m.ticketId);
+    }
+    return unread;
   }
 
   private detailInclude(withCompany = false) {
@@ -380,9 +574,42 @@ export class SupportTicketsService {
       .map((m) => m.userId);
     if (userIds.length === 0) return;
 
+    // Админ изгледът живее в страницата Поддръжка на OWNER фирмата
     await this.pushService.sendToUsers(userIds, {
       ...payload,
-      url: `/dashboard/admin/support`,
+      url: `/dashboard/${owner.id}/support?ticket=${ticketId}`,
+      tag: `support-ticket-${ticketId}`,
+      data: { ticketId },
+    });
+  }
+
+  /**
+   * Push до фирмата-клиент при отговор от СВ Софт — до потребителите ѝ с право
+   * support.tickets → view, ако фирмата има включени push известия.
+   */
+  private async notifyCustomer(
+    companyId: string,
+    ticketId: string,
+    payload: { title: string; body: string },
+  ) {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { pushNotificationsEnabled: true },
+    });
+    if (!company?.pushNotificationsEnabled) return;
+
+    const members = await this.prisma.userCompany.findMany({
+      where: { companyId },
+      select: { userId: true, role: { select: { permissions: true } } },
+    });
+    const userIds = members
+      .filter((m) => this.roleCanHandleSupport(m.role?.permissions))
+      .map((m) => m.userId);
+    if (userIds.length === 0) return;
+
+    await this.pushService.sendToUsers(userIds, {
+      ...payload,
+      url: `/dashboard/${companyId}/support?ticket=${ticketId}`,
       tag: `support-ticket-${ticketId}`,
       data: { ticketId },
     });

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Post,
@@ -7,10 +8,16 @@ import {
   Body,
   Param,
   Query,
+  Res,
+  StreamableFile,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
   HttpCode,
   ForbiddenException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 import { SupportTicketsService } from './support-tickets.service';
 import {
   CreateSupportTicketMessageDto,
@@ -56,21 +63,21 @@ export class AdminSupportTicketsController {
     @Query() query: QuerySupportTicketsDto,
   ) {
     this.assertPermission(user, 'view');
-    const result = await this.supportTickets.findAllAdmin(query);
+    const result = await this.supportTickets.findAllAdmin(user.id, query);
     return { success: true, ...result };
   }
 
   @Get('stats')
   async getStats(@CurrentUser() user: any) {
     this.assertPermission(user, 'view');
-    const stats = await this.supportTickets.getStats();
+    const stats = await this.supportTickets.getStats(user.id);
     return { success: true, stats };
   }
 
   @Get(':id')
   async findOne(@CurrentUser() user: any, @Param('id') id: string) {
     this.assertPermission(user, 'view');
-    const ticket = await this.supportTickets.findOneAdmin(id);
+    const ticket = await this.supportTickets.findOneAdmin(user.id, id);
     return { success: true, ticket };
   }
 
@@ -106,5 +113,53 @@ export class AdminSupportTicketsController {
     this.assertPermission(user, 'delete');
     await this.supportTickets.removeAdmin(id);
     return { success: true };
+  }
+
+  // ---------- прикачени файлове ----------
+
+  @Post(':id/attachments')
+  @UseInterceptors(FileInterceptor('file'))
+  async addAttachment(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Query('messageId') messageId?: string,
+  ) {
+    this.assertPermission(user, 'create');
+    if (!file) throw new BadRequestException('Липсва файл');
+    const attachment = await this.supportTickets.addAttachment(
+      id,
+      file,
+      messageId || undefined,
+    );
+    return { success: true, attachment };
+  }
+
+  @Get(':id/attachments/:attachmentId/file')
+  async getAttachment(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    this.assertPermission(user, 'view');
+    const { stream, contentType, fileName } =
+      await this.supportTickets.getAttachmentStream(id, attachmentId);
+    res.set({
+      'Content-Type': contentType,
+      'Content-Disposition': `inline; filename="${encodeURIComponent(fileName)}"`,
+    });
+    return new StreamableFile(stream);
+  }
+
+  @Delete(':id/attachments/:attachmentId')
+  @HttpCode(200)
+  async removeAttachment(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    this.assertPermission(user, 'delete');
+    return this.supportTickets.removeAttachment(id, attachmentId);
   }
 }
