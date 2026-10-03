@@ -29,11 +29,17 @@ import {
 
 // Valid delivery-status transitions (payment is tracked separately via the
 // payment ledger, mirroring orders).
+// „В транзит" е само информация за движението: от него се връща към
+// „Очаквана" (забавен/отказан превоз) или се получава; складът не се пипа.
 const VALID_TRANSITIONS: Record<GoodsReceiptStatus, GoodsReceiptStatus[]> = {
-  EXPECTED: ['DELIVERED', 'CANCELLED'],
+  EXPECTED: ['IN_TRANSIT', 'DELIVERED', 'CANCELLED'],
+  IN_TRANSIT: ['EXPECTED', 'DELIVERED', 'CANCELLED'],
   DELIVERED: ['CANCELLED'],
   CANCELLED: [],
 };
+
+// Статуси, в които доставката още не е получена и може да се редактира
+const BEFORE_DELIVERY: GoodsReceiptStatus[] = ['EXPECTED', 'IN_TRANSIT'];
 
 @Injectable()
 export class GoodsReceiptsService {
@@ -523,7 +529,7 @@ export class GoodsReceiptsService {
   async update(companyId: string, id: string, dto: UpdateGoodsReceiptDto) {
     const receipt = await this.findOne(companyId, id);
 
-    if (receipt.status !== 'EXPECTED') {
+    if (!BEFORE_DELIVERY.includes(receipt.status)) {
       throw new BadRequestException(
         ErrorMessages.goodsReceipts.canOnlyUpdateExpected,
       );
@@ -706,7 +712,7 @@ export class GoodsReceiptsService {
     }
 
     const isDelivering =
-      receipt.status === 'EXPECTED' && targetStatus === 'DELIVERED';
+      BEFORE_DELIVERY.includes(receipt.status) && targetStatus === 'DELIVERED';
 
     const isCancellingDelivered =
       receipt.status === 'DELIVERED' && targetStatus === 'CANCELLED';

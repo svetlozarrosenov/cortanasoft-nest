@@ -1069,6 +1069,7 @@ enum ProductType {
 // Статус на приемане на стока
 enum GoodsReceiptStatus {
   EXPECTED // Очаквана
+  IN_TRANSIT // В транзит — пратката пътува (само информация, складът не се пипа)
   DELIVERED // Доставена
   CANCELLED // Анулирана
 }

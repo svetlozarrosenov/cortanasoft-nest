@@ -154,7 +154,7 @@ export const ErrorMessages = {
     productsNotFound: 'Един или повече продукти не са намерени',
     serviceNotAllowed:
       'Услуга не може да бъде ред в доставка — въведете я в „Разходи по доставката“',
-    canOnlyUpdateExpected: 'Може да редактирате само очаквани доставки',
+    canOnlyUpdateExpected: 'Може да редактирате само неполучени доставки (очаквани или в транзит)',
     canOnlyConfirmDraft: 'Може да потвърдите само чернови разписки',
     cannotConfirmWithoutItems: 'Не може да потвърдите разписка без артикули',
     alreadyCancelled: 'Доставката вече е анулирана',

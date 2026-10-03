@@ -176,7 +176,7 @@ export class DirectDeliveriesService {
     }
 
     // Синхронизация: приспадаме покритото от изпратени/получени заявки
-    const locked = active.filter((r) => r.sentToSupplierAt || r.status === 'DELIVERED');
+    const locked = active.filter((r) => r.sentToSupplierAt || r.status !== 'EXPECTED');
     const editable = active.filter((r) => !r.sentToSupplierAt && r.status === 'EXPECTED');
     const covered = new Map<string, number>();
     for (const r of locked)
