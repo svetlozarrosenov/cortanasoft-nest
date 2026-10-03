@@ -5,6 +5,7 @@ import {
   Post,
   Body,
   Param,
+  Patch,
   Query,
   Res,
   StreamableFile,
@@ -19,6 +20,8 @@ import {
   CreateSupportTicketDto,
   CreateSupportTicketMessageDto,
   QuerySupportTicketsDto,
+  UpdateSupportTicketDescriptionDto,
+  UpdateSupportTicketMessageDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -107,6 +110,44 @@ export class CompanySupportTicketsController {
       user.id,
       id,
       dto,
+    );
+    return { success: true, message };
+  }
+
+  // ---------- редакция на свое ----------
+
+  @Patch(':id/description')
+  @RequireCreate('support', 'tickets')
+  async editDescription(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+    @Body() dto: UpdateSupportTicketDescriptionDto,
+  ) {
+    const ticket = await this.supportTickets.editDescription(
+      companyId,
+      user.id,
+      id,
+      dto.description,
+    );
+    return { success: true, ticket };
+  }
+
+  @Patch(':id/messages/:messageId')
+  @RequireCreate('support', 'tickets')
+  async editMessage(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @CurrentUser() user: any,
+    @Body() dto: UpdateSupportTicketMessageDto,
+  ) {
+    const message = await this.supportTickets.editMessage(
+      user.id,
+      id,
+      messageId,
+      dto.body,
+      { companyId, isFromSupport: false },
     );
     return { success: true, message };
   }

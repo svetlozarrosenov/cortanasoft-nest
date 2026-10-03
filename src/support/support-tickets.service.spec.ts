@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { SupportTicketsService } from './support-tickets.service';
 
 // Push до екипа на СВ Софт при нов тикет / отговор на клиент: OWNER фирма с
@@ -199,5 +200,70 @@ describe('SupportTicketsService.notifyCustomer', () => {
       body: 'y',
     });
     expect(push.sendToUsers).not.toHaveBeenCalled();
+  });
+});
+
+describe('SupportTicketsService.editMessage', () => {
+  const build = (message: any) => {
+    const prisma = {
+      supportTicketMessage: {
+        findFirst: jest.fn().mockResolvedValue(message),
+        update: jest.fn().mockResolvedValue({ id: 'm1', body: 'ново' }),
+      },
+    };
+    return {
+      service: new SupportTicketsService(prisma as any, {} as any, {} as any),
+      prisma,
+    };
+  };
+
+  it('авторът редактира своето съобщение и се записва editedAt', async () => {
+    const { service, prisma } = build({
+      id: 'm1',
+      authorId: 'u1',
+      isFromSupport: false,
+    });
+    await service.editMessage('u1', 't1', 'm1', '  ново  ', {
+      companyId: 'c1',
+      isFromSupport: false,
+    });
+    const call = prisma.supportTicketMessage.update.mock.calls[0][0];
+    expect(call.data.body).toBe('ново');
+    expect(call.data.editedAt).toBeInstanceOf(Date);
+    // клиентската страна търси само в тикети на своята фирма
+    expect(
+      prisma.supportTicketMessage.findFirst.mock.calls[0][0].where,
+    ).toMatchObject({
+      ticket: { companyId: 'c1' },
+    });
+  });
+
+  it('чуждо съобщение не може да се редактира', async () => {
+    const { service, prisma } = build({
+      id: 'm1',
+      authorId: 'someone-else',
+      isFromSupport: false,
+    });
+    await expect(
+      service.editMessage('u1', 't1', 'm1', 'x', {
+        companyId: 'c1',
+        isFromSupport: false,
+      }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(prisma.supportTicketMessage.update).not.toHaveBeenCalled();
+  });
+
+  it('клиентската страна не може да редактира съобщение на СВ Софт, дори от същия автор', async () => {
+    const { service } = build({
+      id: 'm1',
+      authorId: 'u1',
+      isFromSupport: true,
+    });
+    await expect(
+      service.editMessage('u1', 't1', 'm1', 'x', {
+        companyId: 'c1',
+        isFromSupport: false,
+      }),
+    ).rejects.toThrow(ForbiddenException);
   });
 });

@@ -22,6 +22,7 @@ import { SupportTicketsService } from './support-tickets.service';
 import {
   CreateSupportTicketMessageDto,
   UpdateSupportTicketDto,
+  UpdateSupportTicketMessageDto,
   QuerySupportTicketsDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -113,6 +114,24 @@ export class AdminSupportTicketsController {
     this.assertPermission(user, 'delete');
     await this.supportTickets.removeAdmin(id);
     return { success: true };
+  }
+
+  @Patch(':id/messages/:messageId')
+  async editMessage(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @Body() dto: UpdateSupportTicketMessageDto,
+  ) {
+    this.assertPermission(user, 'create');
+    const message = await this.supportTickets.editMessage(
+      user.id,
+      id,
+      messageId,
+      dto.body,
+      { isFromSupport: true },
+    );
+    return { success: true, message };
   }
 
   // ---------- прикачени файлове ----------

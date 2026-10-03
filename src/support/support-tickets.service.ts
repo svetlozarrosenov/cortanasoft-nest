@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -325,6 +326,61 @@ export class SupportTicketsService {
       (byStatus[SupportTicketStatus.IN_PROGRESS] ?? 0) +
       (byStatus[SupportTicketStatus.WAITING_CUSTOMER] ?? 0);
     return { byStatus, open, unread: unread.size };
+  }
+
+  // ==================== РЕДАКЦИЯ НА СВОЕ СЪОБЩЕНИЕ ====================
+  // Само авторът, само текстът. Не вдига непрочетено и не мести статуса —
+  // това е само за нови съобщения.
+
+  async editMessage(
+    userId: string,
+    ticketId: string,
+    messageId: string,
+    body: string,
+    scope: { companyId?: string; isFromSupport: boolean },
+  ) {
+    const message = await this.prisma.supportTicketMessage.findFirst({
+      where: {
+        id: messageId,
+        ticketId,
+        ...(scope.companyId && { ticket: { companyId: scope.companyId } }),
+      },
+      select: { id: true, authorId: true, isFromSupport: true },
+    });
+    if (!message) throw new NotFoundException('Съобщението не е намерено');
+    if (
+      message.authorId !== userId ||
+      message.isFromSupport !== scope.isFromSupport
+    ) {
+      throw new ForbiddenException('Може да редактирате само свои съобщения');
+    }
+    return this.prisma.supportTicketMessage.update({
+      where: { id: messageId },
+      data: { body: body.trim(), editedAt: new Date() },
+      include: messageInclude,
+    });
+  }
+
+  /** Описанието на тикета — само от този, който го е създал (клиентската страна) */
+  async editDescription(
+    companyId: string,
+    userId: string,
+    id: string,
+    description: string,
+  ) {
+    const ticket = await this.prisma.supportTicket.findFirst({
+      where: { id, companyId },
+      select: { id: true, createdById: true },
+    });
+    if (!ticket) throw new NotFoundException('Тикетът не е намерен');
+    if (ticket.createdById !== userId) {
+      throw new ForbiddenException('Може да редактирате само свои тикети');
+    }
+    await this.prisma.supportTicket.update({
+      where: { id },
+      data: { description: description.trim(), editedAt: new Date() },
+    });
+    return this.findOneForCompany(companyId, userId, id);
   }
 
   // ==================== ПРИКАЧЕНИ ФАЙЛОВЕ ====================

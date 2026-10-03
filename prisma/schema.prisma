@@ -5376,6 +5376,8 @@ model SupportTicket {
 
   resolvedAt DateTime?
   closedAt   DateTime?
+  // Кога създателят за последно е редактирал описанието
+  editedAt   DateTime?
 
   messages    SupportTicketMessage[]
   attachments SupportTicketAttachment[]
@@ -5420,6 +5422,8 @@ model SupportTicketMessage {
   isFromSupport Boolean @default(false)
 
   body String @db.Text
+  // Кога авторът за последно е редактирал текста (null = не е редактиран)
+  editedAt DateTime?
 
   attachments SupportTicketAttachment[]
 
