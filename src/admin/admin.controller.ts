@@ -12,9 +12,18 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  Req,
+  Res,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
+import type { Request as ExpressRequest, Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AdminService } from './admin.service';
+import { ImpersonationService, IMPERSONATION_TTL_MS } from '../auth/impersonation.service';
+import { AuthService } from '../auth/auth.service';
+import { ImpersonateDto } from './dto/impersonate.dto';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { UploadsService } from '../uploads/uploads.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { SuperAdminGuard } from '../common/guards/super-admin.guard';
@@ -54,7 +63,42 @@ export class AdminController {
     private companyPlansService: CompanyPlansService,
     private mailService: MailService,
     private uploadsService: UploadsService,
+    private impersonation: ImpersonationService,
+    private authService: AuthService,
   ) {}
+
+  // ==================== „Влез като" ====================
+
+  /** Издава 1-часов токен на потребителя и го слага в access_token (връщането е през /auth/impersonation/stop) */
+  @Post('users/:userId/impersonate')
+  @HttpCode(HttpStatus.OK)
+  async impersonate(
+    @Param('userId') userId: string,
+    @Body() dto: ImpersonateDto,
+    @CurrentUser() admin: { id: string },
+    @Req() request: ExpressRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const { accessToken, user, companyName } = await this.impersonation.start(
+      admin.id,
+      userId,
+      dto.companyId,
+      request.ip,
+    );
+    response.cookie('access_token', accessToken, {
+      ...this.authService.getCookieOptions(),
+      maxAge: IMPERSONATION_TTL_MS,
+    });
+    return { success: true, user, companyId: dto.companyId, companyName };
+  }
+
+  @Get('companies/:id/impersonations')
+  async impersonations(@Param('id') id: string) {
+    return {
+      success: true,
+      logs: await this.impersonation.listForCompany(id),
+    };
+  }
 
   // ==================== Companies ====================
 

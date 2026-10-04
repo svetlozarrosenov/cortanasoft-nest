@@ -19,12 +19,17 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { NoImpersonationGuard } from '../common/guards/no-impersonation.guard';
+import { ImpersonationService } from './impersonation.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { PERMISSIONS_CONFIG } from '../common/config/permissions.config';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private impersonation: ImpersonationService,
+  ) {}
 
   @Post('login')
   @UseGuards(ThrottlerGuard)
@@ -113,8 +118,25 @@ export class AuthController {
     };
   }
 
-  @Post('switch-company/:companyId')
+  // Край на „Влез като": нов токен за админа (по impersonatedBy), одитът се затваря
+  @Post('impersonation/stop')
   @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async stopImpersonation(
+    @CurrentUser() user: { id: string; impersonatedBy: string | null },
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const { adminToken, companyId } = await this.impersonation.stop(user);
+    response.cookie(
+      'access_token',
+      adminToken,
+      this.authService.getCookieOptions(),
+    );
+    return { success: true, companyId };
+  }
+
+  @Post('switch-company/:companyId')
+  @UseGuards(JwtAuthGuard, NoImpersonationGuard)
   @HttpCode(HttpStatus.OK)
   async switchCompany(
     @CurrentUser() user: any,
@@ -138,7 +160,7 @@ export class AuthController {
   }
 
   @Post('change-password')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, NoImpersonationGuard)
   @HttpCode(HttpStatus.OK)
   async changePassword(
     @CurrentUser() user: any,

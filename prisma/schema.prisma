@@ -5529,6 +5529,23 @@ model SupportTicketRead {
   @@map("support_ticket_reads")
 }
 
+// Одит на „Влез като" (impersonation) от администрацията: кой админ, в чий
+// акаунт, в коя фирма, кога е започнало и кога е спряло. Без релации към User
+// нарочно — записът остава и при изтрит потребител.
+model ImpersonationLog {
+  id        String    @id @default(cuid())
+  adminId   String
+  userId    String
+  companyId String
+  ip        String?
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+
+  @@index([companyId, startedAt])
+  @@index([adminId, startedAt])
+  @@map("impersonation_logs")
+}
+
 // Съобщение в нишката на тикет (реплика напред-назад: клиент ↔ support)
 model SupportTicketMessage {
   id       String        @id @default(cuid())

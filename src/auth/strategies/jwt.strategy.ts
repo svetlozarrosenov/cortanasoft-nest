@@ -11,6 +11,8 @@ export interface JwtPayload {
   email: string;
   companyId: string;
   roleId: string;
+  // „Влез като" от администрацията: id на админа, издал токена (1 час)
+  impersonatedBy?: string;
 }
 
 @Injectable()
@@ -92,6 +94,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       // Партньорски акаунт (виж UserCompany.partnerCustomerId): customers
       // endpoint-ите ограничават видимостта до този партньор и клиентите му
       partnerCustomerId: currentUserCompany.partnerCustomerId ?? null,
+      // Сесия „Влез като" — frontend-ът показва лента, чувствителните действия са спрени
+      impersonatedBy: payload.impersonatedBy ?? null,
       companies: user.userCompanies.map((uc) => ({
         id: uc.company.id,
         name: uc.company.name,
