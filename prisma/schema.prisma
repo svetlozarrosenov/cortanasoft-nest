@@ -300,6 +300,7 @@ model Company {
 
   customerCategories    CustomerCategory[]
   customerCategoryLinks CustomerCategoryLink[]
+  customerContacts      CustomerContact[]
 
   @@map("companies")
 }
@@ -1544,6 +1545,7 @@ model Customer {
   // Order.partnerCustomerId)
   partnerOrders Order[] @relation("OrderPartner")
 
+  contacts               CustomerContact[]
   orders                 Order[]
   billToOrders           Order[]                 @relation("OrderBillTo")
   offers                 Offer[]
@@ -5660,4 +5662,29 @@ model CustomerCategoryLink {
   @@id([customerId, categoryId])
   @@index([companyId, categoryId])
   @@map("customer_category_links")
+}
+
+// Лица за контакт на клиента (тикет #15 Инатех): няколко души на фирма —
+// управител на база, счетоводител, снабдител… — всеки със своя длъжност,
+// имейл и телефон. Не заменят полетата email/phone на самия клиент.
+model CustomerContact {
+  id       String  @id @default(cuid())
+  name     String
+  position String? // Длъжност
+  email    String?
+  phone    String?
+  note     String?
+  isPrimary Boolean @default(false)
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, customerId])
+  @@map("customer_contacts")
 }

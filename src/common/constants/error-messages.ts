@@ -48,6 +48,9 @@ export const ErrorMessages = {
   },
 
   // ==================== Клиенти ====================
+  customerContacts: {
+    notFound: 'Лицето за контакт не е намерено',
+  },
   customers: {
     notFound: 'Клиентът не е намерен',
     companyNameRequired: 'Името на фирмата е задължително за фирмени клиенти',
