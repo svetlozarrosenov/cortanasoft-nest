@@ -23,6 +23,7 @@ import {
 import { DocumentAIService, ParsedInvoiceData } from './document-ai.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 // NB: глобалният ValidationPipe е с whitelist:true — полета БЕЗ декоратор
 // се режат от тялото. Всяко DTO поле тук трябва да носи валидатор.
@@ -205,19 +206,22 @@ export class DocumentAIController {
   async scanInvoice(
     @Param('companyId') companyId: string,
     @Body() dto: ScanInvoiceDto,
+    @CurrentUser() user: { id: string },
   ): Promise<ScanResult> {
     let parsedData: ParsedInvoiceData;
 
     if (dto.base64Image) {
-      parsedData = await this.documentAIService.parseInvoiceFromBase64(
+      parsedData = await this.documentAIService.scanExpenseDocument(
         companyId,
         dto.base64Image,
         dto.mimeType || 'image/jpeg',
+        { userId: user.id },
       );
     } else if (dto.imageUrl) {
       parsedData = await this.documentAIService.parseInvoice(
         companyId,
         dto.imageUrl,
+        { userId: user.id },
       );
     } else {
       throw new Error('Either imageUrl or base64Image is required');
@@ -244,6 +248,7 @@ export class DocumentAIController {
   async scanInvoiceFile(
     @Param('companyId') companyId: string,
     @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: { id: string },
   ): Promise<ScanResult> {
     if (!file) {
       throw new BadRequestException('Липсва файл');
@@ -261,10 +266,11 @@ export class DocumentAIController {
       );
     }
 
-    const parsedData = await this.documentAIService.parseInvoiceFromBase64(
+    const parsedData = await this.documentAIService.scanExpenseDocument(
       companyId,
       file.buffer.toString('base64'),
       file.mimetype,
+      { userId: user.id, fileName: file.originalname, fileSize: file.size },
     );
     return this.buildScanResult(companyId, parsedData);
   }
@@ -285,6 +291,7 @@ export class DocumentAIController {
   async scanExpenseAttachment(
     @Param('companyId') companyId: string,
     @Body() dto: ScanExpenseAttachmentDto,
+    @CurrentUser() user: { id: string },
   ): Promise<ScanResult> {
     const key = dto.attachmentKey;
     // Ключовете са `invoices/<companyId>/<uuid>.<ext>` — чужд ключ не минава.
@@ -325,10 +332,15 @@ export class DocumentAIController {
       throw new BadRequestException('Файлът е твърде голям за разчитане');
     }
 
-    const parsedData = await this.documentAIService.parseInvoiceFromBase64(
+    const parsedData = await this.documentAIService.scanExpenseDocument(
       companyId,
       content.toString('base64'),
       contentType,
+      {
+        userId: user.id,
+        fileName: key.split('/').pop(),
+        fileSize: content.length,
+      },
     );
     return this.buildScanResult(companyId, parsedData);
   }
@@ -349,10 +361,11 @@ export class DocumentAIController {
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 15 * 1024 * 1024 } }),
   )
-  scanDeliveryFile(
+  async scanDeliveryFile(
     @Param('companyId') companyId: string,
     @UploadedFile() file: Express.Multer.File,
-  ): { jobId: string } {
+    @CurrentUser() user: { id: string },
+  ): Promise<{ jobId: string }> {
     if (!file) {
       throw new BadRequestException('Липсва файл');
     }
@@ -371,10 +384,11 @@ export class DocumentAIController {
 
     // Агентното сканиране отнема 30-90 сек → фонова задача + polling
     // (виж коментара при задачите в service-а)
-    const jobId = this.documentAIService.startDeliveryScanJob(
+    const jobId = await this.documentAIService.startDeliveryScanJob(
       companyId,
       file.buffer.toString('base64'),
       file.mimetype,
+      { userId: user.id, fileName: file.originalname, fileSize: file.size },
     );
     return { jobId };
   }
@@ -405,6 +419,7 @@ export class DocumentAIController {
   async reconcileBankStatement(
     @Param('companyId') companyId: string,
     @Body() dto: ReconcileBankStatementDto,
+    @CurrentUser() user: { id: string },
   ): Promise<{ jobId: string }> {
     if (!dto.bankStatementId) {
       throw new BadRequestException('Липсва банково извлечение');
@@ -436,9 +451,14 @@ export class DocumentAIController {
 
     // Стартираме задачата и връщаме веднага — резултатът се взима с GET
     // по jobId (дългата AI работа не бива да държи HTTP заявка отворена)
-    const jobId = this.documentAIService.startReconcileJob(
+    const jobId = await this.documentAIService.startReconcileJob(
       companyId,
       content.toString('base64'),
+      {
+        userId: user.id,
+        fileName: statement.fileUrl.split('/').pop(),
+        fileSize: content.length,
+      },
     );
     return { jobId };
   }

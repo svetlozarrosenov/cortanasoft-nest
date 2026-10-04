@@ -27,7 +27,59 @@ const mockPrisma = {
   payment: { findMany: jest.fn() },
   company: { findUnique: jest.fn() },
   userCompany: { findMany: jest.fn() },
+  aiJob: fakeAiJobTable(),
 };
+
+/** Мини in-memory ai_jobs — задачите вече живеят в базата, не в Map в паметта */
+function fakeAiJobTable() {
+  const rows = new Map<string, Record<string, unknown>>();
+  let seq = 0;
+  return {
+    rows,
+    create: jest.fn(async ({ data }: { data: Record<string, unknown> }) => {
+      const id = `job-${++seq}`;
+      rows.set(id, {
+        id,
+        status: 'RUNNING',
+        result: null,
+        message: null,
+        ...data,
+      });
+      return { id };
+    }),
+    update: jest.fn(
+      async ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: Record<string, unknown>;
+      }) => {
+        const row = rows.get(where.id);
+        if (!row) throw new Error('not found');
+        Object.assign(row, data);
+        return row;
+      },
+    ),
+    findFirst: jest.fn(
+      async ({
+        where,
+      }: {
+        where: { id: string; companyId: string; kind: string };
+      }) => {
+        const row = rows.get(where.id);
+        if (
+          !row ||
+          row.companyId !== where.companyId ||
+          row.kind !== where.kind
+        )
+          return null;
+        return row;
+      },
+    ),
+    updateMany: jest.fn(async () => ({ count: 0 })),
+  };
+}
 
 /** Отговорът идва през submit_invoice tool-а, а не като текст */
 const submitInvoice = (input: Record<string, unknown>) => ({
@@ -249,6 +301,19 @@ describe('DocumentAIService', () => {
         ).rejects.toThrow('Cortana не успя да разчете документа');
       });
 
+      // Тикет #16 Инатех: при max_tokens SDK връща частичен tool input (0 реда),
+      // който минаваше за валиден резултат
+      it('should fail loudly when the response is cut at max_tokens', async () => {
+        mockCreate.mockResolvedValue({
+          ...submitInvoice({ invoiceNumber: 'X', items: [] }),
+          stop_reason: 'max_tokens',
+        });
+
+        await expect(
+          service.parseInvoiceFromBase64('c1', 'base64data', 'image/jpeg'),
+        ).rejects.toThrow('отговорът на AI беше отрязан');
+      });
+
       it('should handle null values from Claude response', async () => {
         mockCreate.mockResolvedValue(
           submitInvoice({
@@ -282,7 +347,7 @@ describe('DocumentAIService', () => {
 
         expect(mockCreate).toHaveBeenCalledWith({
           model: 'claude-haiku-4-5',
-          max_tokens: 4096,
+          max_tokens: 16384,
           tools: [expect.objectContaining({ name: 'submit_invoice' })],
           tool_choice: { type: 'tool', name: 'submit_invoice' },
           messages: [
@@ -1084,9 +1149,14 @@ describe('DocumentAIService', () => {
       expect(mockCreate).not.toHaveBeenCalled();
     });
 
-    it('should delete a finished job after its terminal status is read', async () => {
+    it('persists a finished job with its usage and keeps it readable', async () => {
       mockCreate.mockResolvedValue({
         stop_reason: 'tool_use',
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          cache_read_input_tokens: 50,
+        },
         content: [
           {
             type: 'tool_use',
@@ -1097,20 +1167,33 @@ describe('DocumentAIService', () => {
         ],
       });
 
-      const jobId = service.startReconcileJob('c1', 'base64pdf');
+      const jobId = await service.startReconcileJob('c1', 'base64pdf', {
+        userId: 'u1',
+      });
       // Изчакваме фоновата задача да завърши
       await new Promise((resolve) => setImmediate(resolve));
       await new Promise((resolve) => setImmediate(resolve));
 
-      const first = service.getReconcileJob('c1', jobId);
+      const first = await service.getReconcileJob('c1', jobId);
       expect(first.status).toBe('done');
-      // Второ четене: записът вече е изтрит от паметта
-      expect(() => service.getReconcileJob('c1', jobId)).toThrow(
-        BadRequestException,
-      );
+      // Второ четене: записът остава (справка за употреба), нищо не се трие
+      expect((await service.getReconcileJob('c1', jobId)).status).toBe('done');
+
+      const row = mockPrisma.aiJob.rows.get(jobId)!;
+      expect(row).toMatchObject({
+        companyId: 'c1',
+        userId: 'u1',
+        kind: 'BANK_RECONCILE',
+        status: 'DONE',
+        turns: 1,
+        inputTokens: 100,
+        outputTokens: 20,
+        cacheReadTokens: 50,
+      });
+      expect(row.finishedAt).toBeInstanceOf(Date);
     });
 
-    it('should NOT delete a job that is still running', async () => {
+    it('reports a job as running until it finishes', async () => {
       let resolveCreate!: (value: unknown) => void;
       mockCreate.mockReturnValue(
         new Promise((resolve) => {
@@ -1118,10 +1201,10 @@ describe('DocumentAIService', () => {
         }),
       );
 
-      const jobId = service.startReconcileJob('c1', 'base64pdf');
-      expect(service.getReconcileJob('c1', jobId).status).toBe('running');
-      // Повторно четене докато тече — записът трябва да е още там
-      expect(service.getReconcileJob('c1', jobId).status).toBe('running');
+      const jobId = await service.startReconcileJob('c1', 'base64pdf');
+      expect((await service.getReconcileJob('c1', jobId)).status).toBe(
+        'running',
+      );
 
       resolveCreate({
         stop_reason: 'tool_use',
@@ -1136,12 +1219,21 @@ describe('DocumentAIService', () => {
       });
       await new Promise((resolve) => setImmediate(resolve));
       await new Promise((resolve) => setImmediate(resolve));
-      expect(service.getReconcileJob('c1', jobId).status).toBe('done');
+      expect((await service.getReconcileJob('c1', jobId)).status).toBe('done');
+    });
+
+    it('marks jobs left RUNNING by a previous process as interrupted on boot', async () => {
+      mockPrisma.aiJob.updateMany.mockResolvedValueOnce({ count: 2 });
+      await service.onModuleInit();
+      expect(mockPrisma.aiJob.updateMany).toHaveBeenCalledWith({
+        where: { status: 'RUNNING' },
+        data: expect.objectContaining({ status: 'ERROR' }),
+      });
     });
   });
 
   describe('delivery scan as a background job', () => {
-    it('runs parseDeliveryInvoice in the background and hands the result out once', async () => {
+    it('runs parseDeliveryInvoice in the background and stores the result', async () => {
       mockCreate.mockResolvedValue({
         stop_reason: 'tool_use',
         content: [
@@ -1158,30 +1250,56 @@ describe('DocumentAIService', () => {
         ],
       });
 
-      const jobId = service.startDeliveryScanJob('c1', 'base64pdf', 'application/pdf');
-      expect(service.getDeliveryScanJob('c1', jobId).status).toBe('running');
+      const jobId = await service.startDeliveryScanJob(
+        'c1',
+        'base64pdf',
+        'application/pdf',
+        {
+          fileName: 'inv.pdf',
+          fileSize: 123,
+        },
+      );
+      expect((await service.getDeliveryScanJob('c1', jobId)).status).toBe(
+        'running',
+      );
       await new Promise((resolve) => setImmediate(resolve));
       await new Promise((resolve) => setImmediate(resolve));
 
-      const done = service.getDeliveryScanJob('c1', jobId);
+      const done = await service.getDeliveryScanJob('c1', jobId);
       expect(done.status).toBe('done');
       expect(done.result?.supplier?.name).toBe('Fancom');
-      expect(() => service.getDeliveryScanJob('c1', jobId)).toThrow(BadRequestException);
+      expect(mockPrisma.aiJob.rows.get(jobId)).toMatchObject({
+        kind: 'DELIVERY_SCAN',
+        fileName: 'inv.pdf',
+        fileSize: 123,
+      });
     });
 
     it('is scoped to the company and to the job kind', async () => {
       mockCreate.mockReturnValue(new Promise(() => undefined));
-      const jobId = service.startDeliveryScanJob('c1', 'base64pdf', 'application/pdf');
-      expect(() => service.getDeliveryScanJob('c2', jobId)).toThrow(BadRequestException);
-      expect(() => service.getReconcileJob('c1', jobId)).toThrow(BadRequestException);
+      const jobId = await service.startDeliveryScanJob(
+        'c1',
+        'base64pdf',
+        'application/pdf',
+      );
+      await expect(service.getDeliveryScanJob('c2', jobId)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.getReconcileJob('c1', jobId)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('turns an Anthropic error into a readable message', async () => {
       mockCreate.mockRejectedValue(new Error('boom'));
-      const jobId = service.startDeliveryScanJob('c1', 'base64pdf', 'application/pdf');
+      const jobId = await service.startDeliveryScanJob(
+        'c1',
+        'base64pdf',
+        'application/pdf',
+      );
       await new Promise((resolve) => setImmediate(resolve));
       await new Promise((resolve) => setImmediate(resolve));
-      const job = service.getDeliveryScanJob('c1', jobId);
+      const job = await service.getDeliveryScanJob('c1', jobId);
       expect(job.status).toBe('error');
       expect(job.message).toBe('Сканирането не успя. Опитайте отново.');
     });

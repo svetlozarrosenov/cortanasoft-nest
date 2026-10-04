@@ -1,8 +1,18 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { ExpenseCategory, PaymentMethod } from '@prisma/client';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  OnModuleInit,
+} from '@nestjs/common';
+import {
+  AiJobKind,
+  AiJobStatus,
+  ExpenseCategory,
+  PaymentMethod,
+  Prisma,
+} from '@prisma/client';
 import Anthropic from '@anthropic-ai/sdk';
 import { lookup } from 'dns/promises';
-import { randomUUID } from 'crypto';
 import { isIP } from 'net';
 import { AiSettingsService } from '../ai-settings/ai-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -83,15 +93,20 @@ export interface ReconcileRow {
   match?: ReconcileRowMatch | null;
 }
 
-type AiJobKind = 'reconcile' | 'delivery-scan';
+/** Токени/ходове на една AI операция — сумират се по всички отговори и се пишат в ai_jobs */
+export interface AiUsage {
+  model?: string;
+  turns: number;
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+}
 
-interface AiJob<T> {
-  companyId: string;
-  kind: AiJobKind;
-  status: 'running' | 'done' | 'error';
-  result?: T;
-  message?: string;
-  createdAt: number;
+export interface AiJobMeta {
+  userId?: string | null;
+  fileName?: string | null;
+  fileSize?: number | null;
 }
 
 export interface ReconcileResult {
@@ -201,7 +216,7 @@ export interface ParsedInvoiceData {
 }
 
 @Injectable()
-export class DocumentAIService {
+export class DocumentAIService implements OnModuleInit {
   private readonly logger = new Logger(DocumentAIService.name);
 
   // Всяка компания работи със СВОЯ Anthropic ключ (Настройки > AI) —
@@ -226,6 +241,33 @@ export class DocumentAIService {
       client: new Anthropic({ apiKey: config.apiKey }),
       model: config.model,
     };
+  }
+
+  // Prompt caching в агентния цикъл: фиксираният маркер върху документа покрива
+  // само началото; историята (резултатите от търсенията) расте с всеки ход и
+  // без втори, движещ се маркер се плаща наново. Анулираме предишния (API-то
+  // позволява най-много 4) и маркираме последния tool_result — кешът се
+  // намира по най-дългия съвпадащ префикс, затова старият запис остава
+  // използваем. Измерено: 106k некеширани входни токена → 24 за 30-редов документ.
+  private moveCacheBreakpoint(
+    previous: Anthropic.ToolResultBlockParam | undefined,
+    toolResults: Anthropic.ToolResultBlockParam[],
+  ): Anthropic.ToolResultBlockParam | undefined {
+    if (previous) delete previous.cache_control;
+    const last = toolResults[toolResults.length - 1];
+    if (last) last.cache_control = { type: 'ephemeral' };
+    return last;
+  }
+
+  // Отрязан отговор (stop_reason max_tokens) = непълен tool input. SDK-то го
+  // връща без грешка, затова го хващаме тук, вместо да подадем частичен резултат.
+  private assertNotTruncated(response: Anthropic.Message) {
+    if (response.stop_reason === 'max_tokens') {
+      this.logger.warn(
+        `AI response truncated at max_tokens (output ${response.usage?.output_tokens})`,
+      );
+      throw new BadRequestException(ErrorMessages.ai.outputTruncated);
+    }
   }
 
   // Превежда грешките от Anthropic в ясни съобщения (стигат до оператора в
@@ -271,95 +313,233 @@ export class DocumentAIService {
     throw error;
   }
 
-  // ==================== Фонови AI задачи ====================
+  // ==================== AI задачи (ai_jobs) ====================
   // Дългите AI операции (съгласуване 1-2 мин, агентно сканиране на доставка
   // 30-90 сек) не могат да живеят в отворена HTTP заявка — прокситата
-  // (Next.js rewrite 30 сек, nginx 60 сек) я убиват и клиентът получава голо
-  // „Internal Server Error". POST стартира задача и връща jobId веднага;
-  // frontend-ът пита за резултата. In-memory е достатъчно (един процес).
-  private readonly jobs = new Map<string, AiJob<unknown>>();
+  // (Next.js rewrite 30 сек, nginx 60 сек) я убиват. POST стартира задача и
+  // връща jobId веднага; frontend-ът пита за резултата. Задачите са в базата
+  // (companyId-скопирани): оцеляват рестарт, а токените/времето дават справка
+  // кой колко ползва AI. Не се трият автоматично.
 
-  private startJob<T>(
+  /** Промисите умират с процеса — каквото е останало RUNNING, е прекъснато. */
+  async onModuleInit() {
+    const { count } = await this.prisma.aiJob.updateMany({
+      where: { status: AiJobStatus.RUNNING },
+      data: {
+        status: AiJobStatus.ERROR,
+        message: 'Прекъснато при рестарт на сървъра. Опитайте отново.',
+        finishedAt: new Date(),
+      },
+    });
+    if (count > 0)
+      this.logger.warn(`${count} AI job(s) interrupted by restart`);
+  }
+
+  private newUsage(model?: string): AiUsage {
+    return {
+      model,
+      turns: 0,
+      inputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 0,
+    };
+  }
+
+  private trackUsage(usage: AiUsage | undefined, response: Anthropic.Message) {
+    if (!usage) return;
+    usage.turns += 1;
+    usage.inputTokens += response.usage?.input_tokens ?? 0;
+    usage.outputTokens += response.usage?.output_tokens ?? 0;
+    usage.cacheReadTokens += response.usage?.cache_read_input_tokens ?? 0;
+    usage.cacheWriteTokens += response.usage?.cache_creation_input_tokens ?? 0;
+  }
+
+  private async finishJob(
+    jobId: string,
+    usage: AiUsage,
+    startedAt: number,
+    outcome:
+      | { status: 'DONE'; result: unknown }
+      | { status: 'ERROR'; message: string },
+  ) {
+    await this.prisma.aiJob
+      .update({
+        where: { id: jobId },
+        data: {
+          status: outcome.status,
+          result:
+            outcome.status === 'DONE'
+              ? (outcome.result as Prisma.InputJsonValue)
+              : undefined,
+          message: outcome.status === 'ERROR' ? outcome.message : undefined,
+          model: usage.model,
+          turns: usage.turns,
+          inputTokens: usage.inputTokens,
+          cacheReadTokens: usage.cacheReadTokens,
+          cacheWriteTokens: usage.cacheWriteTokens,
+          outputTokens: usage.outputTokens,
+          durationMs: Date.now() - startedAt,
+          finishedAt: new Date(),
+        },
+      })
+      .catch((error: unknown) =>
+        this.logger.error(`Failed to finish AI job ${jobId}`, error as Error),
+      );
+  }
+
+  private errorMessage(error: unknown, fallback: string): string {
+    return error instanceof BadRequestException
+      ? (error.getResponse() as { message?: string }).message || error.message
+      : fallback;
+  }
+
+  /** Фонова задача: записва реда, пуска работата и връща jobId веднага. */
+  private async startJob<T>(
     companyId: string,
     kind: AiJobKind,
-    work: () => Promise<T>,
+    meta: AiJobMeta,
+    work: (usage: AiUsage) => Promise<T>,
     failMessage: string,
-  ): string {
-    // Чистим задачи по-стари от 30 мин
-    const cutoff = Date.now() - 30 * 60 * 1000;
-    for (const [id, job] of this.jobs) {
-      if (job.createdAt < cutoff) this.jobs.delete(id);
-    }
+  ): Promise<string> {
+    const job = await this.prisma.aiJob.create({
+      data: {
+        companyId,
+        kind,
+        userId: meta.userId ?? null,
+        fileName: meta.fileName ?? null,
+        fileSize: meta.fileSize ?? null,
+      },
+      select: { id: true },
+    });
+    const usage = this.newUsage();
+    const startedAt = Date.now();
 
-    const jobId = randomUUID();
-    const job: AiJob<T> = {
-      companyId,
-      kind,
-      status: 'running',
-      createdAt: Date.now(),
-    };
-    this.jobs.set(jobId, job);
-
-    void work()
-      .then((result) => {
-        job.status = 'done';
-        job.result = result;
-      })
+    void work(usage)
+      .then((result) =>
+        this.finishJob(job.id, usage, startedAt, { status: 'DONE', result }),
+      )
       .catch((error: unknown) => {
-        job.status = 'error';
-        job.message =
-          error instanceof BadRequestException
-            ? (error.getResponse() as { message?: string }).message ||
-              error.message
-            : failMessage;
         this.logger.error(`AI job ${kind} failed`, error as Error);
+        return this.finishJob(job.id, usage, startedAt, {
+          status: 'ERROR',
+          message: this.errorMessage(error, failMessage),
+        });
       });
 
-    return jobId;
+    return job.id;
+  }
+
+  /** Еднократна (синхронна) AI операция — пак се записва в ai_jobs за справката. */
+  private async runTracked<T>(
+    companyId: string,
+    kind: AiJobKind,
+    meta: AiJobMeta,
+    work: (usage: AiUsage) => Promise<T>,
+  ): Promise<T> {
+    const job = await this.prisma.aiJob.create({
+      data: {
+        companyId,
+        kind,
+        userId: meta.userId ?? null,
+        fileName: meta.fileName ?? null,
+        fileSize: meta.fileSize ?? null,
+      },
+      select: { id: true },
+    });
+    const usage = this.newUsage();
+    const startedAt = Date.now();
+    try {
+      const result = await work(usage);
+      await this.finishJob(job.id, usage, startedAt, {
+        status: 'DONE',
+        result,
+      });
+      return result;
+    } catch (error) {
+      await this.finishJob(job.id, usage, startedAt, {
+        status: 'ERROR',
+        message: this.errorMessage(error, 'Грешка при AI анализа'),
+      });
+      throw error;
+    }
   }
 
   /** Резултатът се дава САМО на компанията, стартирала задачата */
-  private readJob<T>(companyId: string, kind: AiJobKind, jobId: string) {
-    const job = this.jobs.get(jobId) as AiJob<T> | undefined;
-    if (!job || job.companyId !== companyId || job.kind !== kind) {
+  private async readJob<T>(companyId: string, kind: AiJobKind, jobId: string) {
+    const job = await this.prisma.aiJob.findFirst({
+      where: { id: jobId, companyId, kind },
+      select: { status: true, result: true, message: true },
+    });
+    if (!job) {
       throw new BadRequestException('Задачата не е намерена');
     }
-    // Краен статус се чете точно веднъж (polling-ът спира на done/error) —
-    // изтриваме записа веднага, за да не виси в паметта до следващия старт.
-    if (job.status !== 'running') {
-      this.jobs.delete(jobId);
-    }
-    return { status: job.status, result: job.result, message: job.message };
+    const status = { RUNNING: 'running', DONE: 'done', ERROR: 'error' }[
+      job.status
+    ] as 'running' | 'done' | 'error';
+    return {
+      status,
+      result: (job.result ?? undefined) as T | undefined,
+      message: job.message ?? undefined,
+    };
   }
 
-  startReconcileJob(companyId: string, base64Pdf: string): string {
+  startReconcileJob(
+    companyId: string,
+    base64Pdf: string,
+    meta: AiJobMeta = {},
+  ): Promise<string> {
     return this.startJob(
       companyId,
-      'reconcile',
-      () => this.reconcileBankStatement(companyId, base64Pdf),
+      AiJobKind.BANK_RECONCILE,
+      meta,
+      (usage) => this.reconcileBankStatement(companyId, base64Pdf, usage),
       'Съгласуването не успя. Опитайте отново.',
     );
   }
 
   getReconcileJob(companyId: string, jobId: string) {
-    return this.readJob<ReconcileResult>(companyId, 'reconcile', jobId);
+    return this.readJob<ReconcileResult>(
+      companyId,
+      AiJobKind.BANK_RECONCILE,
+      jobId,
+    );
   }
 
   startDeliveryScanJob(
     companyId: string,
     base64Data: string,
     mimeType: string,
-  ): string {
+    meta: AiJobMeta = {},
+  ): Promise<string> {
     return this.startJob(
       companyId,
-      'delivery-scan',
-      () => this.parseDeliveryInvoice(companyId, base64Data, mimeType),
+      AiJobKind.DELIVERY_SCAN,
+      meta,
+      (usage) =>
+        this.parseDeliveryInvoice(companyId, base64Data, mimeType, usage),
       'Сканирането не успя. Опитайте отново.',
     );
   }
 
   getDeliveryScanJob(companyId: string, jobId: string) {
-    return this.readJob<DeliveryScanResult>(companyId, 'delivery-scan', jobId);
+    return this.readJob<DeliveryScanResult>(
+      companyId,
+      AiJobKind.DELIVERY_SCAN,
+      jobId,
+    );
+  }
+
+  /** Разчитане на фактура (разход) — синхронно, но се записва в ai_jobs. */
+  scanExpenseDocument(
+    companyId: string,
+    base64Data: string,
+    mimeType: string,
+    meta: AiJobMeta = {},
+  ) {
+    return this.runTracked(companyId, AiJobKind.EXPENSE_SCAN, meta, (usage) =>
+      this.parseInvoiceFromBase64(companyId, base64Data, mimeType, usage),
+    );
   }
 
   /** True if an IP literal is loopback, private, link-local or CGNAT. */
@@ -410,8 +590,23 @@ export class DocumentAIService {
   async parseInvoice(
     companyId: string,
     imageUrl: string,
+    meta: AiJobMeta = {},
+  ): Promise<ParsedInvoiceData> {
+    return this.runTracked(
+      companyId,
+      AiJobKind.EXPENSE_SCAN,
+      { ...meta, fileName: imageUrl },
+      (usage) => this.parseInvoiceFromUrl(companyId, imageUrl, usage),
+    );
+  }
+
+  private async parseInvoiceFromUrl(
+    companyId: string,
+    imageUrl: string,
+    usage: AiUsage,
   ): Promise<ParsedInvoiceData> {
     const { client, model } = await this.getClient(companyId);
+    usage.model = model;
 
     try {
       // Guard against SSRF: imageUrl comes from the request body, so verify it
@@ -428,7 +623,7 @@ export class DocumentAIService {
       const mimeType =
         imageResponse.headers.get('content-type') || 'image/jpeg';
 
-      return await this.callClaude(client, model, base64Image, mimeType);
+      return await this.callClaude(client, model, base64Image, mimeType, usage);
     } catch (error) {
       this.logger.error('Failed to parse invoice:', error);
       throw error;
@@ -442,12 +637,14 @@ export class DocumentAIService {
     companyId: string,
     base64Data: string,
     mimeType: string,
+    usage?: AiUsage,
   ): Promise<ParsedInvoiceData> {
     const { client, model } = await this.getClient(companyId);
+    if (usage) usage.model = model;
 
     try {
       const base64Image = base64Data.replace(/^data:image\/\w+;base64,/, '');
-      return await this.callClaude(client, model, base64Image, mimeType);
+      return await this.callClaude(client, model, base64Image, mimeType, usage);
     } catch (error) {
       this.logger.error('Failed to parse invoice from base64:', error);
       throw error;
@@ -465,8 +662,10 @@ export class DocumentAIService {
     companyId: string,
     base64Data: string,
     mimeType: string,
+    usage?: AiUsage,
   ): Promise<DeliveryScanResult> {
     const { client, model } = await this.getClient(companyId);
+    if (usage) usage.model = model;
     const base64Image = base64Data.replace(/^data:[\w/]+;base64,/, '');
 
     const documentBlock: Anthropic.ContentBlockParam =
@@ -617,17 +816,27 @@ export class DocumentAIService {
 3. For EVERY goods line use search_products to find an existing product. Product names may be in Bulgarian — try translated or simplified queries. Only set matchedProductId when you are reasonably sure it is the same product (set matchConfidence 0-1). If nothing matches, propose newProduct with a sensible Bulgarian name, the SKU/code from the invoice if present, a unit from the allowed list and the purchase price.
 4. vatRate: the VAT percentage the invoice applies (20, 9 or 0); null if not visible.
 5. Finish by calling submit_result exactly once with everything. Dates in YYYY-MM-DD. Prices as plain numbers in the invoice currency, without VAT.`,
+            // Кешира целия префикс (tools + документ + инструкции) — всеки ход
+            // от цикъла иначе го праща наново на пълна цена (30 реда = 10 хода
+            // × ~10k входни токена)
+            cache_control: { type: 'ephemeral' },
           },
         ],
       },
     ];
 
-    // Agent loop: изпълняваме tool заявките (company-скопирани) до submit_result
-    const MAX_TURNS = 12;
+    // Agent loop: изпълняваме tool заявките (company-скопирани) до submit_result.
+    // Документ с 30-40 реда дава submit_result от 6-7k изходни токена — при
+    // 4096 отговорът се режеше и SDK-то връщаше частичен input (0 реда),
+    // който минаваше за резултат („ИИ забрави", тикет #16 Инатех).
+    const MAX_TURNS = 30;
+    let cachedResult: Anthropic.ToolResultBlockParam | undefined;
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const response = await client.messages
-        .create({ model, max_tokens: 4096, tools, messages })
+        .create({ model, max_tokens: 16384, tools, messages })
         .catch((error) => this.mapAnthropicError(error));
+      this.trackUsage(usage, response);
+      this.assertNotTruncated(response);
 
       const toolUses = response.content.filter(
         (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
@@ -656,6 +865,7 @@ export class DocumentAIService {
         });
       }
 
+      cachedResult = this.moveCacheBreakpoint(cachedResult, toolResults);
       messages.push({ role: 'assistant', content: response.content });
       messages.push({ role: 'user', content: toolResults });
     }
@@ -674,8 +884,10 @@ export class DocumentAIService {
   async reconcileBankStatement(
     companyId: string,
     base64Pdf: string,
+    usage?: AiUsage,
   ): Promise<ReconcileResult> {
     const { client, model } = await this.getClient(companyId);
+    if (usage) usage.model = model;
     const companyContext = await this.reconcileCompanyContext(companyId);
 
     const tools: Anthropic.Tool[] = [
@@ -807,11 +1019,14 @@ ${companyContext}
     ];
 
     // Извлеченията имат много редове → повече ходове от доставките
-    const MAX_TURNS = 20;
+    const MAX_TURNS = 30;
+    let cachedResult: Anthropic.ToolResultBlockParam | undefined;
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       const response = await client.messages
-        .create({ model, max_tokens: 8192, tools, messages })
+        .create({ model, max_tokens: 16384, tools, messages })
         .catch((error) => this.mapAnthropicError(error));
+      this.trackUsage(usage, response);
+      this.assertNotTruncated(response);
 
       const toolUses = response.content.filter(
         (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use',
@@ -844,6 +1059,7 @@ ${companyContext}
         });
       }
 
+      cachedResult = this.moveCacheBreakpoint(cachedResult, toolResults);
       messages.push({ role: 'assistant', content: response.content });
       messages.push({ role: 'user', content: toolResults });
     }
@@ -1323,6 +1539,7 @@ ${companyContext}
     model: string,
     base64Image: string,
     mimeType: string,
+    usage?: AiUsage,
   ): Promise<ParsedInvoiceData> {
     // PDF фактури минават като document block; снимки — като image block
     const documentBlock: Anthropic.ContentBlockParam =
@@ -1419,7 +1636,7 @@ ${companyContext}
     const response = await client.messages
       .create({
         model,
-        max_tokens: 4096,
+        max_tokens: 16384,
         tools: [submitTool],
         tool_choice: { type: 'tool', name: 'submit_invoice' },
         messages: [
@@ -1454,6 +1671,8 @@ ${EXPENSE_CATEGORY_HINTS}
         ],
       })
       .catch((error) => this.mapAnthropicError(error));
+    this.trackUsage(usage, response);
+    this.assertNotTruncated(response);
 
     const submitted = response.content.find(
       (block): block is Anthropic.ToolUseBlock =>

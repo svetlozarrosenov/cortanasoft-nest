@@ -9,6 +9,7 @@ const mockDocumentAIService = {
   isEnabledForCompany: jest.fn(),
   parseInvoice: jest.fn(),
   parseInvoiceFromBase64: jest.fn(),
+  scanExpenseDocument: jest.fn(),
 };
 
 const mockPrisma = {
@@ -71,6 +72,7 @@ describe('DocumentAIController', () => {
 
   describe('scanInvoice', () => {
     const companyId = 'company-1';
+    const user = { id: 'user-1' };
 
     const mockParsedData = {
       invoiceNumber: 'INV-001',
@@ -106,7 +108,7 @@ describe('DocumentAIController', () => {
     ];
 
     it('should scan base64 image and return results with matched products', async () => {
-      mockDocumentAIService.parseInvoiceFromBase64.mockResolvedValue(
+      mockDocumentAIService.scanExpenseDocument.mockResolvedValue(
         mockParsedData,
       );
       mockPrisma.product.findMany.mockResolvedValue(mockProducts);
@@ -114,18 +116,20 @@ describe('DocumentAIController', () => {
         { id: 's1', name: 'Тест Доставчик ЕООД', eik: null, vatNumber: null },
       ]);
 
-      const result = await controller.scanInvoice(companyId, {
-        base64Image: 'base64data',
-        mimeType: 'image/jpeg',
-      });
+      const result = await controller.scanInvoice(
+        companyId,
+        {
+          base64Image: 'base64data',
+          mimeType: 'image/jpeg',
+        },
+        user,
+      );
 
       expect(result.invoiceNumber).toBe('INV-001');
       expect(result.lineItems).toHaveLength(2);
 
       // Should match product by SKU (exact match, confidence 1.0)
-      const skuMatch = result.matchedProducts.find(
-        (m) => m.sku === 'CHOC-LG',
-      );
+      const skuMatch = result.matchedProducts.find((m) => m.sku === 'CHOC-LG');
       expect(skuMatch).toBeDefined();
       expect(skuMatch!.confidence).toBe(1.0);
       expect(skuMatch!.productId).toBe('p1');
@@ -147,13 +151,18 @@ describe('DocumentAIController', () => {
       mockPrisma.product.findMany.mockResolvedValue([]);
       mockPrisma.supplier.findMany.mockResolvedValue([]);
 
-      const result = await controller.scanInvoice(companyId, {
-        imageUrl: 'https://example.com/invoice.jpg',
-      });
+      const result = await controller.scanInvoice(
+        companyId,
+        {
+          imageUrl: 'https://example.com/invoice.jpg',
+        },
+        user,
+      );
 
       expect(mockDocumentAIService.parseInvoice).toHaveBeenCalledWith(
         'company-1',
         'https://example.com/invoice.jpg',
+        { userId: 'user-1' },
       );
       expect(result.invoiceNumber).toBe('INV-001');
       expect(result.matchedProducts).toHaveLength(0);
@@ -161,25 +170,34 @@ describe('DocumentAIController', () => {
     });
 
     it('should throw when neither imageUrl nor base64Image provided', async () => {
-      await expect(controller.scanInvoice(companyId, {})).rejects.toThrow(
+      await expect(controller.scanInvoice(companyId, {}, user)).rejects.toThrow(
         'Either imageUrl or base64Image is required',
       );
     });
 
     it('should use default mime type when not provided', async () => {
-      mockDocumentAIService.parseInvoiceFromBase64.mockResolvedValue({
+      mockDocumentAIService.scanExpenseDocument.mockResolvedValue({
         lineItems: [],
         confidence: 0.5,
       });
       mockPrisma.product.findMany.mockResolvedValue([]);
 
-      await controller.scanInvoice(companyId, {
-        base64Image: 'base64data',
-      });
+      await controller.scanInvoice(
+        companyId,
+        {
+          base64Image: 'base64data',
+        },
+        user,
+      );
 
-      expect(
-        mockDocumentAIService.parseInvoiceFromBase64,
-      ).toHaveBeenCalledWith('company-1', 'base64data', 'image/jpeg');
+      expect(mockDocumentAIService.scanExpenseDocument).toHaveBeenCalledWith(
+        'company-1',
+        'base64data',
+        'image/jpeg',
+        {
+          userId: 'user-1',
+        },
+      );
     });
 
     /** Сканиране само за доставчика — продуктите не участват */
@@ -192,17 +210,21 @@ describe('DocumentAIController', () => {
         vatNumber?: string | null;
       }[],
     ) => {
-      mockDocumentAIService.parseInvoiceFromBase64.mockResolvedValue({
+      mockDocumentAIService.scanExpenseDocument.mockResolvedValue({
         lineItems: [],
         confidence: 0.8,
         ...parsed,
       });
       mockPrisma.product.findMany.mockResolvedValue([]);
       mockPrisma.supplier.findMany.mockResolvedValue(suppliers);
-      return controller.scanInvoice(companyId, {
-        base64Image: 'data',
-        mimeType: 'image/png',
-      });
+      return controller.scanInvoice(
+        companyId,
+        {
+          base64Image: 'data',
+          mimeType: 'image/png',
+        },
+        user,
+      );
     };
 
     it('should match the supplier by EIK, even when the invoice prints only the VAT number', async () => {
@@ -287,7 +309,7 @@ describe('DocumentAIController', () => {
     });
 
     it('should not match products below similarity threshold', async () => {
-      mockDocumentAIService.parseInvoiceFromBase64.mockResolvedValue({
+      mockDocumentAIService.scanExpenseDocument.mockResolvedValue({
         lineItems: [
           {
             description: 'XY',
@@ -303,24 +325,32 @@ describe('DocumentAIController', () => {
       ]);
       mockPrisma.supplier.findMany.mockResolvedValue([]);
 
-      const result = await controller.scanInvoice(companyId, {
-        base64Image: 'data',
-      });
+      const result = await controller.scanInvoice(
+        companyId,
+        {
+          base64Image: 'data',
+        },
+        user,
+      );
 
       expect(result.matchedProducts).toHaveLength(0);
     });
 
     it('should handle scan with no supplier info', async () => {
-      mockDocumentAIService.parseInvoiceFromBase64.mockResolvedValue({
+      mockDocumentAIService.scanExpenseDocument.mockResolvedValue({
         invoiceNumber: 'INV-002',
         lineItems: [],
         confidence: 0.9,
       });
       mockPrisma.product.findMany.mockResolvedValue([]);
 
-      const result = await controller.scanInvoice(companyId, {
-        base64Image: 'data',
-      });
+      const result = await controller.scanInvoice(
+        companyId,
+        {
+          base64Image: 'data',
+        },
+        user,
+      );
 
       expect(result.suggestedSupplier).toBeUndefined();
       // Should not even query suppliers when no supplier info
@@ -328,7 +358,7 @@ describe('DocumentAIController', () => {
     });
 
     it('should query only active products for matching', async () => {
-      mockDocumentAIService.parseInvoiceFromBase64.mockResolvedValue({
+      mockDocumentAIService.scanExpenseDocument.mockResolvedValue({
         lineItems: [
           {
             description: 'Test',
@@ -342,7 +372,7 @@ describe('DocumentAIController', () => {
       mockPrisma.product.findMany.mockResolvedValue([]);
       mockPrisma.supplier.findMany.mockResolvedValue([]);
 
-      await controller.scanInvoice(companyId, { base64Image: 'data' });
+      await controller.scanInvoice(companyId, { base64Image: 'data' }, user);
 
       expect(mockPrisma.product.findMany).toHaveBeenCalledWith({
         where: { companyId, isActive: true },

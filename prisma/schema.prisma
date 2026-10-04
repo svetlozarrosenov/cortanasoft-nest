@@ -251,6 +251,7 @@ model Company {
   stockTransfers               StockTransfer[]
   econtConfig                  EcontConfig?
   aiSettings                   AiSettings?
+  aiJobs                       AiJob[]
   hrSettings                   HrSettings?
   positions                    Position[]
   speedyConfig                 SpeedyConfig?
@@ -642,6 +643,7 @@ model User {
   assignedSupportTickets SupportTicket[]        @relation("SupportTicketAssignee")
   supportTicketMessages  SupportTicketMessage[] @relation("SupportTicketMessageAuthor")
   supportTicketReads     SupportTicketRead[]
+  aiJobs                 AiJob[]
 
   // Казуси (клиентски тикети на фирмата)
   createdCases  CustomerCase[] @relation("CaseCreator")
@@ -3986,6 +3988,53 @@ model AiSettings {
   updatedAt DateTime @updatedAt
 
   @@map("ai_settings")
+}
+
+// Фонови/еднократни AI задачи (сканиране на доставка, съгласуване на
+// извлечение, разчитане на разход). Държат се в базата, а не в паметта:
+// оцеляват рестарт, а токените/времето дават справка кой колко ползва AI.
+// Нищо не се трие автоматично — чисти се ръчно, когато вече не трябва.
+model AiJob {
+  id        String      @id @default(cuid())
+  companyId String
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  kind      AiJobKind
+  status    AiJobStatus @default(RUNNING)
+
+  result  Json?
+  message String? // текст на грешката при ERROR
+
+  // Употреба (сумирана по всички ходове на агентния цикъл)
+  model            String?
+  turns            Int     @default(0)
+  inputTokens      Int     @default(0)
+  cacheReadTokens  Int     @default(0)
+  cacheWriteTokens Int     @default(0)
+  outputTokens     Int     @default(0)
+  durationMs       Int?
+  fileName         String?
+  fileSize         Int?
+
+  createdAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([companyId, createdAt])
+  @@index([status])
+  @@map("ai_jobs")
+}
+
+enum AiJobKind {
+  DELIVERY_SCAN
+  BANK_RECONCILE
+  EXPENSE_SCAN
+}
+
+enum AiJobStatus {
+  RUNNING
+  DONE
+  ERROR
 }
 
 // ==================== SPEEDY КОНФИГУРАЦИЯ ====================
