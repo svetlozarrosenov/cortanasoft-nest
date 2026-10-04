@@ -110,6 +110,9 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
               { key: 'type', labelKey: 'common.type' },
               { key: 'status', labelKey: 'common.status' },
               { key: 'createdAt', labelKey: 'common.createdAt' },
+              // Колко дължи клиентът по продажби — изрично право, за да не
+              // се показва на роли, които не бива да виждат пари
+              { key: 'due', labelKey: 'modules.crm.due', optIn: true },
             ],
           },
         ],

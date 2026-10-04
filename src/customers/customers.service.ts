@@ -286,8 +286,18 @@ export class CustomersService {
       this.prisma.customer.count({ where }),
     ]);
 
+    // Дължимо по продажби за клиентите на страницата (същата формула като
+    // справката за вземания) — една заявка за цялата страница
+    const dueByCustomer = await this.dueByCustomer(
+      companyId,
+      data.map((c) => c.id),
+    );
+
     return {
-      data: data.map(withCategories),
+      data: data.map((c) => ({
+        ...withCategories(c),
+        due: dueByCustomer.get(c.id) ?? 0,
+      })),
       meta: {
         total,
         page,
@@ -340,6 +350,84 @@ export class CustomersService {
     }
 
     return withCategories(customer);
+  }
+
+  private async dueByCustomer(companyId: string, customerIds: string[]) {
+    const result = new Map<string, number>();
+    if (customerIds.length === 0) return result;
+    const rows = await this.prisma.$queryRaw<
+      Array<{ customerId: string; due: number }>
+    >`
+      SELECT o."customerId", COALESCE(SUM(GREATEST(o.total - o."paidAmount", 0)), 0)::float8 AS due
+      FROM orders o
+      WHERE o."companyId" = ${companyId}
+        AND o."customerId" IN (${Prisma.join(customerIds)})
+        AND o.status IN ('CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED')
+        AND o."paymentStatus" <> 'REFUNDED'
+      GROUP BY o."customerId"`;
+    for (const r of rows)
+      result.set(r.customerId, Math.round(r.due * 100) / 100);
+    return result;
+  }
+
+  /**
+   * Картонът на клиента като център: броячи на документите му и дължимото.
+   * Дължимо = същата формула като справката за вземания (Отчети > Клиенти):
+   * неплатеното по потвърдени/обработвани/изпратени/доставени продажби.
+   */
+  async getSummary(
+    companyId: string,
+    id: string,
+    partnerScopeId?: string | null,
+  ) {
+    await this.findOne(companyId, id, partnerScopeId);
+    const scope = { companyId, customerId: id };
+    const [
+      orders,
+      invoices,
+      proformas,
+      offers,
+      acceptanceProtocols,
+      ascertainmentProtocols,
+      stockReceipts,
+      contracts,
+      warranties,
+      due,
+    ] = await Promise.all([
+      this.prisma.order.count({
+        where: { ...scope, status: { not: 'CANCELLED' } },
+      }),
+      this.prisma.invoice.count({
+        where: { ...scope, status: { not: 'CANCELLED' } },
+      }),
+      this.prisma.proforma.count({ where: scope }),
+      this.prisma.offer.count({ where: scope }),
+      this.prisma.acceptanceProtocol.count({ where: scope }),
+      this.prisma.ascertainmentProtocol.count({ where: scope }),
+      this.prisma.stockReceipt.count({ where: scope }),
+      this.prisma.contract.count({ where: scope }),
+      this.prisma.issuedWarranty.count({ where: scope }),
+      this.prisma.$queryRaw<Array<{ due: number; unpaidOrders: number }>>`
+        SELECT COALESCE(SUM(GREATEST(o.total - o."paidAmount", 0)), 0)::float8 AS due,
+               COUNT(*) FILTER (WHERE o.total - o."paidAmount" > 0)::int AS "unpaidOrders"
+        FROM orders o
+        WHERE o."companyId" = ${companyId} AND o."customerId" = ${id}
+          AND o.status IN ('CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED')
+          AND o."paymentStatus" <> 'REFUNDED'`,
+    ]);
+    return {
+      orders,
+      invoices,
+      proformas,
+      offers,
+      acceptanceProtocols,
+      ascertainmentProtocols,
+      stockReceipts,
+      contracts,
+      warranties,
+      due: Math.round((due[0]?.due ?? 0) * 100) / 100,
+      unpaidOrders: due[0]?.unpaidOrders ?? 0,
+    };
   }
 
   async update(

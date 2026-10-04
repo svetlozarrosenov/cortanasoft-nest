@@ -295,7 +295,7 @@ describe('createFullPermissions', () => {
     }
   });
 
-  it('CRM customersList should have all 6 columns by default', () => {
+  it('CRM customersList should have all 7 columns with full permissions', () => {
     const cols = getVisibleColumns(full, 'crm', 'customers', 'customersList');
     expect(cols).toContain('name');
     expect(cols).toContain('email');
@@ -303,7 +303,9 @@ describe('createFullPermissions', () => {
     expect(cols).toContain('type');
     expect(cols).toContain('status');
     expect(cols).toContain('createdAt');
-    expect(cols.length).toBe(6);
+    // „Дължимо" е opt-in колона — влиза само в пълните права
+    expect(cols).toContain('due');
+    expect(cols.length).toBe(7);
   });
 
   it('ERP ordersList should have all 8 columns with full permissions', () => {
@@ -347,7 +349,7 @@ describe('stripAdminModuleFromPermissions', () => {
     );
     expect(cols).toContain('name');
     expect(cols).toContain('email');
-    expect(cols.length).toBe(6);
+    expect(cols.length).toBe(7);
   });
 
   it('should not mutate the original permissions object', () => {
@@ -956,7 +958,7 @@ describe('Edge cases', () => {
     expect(cols).toContain('type');
     expect(cols).toContain('status');
     expect(cols).toContain('createdAt');
-    expect(cols.length).toBe(4);
+    expect(cols.length).toBe(5);
   });
 
   it('createFullPermissions then disable entire module', () => {

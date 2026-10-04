@@ -161,6 +161,24 @@ export class CustomersController {
     return Object.values(CustomerSource);
   }
 
+  /** Броячи на документите и дължимото на клиента — за картона в CRM */
+  @Get(':id/summary')
+  @RequireAnyPermission(
+    { module: 'crm', page: 'customers', action: 'view' },
+    { module: 'crm', page: 'contacts', action: 'view' },
+  )
+  getSummary(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.customersService.getSummary(
+      companyId,
+      id,
+      user?.partnerCustomerId ?? null,
+    );
+  }
+
   @Get(':id')
   @RequireAnyPermission(
     { module: 'crm', page: 'customers', action: 'view' },
