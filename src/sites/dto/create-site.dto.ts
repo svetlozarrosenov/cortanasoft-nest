@@ -4,6 +4,9 @@ import {
   IsBoolean,
   IsNotEmpty,
   MaxLength,
+  IsArray,
+  ArrayMaxSize,
+  ValidateIf,
 } from 'class-validator';
 
 export class CreateSiteDto {
@@ -30,4 +33,18 @@ export class CreateSiteDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  // Клиент, чийто е обектът; null изчиства
+  @ValidateIf((o: CreateSiteDto) => o.customerId !== null)
+  @IsString()
+  @IsOptional()
+  customerId?: string | null;
+
+  // Чеклист за посещение — редове текст
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  @MaxLength(200, { each: true })
+  @IsOptional()
+  checklist?: string[];
 }

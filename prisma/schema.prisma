@@ -228,6 +228,7 @@ model Company {
   dealTasks                    DealTask[]
   departments                  Department[]
   attendances                  Attendance[]
+  workShifts                   WorkShift[]
   payrolls                     Payroll[]
   performanceReviews           PerformanceReview[]
   tickets                      Ticket[]
@@ -793,6 +794,12 @@ model HrSettings {
   leaveMaxBackdateDays Int @default(90) // Колко дни назад HR може да въвежда отсъствие (0 = без ограничение)
   leaveMinNoticeDays   Int @default(0) // Минимално предизвестие (календарни дни) за платен отпуск от служител
 
+  // Присъствия от графика (SAP „negative time recording"): в 00:05 cron-ът
+  // създава присъствията за планираните смени на деня; супервайзърът
+  // пипа само изключенията. Одобрен отпуск има приоритет. Opt-in — по
+  // подразбиране изключено, фирми без графици не са засегнати.
+  autoAttendanceFromSchedule Boolean @default(false)
+
   companyId String  @unique
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -935,6 +942,57 @@ model Attendance {
   @@index([companyId, date])
   @@index([siteId])
   @@map("attendances")
+}
+
+// ==================== ГРАФИК НА СМЕНИТЕ ====================
+// Планиране напред: кой служител на кой обект, кога (сервизни фирми с много
+// обекти — чистене, поддръжка). Присъствията остават отчет пост-фактум:
+// при „Отчети" на смяната се създава запис в Attendance през неговия сервиз.
+// userId е като при Attendance — без релация към User (служители без достъп
+// са също User записи).
+
+enum WorkShiftStatus {
+  PLANNED // Планирана
+  DONE // Отчетена — има присъствие
+  MISSED // Не се е явил
+}
+
+model WorkShift {
+  id String @id @default(cuid())
+
+  date      DateTime @db.Date
+  startTime String // "18:00"
+  endTime   String // "21:00"
+  note      String?
+
+  status       WorkShiftStatus @default(PLANNED)
+  reportedAt   DateTime?
+  reportedById String?
+  // Присъствието, създадено при отчитане (без релация — Attendance не се пипа)
+  attendanceId String?
+  // Отметки по чеклиста на обекта: { "Кошчета": true, ... }
+  checklist Json?
+
+  // Серия от повтарящи се смени (създадени заедно с „повтаряй всяка седмица")
+  seriesId String?
+
+  // Обектът е незадължителен — смяна без обект (офис, без право за Обекти)
+  siteId String?
+  site   Site?   @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
+  userId String
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, date])
+  @@index([companyId, siteId, date])
+  @@index([companyId, userId, date])
+  @@index([companyId, seriesId])
+  @@map("work_shifts")
 }
 
 // Статус на заплата
@@ -1546,6 +1604,7 @@ model Customer {
   partnerOrders Order[] @relation("OrderPartner")
 
   contacts               CustomerContact[]
+  sites                  Site[]
   orders                 Order[]
   billToOrders           Order[]                 @relation("OrderBillTo")
   offers                 Offer[]
@@ -1840,17 +1899,27 @@ model Site {
   notes    String? @db.Text
   isActive Boolean @default(true)
 
+  // Чий е обектът (сервизни фирми: сградата/офисът на клиента, където се
+  // работи). Незадължително — обектите-проекти остават без клиент.
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  // Чеклист за посещение („Кошчета", „Подове"…) — отмята се в „Моят екип днес"
+  checklist String[] @default([])
+
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   orders      Order[]
   expenses    Expense[]
   attendances Attendance[]
+  workShifts  WorkShift[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([companyId, isActive])
+  @@index([companyId, customerId])
   @@map("sites")
 }
 

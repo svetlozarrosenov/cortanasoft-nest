@@ -10,6 +10,7 @@ export const HR_SETTINGS_DEFAULTS = {
   hoursToleranceMinutes: 30,
   leaveMaxBackdateDays: 90,
   leaveMinNoticeDays: 0,
+  autoAttendanceFromSchedule: false,
 };
 
 const toMinutes = (hhmm: string) => {
@@ -76,6 +77,8 @@ export class HrSettingsService {
       leaveMaxBackdateDays:
         dto.leaveMaxBackdateDays ?? current.leaveMaxBackdateDays,
       leaveMinNoticeDays: dto.leaveMinNoticeDays ?? current.leaveMinNoticeDays,
+      autoAttendanceFromSchedule:
+        dto.autoAttendanceFromSchedule ?? current.autoAttendanceFromSchedule,
     };
     const start = toMinutes(next.workDayStart);
     const end = toMinutes(next.workDayEnd);

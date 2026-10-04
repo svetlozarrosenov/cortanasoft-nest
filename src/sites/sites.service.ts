@@ -8,6 +8,7 @@ import {
   QuerySiteSummaryDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
+import { ErrorMessages } from '../common/constants/error-messages';
 
 @Injectable()
 export class SitesService {
@@ -16,21 +17,41 @@ export class SitesService {
     private hrSettings: HrSettingsService,
   ) {}
 
+  // Клиентът трябва да е на същата фирма — чужд id не минава
+  private async assertCustomer(companyId: string, customerId?: string | null) {
+    if (!customerId) return;
+    const customer = await this.prisma.customer.findFirst({
+      where: { id: customerId, companyId },
+      select: { id: true },
+    });
+    if (!customer) {
+      throw new NotFoundException(ErrorMessages.customers.notFound);
+    }
+  }
+
+  private readonly include = {
+    _count: { select: { orders: true, expenses: true } },
+    customer: {
+      select: { id: true, companyName: true, firstName: true, lastName: true },
+    },
+  } as const;
+
   async create(companyId: string, dto: CreateSiteDto) {
+    await this.assertCustomer(companyId, dto.customerId);
     return this.prisma.site.create({
       data: {
         ...dto,
+        checklist: dto.checklist?.map((l) => l.trim()).filter(Boolean),
         companyId,
       },
-      include: {
-        _count: { select: { orders: true, expenses: true } },
-      },
+      include: this.include,
     });
   }
 
   async findAll(companyId: string, query: QuerySitesDto) {
     const {
       search,
+      customerId,
       isActive,
       page = 1,
       limit = 20,
@@ -40,6 +61,7 @@ export class SitesService {
 
     const where: Prisma.SiteWhereInput = {
       companyId,
+      ...(customerId && { customerId }),
       ...(isActive !== undefined && { isActive }),
       ...(search && {
         OR: [
@@ -53,9 +75,7 @@ export class SitesService {
     const [data, total] = await Promise.all([
       this.prisma.site.findMany({
         where,
-        include: {
-          _count: { select: { orders: true, expenses: true } },
-        },
+        include: this.include,
         orderBy: { [sortBy]: sortOrder },
         skip: (page - 1) * limit,
         take: limit,
@@ -77,9 +97,7 @@ export class SitesService {
   async findOne(companyId: string, id: string) {
     const site = await this.prisma.site.findFirst({
       where: { id, companyId },
-      include: {
-        _count: { select: { orders: true, expenses: true } },
-      },
+      include: this.include,
     });
 
     if (!site) {
@@ -353,13 +371,17 @@ export class SitesService {
 
   async update(companyId: string, id: string, dto: UpdateSiteDto) {
     await this.findOne(companyId, id);
+    await this.assertCustomer(companyId, dto.customerId);
 
     return this.prisma.site.update({
       where: { id },
-      data: dto,
-      include: {
-        _count: { select: { orders: true, expenses: true } },
+      data: {
+        ...dto,
+        ...(dto.checklist && {
+          checklist: dto.checklist.map((l) => l.trim()).filter(Boolean),
+        }),
       },
+      include: this.include,
     });
   }
 

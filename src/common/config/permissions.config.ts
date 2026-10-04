@@ -416,6 +416,13 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
               { key: 'city', labelKey: 'common.city' },
               { key: 'orders', labelKey: 'modules.erp.sales' },
               { key: 'status', labelKey: 'common.status' },
+              // Сервизни фирми: обектът е на клиент — opt-in, за да не се
+              // появява при фирми, чиито обекти са вътрешни проекти
+              {
+                key: 'customer',
+                labelKey: 'modules.crm.customer',
+                optIn: true,
+              },
             ],
           },
         ],
@@ -649,6 +656,13 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         key: 'myAttendance',
         labelKey: 'modules.hr.myAttendance',
         actions: ['view'],
+      },
+      // График на смените (планиране напред по обекти) — за сервизни фирми.
+      // Нова страница: никоя съществуваща роля не я получава автоматично.
+      {
+        key: 'schedule',
+        labelKey: 'modules.hr.schedule',
+        actions: ['view', 'create', 'edit', 'delete'],
       },
       {
         key: 'attendance',

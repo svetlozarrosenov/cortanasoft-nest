@@ -392,6 +392,7 @@ export class CustomersService {
       stockReceipts,
       contracts,
       warranties,
+      sites,
       due,
     ] = await Promise.all([
       this.prisma.order.count({
@@ -407,6 +408,7 @@ export class CustomersService {
       this.prisma.stockReceipt.count({ where: scope }),
       this.prisma.contract.count({ where: scope }),
       this.prisma.issuedWarranty.count({ where: scope }),
+      this.prisma.site.count({ where: { ...scope, isActive: true } }),
       this.prisma.$queryRaw<Array<{ due: number; unpaidOrders: number }>>`
         SELECT COALESCE(SUM(GREATEST(o.total - o."paidAmount", 0)), 0)::float8 AS due,
                COUNT(*) FILTER (WHERE o.total - o."paidAmount" > 0)::int AS "unpaidOrders"
@@ -425,6 +427,7 @@ export class CustomersService {
       stockReceipts,
       contracts,
       warranties,
+      sites,
       due: Math.round((due[0]?.due ?? 0) * 100) / 100,
       unpaidOrders: due[0]?.unpaidOrders ?? 0,
     };

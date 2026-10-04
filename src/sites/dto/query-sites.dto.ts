@@ -7,6 +7,11 @@ export class QuerySitesDto {
   @IsOptional()
   search?: string;
 
+  // Само обектите на този клиент (картата на клиента)
+  @IsString()
+  @IsOptional()
+  customerId?: string;
+
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)
   isActive?: boolean;

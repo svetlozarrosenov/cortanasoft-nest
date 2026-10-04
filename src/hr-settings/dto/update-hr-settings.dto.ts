@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsInt,
   IsOptional,
   Matches,
@@ -56,4 +57,9 @@ export class UpdateHrSettingsDto {
   @Max(365)
   @IsOptional()
   leaveMinNoticeDays?: number;
+
+  // Присъствия от графика (opt-in) — виж HrSettings.autoAttendanceFromSchedule
+  @IsBoolean()
+  @IsOptional()
+  autoAttendanceFromSchedule?: boolean;
 }
