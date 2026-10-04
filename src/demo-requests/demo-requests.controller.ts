@@ -28,6 +28,8 @@ export class DemoRequestsController {
       fbp: req.cookies?.['_fbp'] as string | undefined,
       fbc: req.cookies?.['_fbc'] as string | undefined,
       eventSourceUrl: referer,
+      // Логнат потребител (наш клиент/служител) не е аудитория — без Pixel/CAPI
+      skipPixel: Boolean(req.cookies?.['access_token']),
     });
     return {
       success: true,

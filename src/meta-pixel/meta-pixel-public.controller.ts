@@ -32,6 +32,11 @@ export class MetaPixelPublicController {
     @Ip() ip: string,
     @Headers('user-agent') userAgent: string | undefined,
   ) {
+    // Следим само НЕ-логнати посетители: собствените ни клиенти/служители не
+    // са аудитория за реклама и само замърсяват статистиката.
+    if (req.cookies?.['access_token']) {
+      return { success: true, skipped: 'authenticated' };
+    }
     // _fbp + fbc cookies се сетват от browser Pixel-а; критични за match quality.
     const fbp = (req.cookies?.['_fbp'] as string | undefined) || undefined;
     const fbc = (req.cookies?.['_fbc'] as string | undefined) || undefined;
@@ -41,6 +46,7 @@ export class MetaPixelPublicController {
       eventName: dto.event_name,
       eventId: dto.event_id,
       eventSourceUrl: dto.event_source_url,
+      referrer: dto.referrer,
       ip,
       userAgent,
       fbp,

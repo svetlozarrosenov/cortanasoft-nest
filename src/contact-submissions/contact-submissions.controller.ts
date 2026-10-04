@@ -38,6 +38,8 @@ export class ContactSubmissionsController {
       fbp: req.cookies?.['_fbp'] as string | undefined,
       fbc: req.cookies?.['_fbc'] as string | undefined,
       eventSourceUrl: referer,
+      // Логнат потребител (наш клиент/служител) не е аудитория — без Pixel/CAPI
+      skipPixel: Boolean(req.cookies?.['access_token']),
     });
 
     // Fire-and-forget: send notifications without blocking the response

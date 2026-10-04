@@ -20,6 +20,8 @@ export interface MetaPixelRequestContext {
   fbp?: string;
   fbc?: string;
   eventSourceUrl?: string;
+  // true при логнат подател — не се праща към Meta и не се логва
+  skipPixel?: boolean;
 }
 
 @Injectable()
@@ -55,7 +57,7 @@ export class DemoRequestsService {
     });
 
     // Fire-and-forget: Meta CAPI Lead (deduplicates with browser fbq() on the same eventId).
-    if (dto.metaEventId) {
+    if (dto.metaEventId && !meta?.skipPixel) {
       void this.metaPixelEvents.sendEvent({
         eventName: 'Lead',
         eventId: dto.metaEventId,

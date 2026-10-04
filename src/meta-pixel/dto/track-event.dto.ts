@@ -2,7 +2,7 @@ import { IsEmail, IsIn, IsOptional, IsString, MaxLength } from 'class-validator'
 
 // Допустимите Meta standard events за нашия landing site funnel.
 // Ако някога ни потрябва нов event — добавяме го тук + на frontend helper-а.
-const ALLOWED_EVENTS = ['Lead', 'Contact', 'ViewContent', 'CompleteRegistration'] as const;
+const ALLOWED_EVENTS = ['PageView', 'Lead', 'Contact', 'ViewContent', 'CompleteRegistration'] as const;
 type AllowedEvent = (typeof ALLOWED_EVENTS)[number];
 
 export class TrackMetaPixelEventDto {
@@ -22,6 +22,11 @@ export class TrackMetaPixelEventDto {
   @IsString()
   @MaxLength(2000)
   event_source_url?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  referrer?: string;
 
   @IsOptional()
   @IsString()

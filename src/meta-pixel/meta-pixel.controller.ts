@@ -8,6 +8,7 @@ import {
   Post,
   Put,
   Query,
+  Param,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -17,7 +18,8 @@ import {
   MAX_INSIGHTS_DAYS,
   MetaPixelInsightsService,
 } from './meta-pixel-insights.service';
-import { SaveMetaPixelConfigDto } from './dto';
+import { SaveMetaPixelConfigDto, MetaPixelLogQueryDto } from './dto';
+import { MetaPixelLogService } from './meta-pixel-log.service';
 
 @Controller('admin/meta-pixel')
 @UseGuards(JwtAuthGuard, SuperAdminGuard)
@@ -25,6 +27,7 @@ export class MetaPixelController {
   constructor(
     private service: MetaPixelService,
     private insights: MetaPixelInsightsService,
+    private log: MetaPixelLogService,
   ) {}
 
   @Get('config')
@@ -42,6 +45,19 @@ export class MetaPixelController {
   @Delete('config')
   async deleteConfig() {
     return this.service.deleteConfig();
+  }
+
+  // ==================== Лог на събитията (нашата база) ====================
+
+  @Get('events')
+  async events(@Query() q: MetaPixelLogQueryDto) {
+    const [page, summary] = await Promise.all([this.log.list(q), this.log.summary(q)]);
+    return { success: true, ...page, summary };
+  }
+
+  @Get('events/visitor/:fbp')
+  async visitor(@Param('fbp') fbp: string) {
+    return { success: true, ...(await this.log.visitor(fbp)) };
   }
 
   // Pixel events analytics — Live fetch с 10 min cache в самия service.

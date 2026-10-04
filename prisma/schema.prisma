@@ -4406,6 +4406,47 @@ model MetaPixelConfig {
   @@map("meta_pixel_config")
 }
 
+// Лог на всяко събитие от публичния сайт (PageView, Lead, Contact, …) — само
+// за НЕ-логнати посетители. Платформено (пикселът е на СВ Софт), без companyId.
+// `fbp` (_fbp бисквитката) е стабилният идентификатор на браузъра: по него се
+// вижда пътеката на анонимен посетител и към кой имейл се „връзва", ако после
+// прати форма. Пазим суровия имейл за търсене (към Meta отива само хеш).
+model MetaPixelEvent {
+  id        String   @id @default(cuid())
+  eventName String
+  eventId   String
+  eventTime DateTime @default(now())
+
+  eventSourceUrl String?
+  path           String?
+  referrer       String?
+  contentName    String?
+
+  userEmail     String?
+  userPhone     String?
+  userFirstName String?
+  userLastName  String?
+  userIp        String?
+  userAgent     String?
+  fbp           String?
+  fbc           String?
+
+  // Резултат от Conversions API
+  capiSuccess  Boolean @default(false)
+  capiStatus   Int?
+  capiResponse String? @db.Text
+  capiError    String? @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([eventTime(sort: Desc)])
+  @@index([eventName, eventTime(sort: Desc)])
+  @@index([fbp, eventTime(sort: Desc)])
+  @@index([userEmail])
+  @@index([eventId])
+  @@map("meta_pixel_events")
+}
+
 // ==================== СЕРВИЗ ====================
 
 // Статус на сервизна заявка
