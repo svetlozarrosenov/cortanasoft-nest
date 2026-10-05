@@ -20,6 +20,7 @@ export interface MetaPixelRequestContext {
   fbp?: string;
   fbc?: string;
   eventSourceUrl?: string;
+  visitorId?: string;
   // true при логнат подател — не се праща към Meta и не се логва
   skipPixel?: boolean;
 }
@@ -66,6 +67,7 @@ export class ContactSubmissionsService {
         userAgent: meta?.userAgent,
         fbp: meta?.fbp,
         fbc: meta?.fbc,
+        visitorId: meta?.visitorId,
         email: dto.email,
         phone: dto.phone,
         contentName: 'contact_form',

@@ -36,7 +36,7 @@ export class MetaPixelLogQueryDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)
-  fbp?: string;
+  visitor?: string;
 
   @IsOptional()
   @Type(() => Number)

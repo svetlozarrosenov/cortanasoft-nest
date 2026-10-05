@@ -55,9 +55,9 @@ export class MetaPixelController {
     return { success: true, ...page, summary };
   }
 
-  @Get('events/visitor/:fbp')
-  async visitor(@Param('fbp') fbp: string) {
-    return { success: true, ...(await this.log.visitor(fbp)) };
+  @Get('events/visitor/:key')
+  async visitor(@Param('key') key: string) {
+    return { success: true, ...(await this.log.visitor(key)) };
   }
 
   // Pixel events analytics — Live fetch с 10 min cache в самия service.

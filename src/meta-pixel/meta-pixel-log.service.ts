@@ -9,7 +9,7 @@ export interface MetaPixelLogQuery {
   search?: string; // имейл или път
   from?: string; // YYYY-MM-DD
   to?: string;
-  fbp?: string; // пътеката на един посетител
+  visitor?: string; // пътеката на един посетител (cs_vid или _fbp)
   limit?: number;
   cursor?: string;
 }
@@ -32,13 +32,17 @@ export class MetaPixelLogService {
     if (q.eventName) where.eventName = q.eventName;
     if (q.status === 'success') where.capiSuccess = true;
     if (q.status === 'error') where.capiSuccess = false;
-    if (q.fbp) where.fbp = q.fbp;
+    if (q.visitor) where.OR = [{ visitorId: q.visitor }, { fbp: q.visitor }];
     if (q.search) {
       const s = q.search.trim();
-      where.OR = [
-        { userEmail: { contains: s, mode: 'insensitive' } },
-        { path: { contains: s, mode: 'insensitive' } },
-        { userLastName: { contains: s, mode: 'insensitive' } },
+      where.AND = [
+        {
+          OR: [
+            { userEmail: { contains: s, mode: 'insensitive' } },
+            { path: { contains: s, mode: 'insensitive' } },
+            { userLastName: { contains: s, mode: 'insensitive' } },
+          ],
+        },
       ];
     }
     if (q.from || q.to) {
@@ -63,14 +67,18 @@ export class MetaPixelLogService {
     const events = hasMore ? rows.slice(0, limit) : rows;
     // Посетител, който е пратил форма (имейл) по-късно/по-рано — показваме
     // кой е и на анонимните му PageView-ове
+    const keyOf = (e: { visitorId: string | null; fbp: string | null }) =>
+      e.visitorId ?? e.fbp;
     const identity = await this.identities(
-      events.map((e) => e.fbp).filter((f): f is string => !!f),
+      events.map(keyOf).filter((f): f is string => !!f),
     );
     return {
       events: events.map((e) => ({
         ...e,
+        visitorKey: keyOf(e),
         visitorEmail:
-          e.userEmail ?? (e.fbp ? (identity.get(e.fbp) ?? null) : null),
+          e.userEmail ??
+          (keyOf(e) ? (identity.get(keyOf(e) as string) ?? null) : null),
       })),
       nextCursor: hasMore ? events[events.length - 1].id : null,
     };
@@ -80,12 +88,19 @@ export class MetaPixelLogService {
     const unique = [...new Set(fbps)];
     if (unique.length === 0) return new Map();
     const rows = await this.prisma.metaPixelEvent.findMany({
-      where: { fbp: { in: unique }, userEmail: { not: null } },
+      where: {
+        OR: [{ visitorId: { in: unique } }, { fbp: { in: unique } }],
+        userEmail: { not: null },
+      },
       orderBy: { eventTime: 'desc' },
-      distinct: ['fbp'],
-      select: { fbp: true, userEmail: true },
+      select: { visitorId: true, fbp: true, userEmail: true },
     });
-    return new Map(rows.map((r) => [r.fbp as string, r.userEmail as string]));
+    const map = new Map<string, string>();
+    for (const r of rows) {
+      for (const k of [r.visitorId, r.fbp])
+        if (k && !map.has(k)) map.set(k, r.userEmail as string);
+    }
+    return map;
   }
 
   /** Обобщение за същия филтър; без период = последните 30 дни */
@@ -113,9 +128,11 @@ export class MetaPixelLogService {
           take: 10,
         }),
         this.prisma.metaPixelEvent.findMany({
-          where: { ...base, fbp: { not: null } },
-          distinct: ['fbp'],
-          select: { fbp: true },
+          where: {
+            ...base,
+            OR: [{ visitorId: { not: null } }, { fbp: { not: null } }],
+          },
+          select: { visitorId: true, fbp: true },
         }),
         this.prisma.metaPixelEvent.count({
           where: { ...base, eventName: { in: ['Lead', 'Contact'] } },
@@ -130,21 +147,21 @@ export class MetaPixelLogService {
         byEvent.map((b) => [b.eventName, b._count._all]),
       ),
       topPages: topPages.map((p) => ({ path: p.path, count: p._count._all })),
-      uniqueVisitors: visitors.length,
+      uniqueVisitors: new Set(visitors.map((v) => v.visitorId ?? v.fbp)).size,
       leads,
     };
   }
 
   /** Всички събития на един браузър (по _fbp), хронологично */
-  async visitor(fbp: string) {
+  async visitor(key: string) {
     const events = await this.prisma.metaPixelEvent.findMany({
-      where: { fbp },
+      where: { OR: [{ visitorId: key }, { fbp: key }] },
       orderBy: [{ eventTime: 'asc' }, { id: 'asc' }],
       take: 500,
     });
     const identified = events.find((e) => e.userEmail);
     return {
-      fbp,
+      visitor: key,
       email: identified?.userEmail ?? null,
       name: identified
         ? [identified.userFirstName, identified.userLastName]

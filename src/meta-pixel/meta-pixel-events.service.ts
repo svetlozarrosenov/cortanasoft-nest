@@ -22,6 +22,8 @@ export interface SendCapiEventInput {
   userAgent?: string;
   fbp?: string;
   fbc?: string;
+  // Наш идентификатор на браузъра (cs_vid) — само за лога
+  visitorId?: string;
   // PII (auto-hashed от SDK). Празни → не се пращат.
   email?: string;
   phone?: string;
@@ -136,6 +138,7 @@ export class MetaPixelEventsService {
           userAgent: input.userAgent?.slice(0, 500) || null,
           fbp: input.fbp || null,
           fbc: input.fbc || null,
+          visitorId: input.visitorId || null,
         },
         select: { id: true },
       });

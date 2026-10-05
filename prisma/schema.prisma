@@ -4430,6 +4430,9 @@ model MetaPixelEvent {
   userAgent     String?
   fbp           String?
   fbc           String?
+  // Наш first-party идентификатор на браузъра (cs_vid бисквитка, 1 г.) —
+  // работи и при блокиран пиксел; _fbp е само за Meta
+  visitorId     String?
 
   // Резултат от Conversions API
   capiSuccess  Boolean @default(false)
@@ -4442,6 +4445,7 @@ model MetaPixelEvent {
   @@index([eventTime(sort: Desc)])
   @@index([eventName, eventTime(sort: Desc)])
   @@index([fbp, eventTime(sort: Desc)])
+  @@index([visitorId, eventTime(sort: Desc)])
   @@index([userEmail])
   @@index([eventId])
   @@map("meta_pixel_events")
