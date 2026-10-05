@@ -55,6 +55,11 @@ export class MetaPixelController {
     return { success: true, ...page, summary };
   }
 
+  @Get('events/visitors')
+  async visitors(@Query('search') search?: string) {
+    return { success: true, visitors: await this.log.visitors(search) };
+  }
+
   @Get('events/visitor/:key')
   async visitor(@Param('key') key: string) {
     return { success: true, ...(await this.log.visitor(key)) };
