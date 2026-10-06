@@ -57,6 +57,8 @@ export class ExpensesService {
             },
           ];
     const round2 = (n: number) => Math.round(n * 100) / 100;
+    // Ед. цената пази 4 знака (доставчици с цени 48.6140); сумите са на стотинка
+    const round4 = (n: number) => Math.round(n * 10000) / 10000;
     const items = rows.map((r, i) => {
       const vatRate = r.vatRate ?? 0;
       const quantity = r.quantity ?? 1;
@@ -70,7 +72,7 @@ export class ExpensesService {
         description: r.description,
         category: r.category,
         quantity,
-        unitPrice: round2(unitPrice),
+        unitPrice: round4(unitPrice),
         amount,
         vatRate,
         vatAmount: round2(vatAmount),

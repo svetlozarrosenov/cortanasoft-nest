@@ -1193,7 +1193,7 @@ model Product {
   // Цени по подразбиране (без ДДС)
   // Покупна цена към доставчика (ръчна; предпопълва реда в нова доставка).
   // НЕ се презаписва от доставките — транспортът не бива да влиза тук.
-  purchasePrice Decimal? @db.Decimal(10, 2)
+  purchasePrice Decimal? @db.Decimal(12, 4) // 4 знака: доставчици с цени 48.6140 (тикет #18 Инатех)
   // Последна доставна стойност за единица: цена × курс + дял от разходите по
   // доставката, във валутата на компанията. Обновява се при всяка потвърдена
   // доставка (складова или дропшип). Справочна колона в Продукти; складът си
@@ -1462,7 +1462,7 @@ model GoodsReceipt {
 model GoodsReceiptItem {
   id           String  @id @default(cuid())
   quantity     Decimal @db.Decimal(10, 3) // Получено количество
-  unitPrice    Decimal @db.Decimal(10, 2) // Реална покупна цена
+  unitPrice    Decimal @db.Decimal(12, 4) // Реална покупна цена (4 знака — доставчиците ползват 3–4)
   vatRate      Decimal @db.Decimal(5, 2) // ДДС ставка
   exchangeRate Decimal @default(1) @db.Decimal(10, 6) // Курс към валутата на компанията
 
@@ -2102,7 +2102,7 @@ model OrderItem {
   // (GoodsReceipt.directDelivery + orderId) при получаването ѝ.
   // Гейт: erp.directDelivery (view).
   directDelivery Boolean  @default(false)
-  unitCost       Decimal? @db.Decimal(10, 2) // Покупна цена (снапшот) — само за директни редове
+  unitCost       Decimal? @db.Decimal(12, 4) // Покупна цена (снапшот) — само за директни редове
 
   invoiceItems InvoiceItem[]
 
@@ -2392,7 +2392,7 @@ model InventoryBatch {
   batchNumber       String // Номер на партидата (LOT)
   quantity          Decimal   @db.Decimal(10, 3) // Текущо налично количество
   initialQty        Decimal   @db.Decimal(10, 3) // Първоначално количество
-  unitCost          Decimal   @db.Decimal(10, 2) // Цена на придобиване
+  unitCost          Decimal   @db.Decimal(12, 4) // Цена на придобиване (4 знака)
   expiryDate        DateTime? // Срок на годност
   manufacturingDate DateTime? // Дата на производство
   notes             String?
@@ -2441,7 +2441,7 @@ model InventorySerial {
   id           String       @id @default(cuid())
   serialNumber String // Уникален сериен/регистрационен номер
   status       SerialStatus @default(IN_STOCK)
-  unitCost     Decimal      @db.Decimal(10, 2) // Цена на придобиване
+  unitCost     Decimal      @db.Decimal(12, 4) // Цена на придобиване (4 знака)
   notes        String?
 
   createdAt DateTime @default(now())
@@ -3431,7 +3431,7 @@ model ExpenseItem {
   // Количество × единична цена = нетна сума (както ред на фактура); ДДС във
   // валутата на реда; exchangeRate → валутата на компанията
   quantity     Decimal  @default(1) @db.Decimal(10, 3)
-  unitPrice    Decimal? @db.Decimal(12, 2)
+  unitPrice    Decimal? @db.Decimal(12, 4)
   amount       Decimal  @db.Decimal(12, 2)
   vatRate      Decimal  @default(0) @db.Decimal(5, 2)
   vatAmount    Decimal  @default(0) @db.Decimal(12, 2)

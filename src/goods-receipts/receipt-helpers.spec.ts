@@ -10,9 +10,15 @@ const item = (
 
 describe('computeUnitCosts', () => {
   it('converts the line price into the company currency', () => {
-    // 10 бр. × 5 EUR × 1.95583 = 9.78 BGN/бр.
+    // 10 бр. × 5 EUR × 1.95583 = 9.7792 BGN/бр. (4 знака — тикет #18)
     const m = computeUnitCosts([item('a', 10, 5, 1.95583)], []);
-    expect(m.get('a')).toBe(9.78);
+    expect(m.get('a')).toBe(9.7792);
+  });
+
+  it('пази 4 знака на цената: 5 бр. × 48.6140 не губи стотинки', () => {
+    const m = computeUnitCosts([item('a', 5, 48.614)], []);
+    expect(m.get('a')).toBe(48.614);
+    expect(Math.round(5 * (m.get('a') as number) * 100) / 100).toBe(243.07);
   });
 
   it('spreads included expenses proportionally to line value', () => {

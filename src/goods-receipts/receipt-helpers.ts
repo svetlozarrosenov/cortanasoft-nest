@@ -51,6 +51,8 @@ export const RECEIPT_INCLUDE = {
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+// Себестойността е с 4 знака — при цени 48.6140 закръглянето до стотинка губи 1–2 цента на ред
+const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
 export interface UnitCostItem {
   id: string;
@@ -82,7 +84,7 @@ export function landedCostLines(
  *   landed cost    = Σ разходи към доставката с includeInStockCost, всеки
  *                    със свой метод: VALUE — дял ∝ база на реда (при нулева
  *                    обща база — по количество); QUANTITY — дял ∝ количество
- *   unitCost       = (база + дял) / количество, закръглено до стотинка
+ *   unitCost       = (база + дял) / количество, закръглено до 4-ти знак
  * Услугите не влизат в склада и не поемат дял от разходите.
  */
 export function computeUnitCosts(
@@ -121,7 +123,7 @@ export function computeUnitCosts(
         share += (landedByQty * qty) / totalQty;
       }
     }
-    out.set(it.id, qty > 0 ? round2((lineBase + share) / qty) : 0);
+    out.set(it.id, qty > 0 ? round4((lineBase + share) / qty) : 0);
   }
   return out;
 }

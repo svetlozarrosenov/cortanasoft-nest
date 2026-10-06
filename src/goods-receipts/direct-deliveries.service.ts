@@ -62,8 +62,9 @@ export class DirectDeliveriesService {
       if (map.has(r.productId)) continue;
       map.set(r.productId, {
         unitPrice:
-          Math.round(Number(r.unitPrice) * Number(r.exchangeRate || 1) * 100) /
-          100,
+          Math.round(
+            Number(r.unitPrice) * Number(r.exchangeRate || 1) * 10000,
+          ) / 10000,
         supplierId: r.goodsReceipt.supplierId,
       });
     }
