@@ -207,6 +207,22 @@ export class DashboardService {
       },
     });
 
+    // Recent goods receipts — same idea as recentOrders, by the document date.
+    const recentGoodsReceipts = await this.prisma.goodsReceipt.findMany({
+      where: { companyId, status: { not: 'CANCELLED' } },
+      orderBy: [{ receiptDate: 'desc' }, { createdAt: 'desc' }],
+      take: 5,
+      select: {
+        id: true,
+        receiptNumber: true,
+        receiptDate: true,
+        totalAmount: true,
+        status: true,
+        directDelivery: true,
+        supplier: { select: { name: true } },
+      },
+    });
+
     // Calculate percentage changes
     const calculateChange = (current: number, previous: number): string => {
       if (previous === 0) return current > 0 ? '+100%' : '0%';
@@ -268,6 +284,15 @@ export class DashboardService {
         total: Number(o.total),
         status: o.status,
         createdAt: o.createdAt,
+      })),
+      recentGoodsReceipts: recentGoodsReceipts.map((r) => ({
+        id: r.id,
+        receiptNumber: r.receiptNumber,
+        supplierName: r.supplier?.name ?? null,
+        total: Number(r.totalAmount),
+        status: r.status,
+        directDelivery: r.directDelivery,
+        receiptDate: r.receiptDate,
       })),
     };
   }

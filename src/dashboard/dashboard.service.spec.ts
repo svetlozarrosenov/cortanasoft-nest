@@ -7,6 +7,7 @@ const mockPrisma = {
   deal: { count: jest.fn() },
   product: { count: jest.fn() },
   order: { count: jest.fn(), aggregate: jest.fn(), findMany: jest.fn() },
+  goodsReceipt: { findMany: jest.fn() },
   invoice: { count: jest.fn(), aggregate: jest.fn() },
   userCompany: { count: jest.fn() },
   department: { count: jest.fn() },
@@ -38,6 +39,7 @@ describe('DashboardService', () => {
       mockPrisma.order.count.mockResolvedValue(0);
       mockPrisma.order.aggregate.mockResolvedValue({ _sum: { total: null, paidAmount: null } });
       mockPrisma.order.findMany.mockResolvedValue([]);
+      mockPrisma.goodsReceipt.findMany.mockResolvedValue([]);
       mockPrisma.invoice.count.mockResolvedValue(0);
       mockPrisma.invoice.aggregate.mockResolvedValue({ _sum: { total: null } });
       mockPrisma.userCompany.count.mockResolvedValue(0);
@@ -51,6 +53,7 @@ describe('DashboardService', () => {
       expect(result).toHaveProperty('quickStats');
       expect(result).toHaveProperty('modules');
       expect(result).toHaveProperty('recentOrders');
+      expect(result).toHaveProperty('recentGoodsReceipts');
       expect(result.modules).toHaveProperty('crm');
       expect(result.modules).toHaveProperty('erp');
       expect(result.modules).toHaveProperty('hr');
