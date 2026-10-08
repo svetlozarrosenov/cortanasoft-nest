@@ -169,7 +169,8 @@ const EXPENSE_CATEGORY_HINTS = `  DELIVERY: shipping, couriers, transport servic
   MAINTENANCE: repairs, servicing, cleaning, spare parts for own equipment/vehicles
   INSURANCE: insurance premiums of any kind
   TAXES: taxes, state/municipal fees, licences from authorities
-  TRAVEL: business trips — hotels, tickets, per diems, taxi
+  TRAVEL: business trips — tickets, per diems, taxi (hotels go to ACCOMMODATION)
+  ACCOMMODATION: hotels, guest houses, apartments, lodging of any kind
   COMMUNICATION: phone, mobile, internet, hosting of communication services
   SOFTWARE: software licences, SaaS subscriptions, cloud, domains
   CONSULTING: accountants, lawyers, consultants, freelancers, professional services
