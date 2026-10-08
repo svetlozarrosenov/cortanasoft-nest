@@ -12,6 +12,7 @@ import {
   ExpenseItemDto,
 } from './dto';
 import { Prisma, ExpenseCategory } from '@prisma/client';
+import { ErrorMessages } from '../common/constants/error-messages';
 
 @Injectable()
 export class ExpensesService {
@@ -98,6 +99,19 @@ export class ExpensesService {
     };
   }
 
+  // Служителят (advanceUserId) трябва да е в компанията
+  private async assertEmployeeInCompany(companyId: string, userId: string) {
+    const member = await this.prisma.userCompany.findFirst({
+      where: { companyId, userId },
+      select: { id: true },
+    });
+    if (!member) {
+      throw new NotFoundException(
+        ErrorMessages.employeeAdvances.employeeNotInCompany,
+      );
+    }
+  }
+
   async create(companyId: string, userId: string, dto: CreateExpenseDto) {
     const lines = ExpensesService.linesFromDto(dto);
     if (
@@ -112,6 +126,15 @@ export class ExpensesService {
     if (dto.siteId) {
       await this.assertSiteInCompany(companyId, dto.siteId);
     }
+    if (dto.advanceUserId) {
+      await this.assertEmployeeInCompany(companyId, dto.advanceUserId);
+    }
+    // Платен от служебен аванс = парите вече са излезли от фирмата → платен
+    const fromAdvance = !!dto.advanceUserId;
+    const status = dto.status || (fromAdvance ? 'PAID' : 'PENDING');
+    const expenseDate = dto.expenseDate
+      ? new Date(dto.expenseDate)
+      : new Date();
 
     return this.prisma.expense.create({
       data: {
@@ -121,13 +144,15 @@ export class ExpensesService {
         vatAmount: lines.vatAmount,
         totalAmount: lines.totalAmount,
         items: { create: lines.items },
-        expenseDate: dto.expenseDate ? new Date(dto.expenseDate) : new Date(),
+        expenseDate,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
         invoiceNumber: dto.invoiceNumber,
         receiptNumber: dto.receiptNumber,
         attachmentUrl: dto.attachmentUrl,
-        status: dto.status || 'PENDING',
-        paymentMethod: dto.paymentMethod,
+        status,
+        paidAt: status === 'PAID' ? expenseDate : null,
+        paymentMethod: dto.paymentMethod ?? (fromAdvance ? 'CASH' : undefined),
+        advanceUserId: dto.advanceUserId || undefined,
         notes: dto.notes,
         isRecurring: dto.isRecurring || false,
         recurringInterval: dto.recurringInterval,
@@ -140,6 +165,7 @@ export class ExpensesService {
         items: { orderBy: { sortOrder: 'asc' as const } },
         supplier: true,
         site: { select: { id: true, name: true } },
+        advanceUser: { select: { id: true, firstName: true, lastName: true } },
         createdBy: {
           select: {
             id: true,
@@ -224,6 +250,9 @@ export class ExpensesService {
           items: { orderBy: { sortOrder: 'asc' as const } },
           supplier: true,
           site: { select: { id: true, name: true } },
+          advanceUser: {
+            select: { id: true, firstName: true, lastName: true },
+          },
           createdBy: {
             select: {
               id: true,
@@ -272,6 +301,7 @@ export class ExpensesService {
         items: { orderBy: { sortOrder: 'asc' as const } },
         supplier: true,
         site: { select: { id: true, name: true } },
+        advanceUser: { select: { id: true, firstName: true, lastName: true } },
         createdBy: {
           select: {
             id: true,
@@ -403,6 +433,19 @@ export class ExpensesService {
       }
     }
 
+    if (dto.advanceUserId !== undefined) {
+      if (dto.advanceUserId) {
+        await this.assertEmployeeInCompany(companyId, dto.advanceUserId);
+        updateData.advanceUser = { connect: { id: dto.advanceUserId } };
+        if (dto.status === undefined && current.status === 'PENDING') {
+          updateData.status = 'PAID';
+          updateData.paidAt = updateData.expenseDate ?? current.expenseDate;
+        }
+      } else {
+        updateData.advanceUser = { disconnect: true };
+      }
+    }
+
     if (dto.approvedById !== undefined) {
       if (dto.approvedById) {
         updateData.approvedBy = { connect: { id: dto.approvedById } };
@@ -417,6 +460,7 @@ export class ExpensesService {
         items: { orderBy: { sortOrder: 'asc' as const } },
         supplier: true,
         site: { select: { id: true, name: true } },
+        advanceUser: { select: { id: true, firstName: true, lastName: true } },
         createdBy: {
           select: {
             id: true,

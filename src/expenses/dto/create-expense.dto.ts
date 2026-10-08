@@ -90,4 +90,9 @@ export class CreateExpenseDto {
   @IsString()
   @IsOptional()
   siteId?: string;
+
+  // Платен от служебния аванс на служител (HR > Служебни аванси)
+  @IsString()
+  @IsOptional()
+  advanceUserId?: string;
 }

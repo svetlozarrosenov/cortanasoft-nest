@@ -664,6 +664,13 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         labelKey: 'modules.hr.schedule',
         actions: ['view', 'create', 'edit', 'delete'],
       },
+      // Служебни аванси (пари на служител срещу разходи по обекти) — opt-in,
+      // никоя роля не го получава автоматично.
+      {
+        key: 'advances',
+        labelKey: 'modules.hr.advances',
+        actions: ['view', 'create', 'edit', 'delete'],
+      },
       {
         key: 'attendance',
         labelKey: 'modules.hr.attendance',

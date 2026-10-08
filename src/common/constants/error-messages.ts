@@ -59,6 +59,11 @@ export const ErrorMessages = {
     noDates: 'Няма нито един ден в избрания период за избраните дни от седмицата',
     weekMustStartMonday: 'Седмицата трябва да започва от понеделник',
   },
+  employeeAdvances: {
+    notFound: 'Авансът не е намерен',
+    employeeNotInCompany: 'Служителят не е част от компанията',
+    invalidAmount: 'Сумата трябва да е положителна',
+  },
   customerContacts: {
     notFound: 'Лицето за контакт не е намерено',
   },

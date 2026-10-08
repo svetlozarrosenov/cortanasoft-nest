@@ -27,6 +27,7 @@ import { CustomersModule } from './customers/customers.module';
 import { CustomerCategoriesModule } from './customer-categories/customer-categories.module';
 import { CustomerContactsModule } from './customer-contacts/customer-contacts.module';
 import { WorkShiftsModule } from './work-shifts/work-shifts.module';
+import { EmployeeAdvancesModule } from './employee-advances/employee-advances.module';
 import { DealsModule } from './deals/deals.module';
 import { EmployeesModule } from './employees/employees.module';
 import { DepartmentsModule } from './departments/departments.module';
@@ -119,6 +120,7 @@ import { HealthModule } from './health/health.module';
     CustomerCategoriesModule,
     CustomerContactsModule,
     WorkShiftsModule,
+    EmployeeAdvancesModule,
     DealsModule,
     EmployeesModule,
     DepartmentsModule,
