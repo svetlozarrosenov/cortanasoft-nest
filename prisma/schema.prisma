@@ -2356,6 +2356,7 @@ model Offer {
 
   items          OfferItem[]
   resultingOrder Order?      @relation("OrderFromOffer")
+  documents      Document[]
 
   @@unique([companyId, offerNumber])
   @@index([companyId, status])
@@ -3490,6 +3491,9 @@ model Document {
   ascertainmentProtocolId String?
   ascertainmentProtocol   AscertainmentProtocol? @relation(fields: [ascertainmentProtocolId], references: [id], onDelete: Cascade)
 
+  offerId String?
+  offer   Offer?  @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
   @@index([companyId])
   @@index([goodsReceiptId])
   @@index([invoiceId])
@@ -3498,6 +3502,7 @@ model Document {
   @@index([stockReceiptId])
   @@index([acceptanceProtocolId])
   @@index([ascertainmentProtocolId])
+  @@index([offerId])
   @@map("documents")
 }
 

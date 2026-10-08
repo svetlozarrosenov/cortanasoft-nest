@@ -29,7 +29,7 @@ const OFFER_INCLUDE = {
   resultingOrder: {
     select: { id: true, orderNumber: true, status: true },
   },
-  _count: { select: { items: true } },
+  _count: { select: { items: true, documents: true } },
 } as const;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
