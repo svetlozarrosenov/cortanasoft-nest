@@ -23,6 +23,7 @@ import {
   UpdateExpenseDto,
   QueryExpensesDto,
   MarkExpensePaidDto,
+  DuplicatesQueryDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -83,6 +84,16 @@ export class ExpensesController {
     @Query() query: QueryExpensesDto,
   ) {
     return this.expensesService.findAll(companyId, query);
+  }
+
+  // Предупреждение за дублиран разход — ползва се от модала преди запис
+  @Get('duplicates')
+  @RequireView('erp', 'expenses')
+  duplicates(
+    @Param('companyId') companyId: string,
+    @Query() query: DuplicatesQueryDto,
+  ) {
+    return this.expensesService.findDuplicates(companyId, query);
   }
 
   @Get('export')
