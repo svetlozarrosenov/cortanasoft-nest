@@ -2039,6 +2039,7 @@ model Order {
 
   items               OrderItem[]
   invoices            Invoice[]
+  proformas           Proforma[]
   acceptanceProtocols AcceptanceProtocol[]
   shipments           Shipment[]
   issuedWarranties    IssuedWarranty[]
@@ -2617,6 +2618,10 @@ model Proforma {
   customerCity       String?
   customerPostalCode String?
 
+  // Проформа по продажба (продажба → проформа → авансова/окончателна фактура)
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
   // Суми
   subtotal  Decimal @db.Decimal(12, 2) // Сума без ДДС
   vatAmount Decimal @db.Decimal(12, 2) // ДДС
@@ -2649,6 +2654,7 @@ model Proforma {
   @@index([companyId, status])
   @@index([companyId, proformaDate])
   @@index([customerId])
+  @@index([orderId])
   @@map("proformas")
 }
 

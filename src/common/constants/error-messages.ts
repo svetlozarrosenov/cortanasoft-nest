@@ -97,6 +97,10 @@ export const ErrorMessages = {
   },
 
   // ==================== Фактури ====================
+  proformas: {
+    orderCancelled: 'Не може да се издаде проформа по анулирана продажба',
+    amountExceedsTotal: 'Сумата надвишава стойността на продажбата',
+  },
   invoices: {
     notFound: 'Фактурата не е намерена',
     orderNotFound: 'Поръчката не е намерена',
