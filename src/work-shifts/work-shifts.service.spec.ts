@@ -7,7 +7,7 @@ describe('WorkShiftsService', () => {
     site: { findFirst: jest.fn(), findMany: jest.fn() },
     userCompany: { findMany: jest.fn() },
     user: { findMany: jest.fn() },
-    attendance: { deleteMany: jest.fn() },
+    attendance: { deleteMany: jest.fn(), findFirst: jest.fn() },
     workShift: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
@@ -18,10 +18,19 @@ describe('WorkShiftsService', () => {
     },
   };
   const attendance: any = { create: jest.fn() };
-  const service = new WorkShiftsService(prisma, attendance);
+  const hrSettings: any = {
+    get: jest
+      .fn()
+      .mockResolvedValue({ breakStart: '12:00', breakEnd: '13:00' }),
+  };
+  const service = new WorkShiftsService(prisma, attendance, hrSettings);
 
   beforeEach(() => {
     jest.clearAllMocks();
+    hrSettings.get.mockResolvedValue({
+      breakStart: '12:00',
+      breakEnd: '13:00',
+    });
     prisma.site.findFirst.mockResolvedValue({ id: 'site1' });
     prisma.userCompany.findMany.mockImplementation(async ({ where }: any) =>
       where.userId.in.map((userId: string) => ({ userId })),
@@ -130,12 +139,67 @@ describe('WorkShiftsService', () => {
     ]);
     prisma.leave = { findMany: jest.fn().mockResolvedValue([]) };
     prisma.workShift.update = jest.fn();
-    attendance.create.mockResolvedValue({ id: 'att9' });
+    attendance.create.mockResolvedValue({ count: 1, skipped: [] });
+    prisma.attendance.findFirst.mockResolvedValue({ id: 'att9' });
     await service.autoReportDay('c1', '2026-10-05');
-    expect(attendance.create.mock.calls[0][2]).toMatchObject({
-      checkIn: '2026-10-05T19:00:00.000Z',
-      checkOut: '2026-10-06T03:00:00.000Z',
+    // Часовете „от–до" отиват в Присъствия, което само удължава нощната
+    // смяна до следващия ден; почивка при нощна смяна няма
+    const dto = attendance.create.mock.calls[0][2];
+    expect(dto).toMatchObject({
+      dates: ['2026-10-05'],
+      startTime: '22:00',
+      endTime: '06:00',
     });
+    expect(dto.breakStart).toBeUndefined();
+  });
+
+  it('почивката трябва да е „от–до" изцяло в дневна смяна', async () => {
+    const base = {
+      siteId: 'site1',
+      userIds: ['u1'],
+      date: '2026-10-05',
+      startTime: '08:00',
+      endTime: '17:00',
+    };
+    await expect(
+      service.create('c1', { ...base, breakStart: '12:00' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.create('c1', { ...base, breakStart: '07:00', breakEnd: '08:30' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.create('c1', { ...base, breakStart: '13:00', breakEnd: '12:00' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.create('c1', {
+        ...base,
+        startTime: '22:00',
+        endTime: '06:00',
+        breakStart: '01:00',
+        breakEnd: '02:00',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.workShift.createMany).not.toHaveBeenCalled();
+
+    await service.create('c1', {
+      ...base,
+      breakStart: '14:00',
+      breakEnd: '15:00',
+    });
+    const rows = prisma.workShift.createMany.mock.calls[0][0].data;
+    expect(rows[0]).toMatchObject({ breakStart: '14:00', breakEnd: '15:00' });
+  });
+
+  it('без зададена почивка смяната се пази с null (= почивката от HR настройките)', async () => {
+    await service.create('c1', {
+      siteId: 'site1',
+      userIds: ['u1'],
+      date: '2026-10-05',
+      startTime: '08:00',
+      endTime: '17:00',
+    });
+    const rows = prisma.workShift.createMany.mock.calls[0][0].data;
+    expect(rows[0]).toMatchObject({ breakStart: null, breakEnd: null });
   });
 
   it('еднакви начален и краен час е грешка', async () => {
@@ -203,12 +267,21 @@ describe('WorkShiftsService.autoReportDay (присъствия от графи�
   const prisma: any = {
     workShift: { findMany: jest.fn(), update: jest.fn() },
     leave: { findMany: jest.fn() },
+    attendance: { findFirst: jest.fn() },
   };
   const attendance: any = { create: jest.fn() };
-  const service = new WorkShiftsService(prisma, attendance);
+  const hrSettings: any = { get: jest.fn() };
+  const service = new WorkShiftsService(prisma, attendance, hrSettings);
   const day = new Date('2026-10-05T00:00:00.000Z');
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    hrSettings.get.mockResolvedValue({
+      breakStart: '12:00',
+      breakEnd: '13:00',
+    });
+    prisma.attendance.findFirst.mockResolvedValue({ id: 'att1' });
+  });
 
   it('отчита планираните смени за деня и създава присъствия; отпускът има приоритет', async () => {
     prisma.workShift.findMany.mockResolvedValue([
@@ -237,16 +310,22 @@ describe('WorkShiftsService.autoReportDay (присъствия от графи�
         endDate: new Date('2026-10-07T00:00:00.000Z'),
       },
     ]);
-    attendance.create.mockResolvedValue({ id: 'att1' });
+    attendance.create.mockResolvedValue({ count: 1, skipped: [] });
 
     const res = await service.autoReportDay('c1', '2026-10-05');
     expect(res).toEqual({ done: 1, onLeave: 1, failed: 0 });
     expect(attendance.create).toHaveBeenCalledTimes(1);
-    expect(attendance.create.mock.calls[0][2]).toMatchObject({
+    // 08–12 не побира почивката 12–13 → без разделяне
+    const dto = attendance.create.mock.calls[0][2];
+    expect(dto).toMatchObject({
       userId: 'u1',
       siteId: 'site1',
       date: '2026-10-05',
+      dates: ['2026-10-05'],
+      startTime: '08:00',
+      endTime: '12:00',
     });
+    expect(dto.breakStart).toBeUndefined();
     expect(prisma.workShift.update).toHaveBeenCalledWith({
       where: { id: 's1' },
       data: expect.objectContaining({
@@ -285,10 +364,110 @@ describe('WorkShiftsService.autoReportDay (присъствия от графи�
     prisma.leave.findMany.mockResolvedValue([]);
     attendance.create
       .mockRejectedValueOnce(new Error('overlap'))
-      .mockResolvedValueOnce({ id: 'att2' });
+      .mockResolvedValueOnce({ count: 1, skipped: [] });
     const res = await service.autoReportDay('c1', '2026-10-05');
     expect(res).toEqual({ done: 1, onLeave: 0, failed: 1 });
     expect(prisma.workShift.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('ден с вече въведено присъствие (count 0) = прескочена смяна, не DONE', async () => {
+    prisma.workShift.findMany.mockResolvedValue([
+      {
+        id: 's1',
+        userId: 'u1',
+        siteId: 'site1',
+        date: day,
+        startTime: '08:00',
+        endTime: '17:00',
+      },
+    ]);
+    prisma.leave.findMany.mockResolvedValue([]);
+    attendance.create.mockResolvedValue({
+      count: 0,
+      skipped: [{ date: '2026-10-05', reason: 'recorded' }],
+    });
+    const res = await service.autoReportDay('c1', '2026-10-05');
+    expect(res).toEqual({ done: 0, onLeave: 0, failed: 1 });
+    expect(prisma.workShift.update).not.toHaveBeenCalled();
+  });
+
+  it('цял ден 08–17: почивката от HR настройките разделя присъствието като ръчната форма', async () => {
+    prisma.workShift.findMany.mockResolvedValue([
+      {
+        id: 's1',
+        userId: 'u1',
+        siteId: 'site1',
+        date: day,
+        startTime: '08:00',
+        endTime: '17:00',
+        breakStart: null,
+        breakEnd: null,
+      },
+    ]);
+    prisma.leave.findMany.mockResolvedValue([]);
+    attendance.create.mockResolvedValue({ count: 1, skipped: [] });
+    await service.autoReportDay('c1', '2026-10-05');
+    expect(attendance.create.mock.calls[0][2]).toMatchObject({
+      dates: ['2026-10-05'],
+      startTime: '08:00',
+      endTime: '17:00',
+      breakStart: '12:00',
+      breakEnd: '13:00',
+    });
+    // attendanceId = първият сегмент на деня
+    expect(prisma.attendance.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { companyId: 'c1', userId: 'u1', date: day },
+      orderBy: { checkIn: 'asc' },
+    });
+    expect(prisma.workShift.update).toHaveBeenCalledWith({
+      where: { id: 's1' },
+      data: expect.objectContaining({ status: 'DONE', attendanceId: 'att1' }),
+    });
+  });
+
+  it('собствената почивка на смяната има превес над HR настройките', async () => {
+    prisma.workShift.findMany.mockResolvedValue([
+      {
+        id: 's1',
+        userId: 'u1',
+        siteId: null,
+        date: day,
+        startTime: '07:00',
+        endTime: '17:00',
+        breakStart: '14:00',
+        breakEnd: '15:00',
+      },
+    ]);
+    prisma.leave.findMany.mockResolvedValue([]);
+    attendance.create.mockResolvedValue({ count: 1, skipped: [] });
+    await service.autoReportDay('c1', '2026-10-05');
+    expect(attendance.create.mock.calls[0][2]).toMatchObject({
+      startTime: '07:00',
+      endTime: '17:00',
+      breakStart: '14:00',
+      breakEnd: '15:00',
+    });
+    expect(attendance.create.mock.calls[0][2].siteId).toBeUndefined();
+  });
+
+  it('фирма без почивка в настройките: присъствие без разделяне', async () => {
+    hrSettings.get.mockResolvedValue({ breakStart: null, breakEnd: null });
+    prisma.workShift.findMany.mockResolvedValue([
+      {
+        id: 's1',
+        userId: 'u1',
+        siteId: 'site1',
+        date: day,
+        startTime: '08:00',
+        endTime: '17:00',
+        breakStart: null,
+        breakEnd: null,
+      },
+    ]);
+    prisma.leave.findMany.mockResolvedValue([]);
+    attendance.create.mockResolvedValue({ count: 1, skipped: [] });
+    await service.autoReportDay('c1', '2026-10-05');
+    expect(attendance.create.mock.calls[0][2].breakStart).toBeUndefined();
   });
 });
 

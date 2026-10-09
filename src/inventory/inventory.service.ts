@@ -443,6 +443,7 @@ export class InventoryService {
   async getStockLevels(companyId: string, query: QueryStockLevelsDto) {
     const {
       search,
+      type,
       locationId,
       categoryId,
       hasStock,
@@ -454,6 +455,7 @@ export class InventoryService {
     // Build product filter
     const productWhere: Prisma.ProductWhereInput = {
       companyId,
+      ...(type && { type }),
       ...(categoryId && { categoryId }),
       // Всяка дума от търсенето трябва да съвпадне в име/SKU/баркод/категория
       ...buildTokenSearch<Prisma.ProductWhereInput>(search, [

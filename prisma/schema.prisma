@@ -963,6 +963,11 @@ model WorkShift {
   date      DateTime @db.Date
   startTime String // "18:00"
   endTime   String // "21:00"
+  // Почивка „от–до" вътре в смяната (HH:mm). NULL = почивката от HR
+  // настройките. При отчитане присъствието се разделя около нея на два
+  // сегмента — точно както ръчната форма в Присъствия. Само за дневни смени.
+  breakStart String?
+  breakEnd   String?
   note      String?
 
   status       WorkShiftStatus @default(PLANNED)
