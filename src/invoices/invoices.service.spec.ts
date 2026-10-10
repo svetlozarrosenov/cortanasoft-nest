@@ -102,6 +102,17 @@ describe('InvoicesService', () => {
       expect(rows[0].description).toBe(expected);
     });
 
+    it('should reject a REGULAR invoice for part of the remainder (no tax event)', async () => {
+      const order = makeOrder('CONFIRMED');
+      Object.assign(order, { invoicedAmount: 0, paidAmount: 0 });
+      mockPrisma.order.findFirst.mockResolvedValue(order);
+      mockPrisma.invoice.findFirst.mockResolvedValue(null);
+      await expect(
+        service.createFromOrder('c1', 'u1', { orderId: 'ord1', amount: 13 } as any),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.invoice.create).not.toHaveBeenCalled();
+    });
+
     it('should throw NotFoundException when order not found', async () => {
       mockPrisma.order.findFirst.mockResolvedValue(null);
       await expect(
@@ -406,8 +417,17 @@ describe('InvoicesService', () => {
         .mockResolvedValueOnce(0); // numbering count for fiscal sequence
       mockPrisma.invoice.create.mockResolvedValue({ id: 'avn1', type: 'ADVANCE' });
       mockPrisma.order.update.mockResolvedValue({});
+      // 1st findFirst = numbering, 2nd = re-fetch after recalculateOrderState
+      mockPrisma.invoice.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'avn1', type: 'ADVANCE', status: 'PAID' });
 
-      await service.createAdvance('c1', 'u1', { orderId: 'ord1', amount: 360 } as any);
+      const result = await service.createAdvance('c1', 'u1', { orderId: 'ord1', amount: 360 } as any);
+      // Авансът не записва плащане сам; вече въведените по продажбата се
+      // разпределят FIFO по фактурите (recalculateOrderState)
+      expect(mockPayments.recalculateOrderState).toHaveBeenCalledWith(expect.anything(), 'ord1');
+      expect(mockPrisma.payment?.create ?? jest.fn()).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({ id: 'avn1', status: 'PAID' }));
 
       expect(mockPrisma.invoice.create).toHaveBeenCalledWith(
         expect.objectContaining({

@@ -216,6 +216,12 @@ export class InvoicesService {
     if (requestedAmount > remainder + EPSILON) {
       throw new BadRequestException(ErrorMessages.invoices.amountExceedsRemainder);
     }
+    // Обикновена фактура за произволна част от сумата няма данъчно събитие
+    // (ЗДДС чл. 25): нито доставка, нито получен аванс. Затова REGULAR покрива
+    // целия нефактуриран остатък; парите преди доставка минават като ADVANCE.
+    if (Math.abs(requestedAmount - remainder) > EPSILON) {
+      throw new BadRequestException(ErrorMessages.invoices.regularMustCoverRemainder);
+    }
 
     const isFullFirstInvoice =
       alreadyInvoiced === 0 && Math.abs(requestedAmount - orderTotal) < EPSILON;
@@ -368,7 +374,7 @@ export class InvoicesService {
     const partialVatAmount = round2(Number(order.vatAmount) * ratio);
     const effectiveVatRate = this.effectiveVatRateForOrder(order);
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const invoiceNumber = await this.generateInvoiceNumber(companyId, tx);
 
       const invoice = await tx.invoice.create({
@@ -412,8 +418,16 @@ export class InvoicesService {
         data: { advancedAmount: alreadyAdvanced + requestedAmount },
       });
 
+      // Авансът не създава плащане — парите са отделен факт със своя дата и
+      // начин. Но вече записаните по продажбата плащания се разпределят
+      // FIFO по фактурите, така че аванс след въведено плащане излиза платен.
+      await this.paymentsService.recalculateOrderState(tx, order.id);
+
       return invoice;
     });
+
+    // Re-fetch after transaction — recalculateOrderState mutated paidAmount/status.
+    return this.findOne(companyId, created.id);
   }
 
   async createFinal(
