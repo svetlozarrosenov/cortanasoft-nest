@@ -17,6 +17,7 @@ import {
   CreateProformaDto,
   UpdateProformaDto,
   QueryProformasDto,
+  CreateProformaFromOrderDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -49,6 +50,26 @@ export class CompanyProformasController {
     @Body() dto: CreateProformaDto,
   ) {
     return this.proformasService.create(companyId, user.id, dto);
+  }
+
+  // Проформа по продажба (от таба „Фактури" на продажбата)
+  @Post('from-order')
+  @RequireCreate('erp', 'invoices')
+  createFromOrder(
+    @Param('companyId') companyId: string,
+    @CurrentUser() user: any,
+    @Body() dto: CreateProformaFromOrderDto,
+  ) {
+    return this.proformasService.createFromOrder(companyId, user.id, dto);
+  }
+
+  @Get('by-order/:orderId')
+  @RequireView('erp', 'invoices')
+  findByOrder(
+    @Param('companyId') companyId: string,
+    @Param('orderId') orderId: string,
+  ) {
+    return this.proformasService.findByOrder(companyId, orderId);
   }
 
   @Get()

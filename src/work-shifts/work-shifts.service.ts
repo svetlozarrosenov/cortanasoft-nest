@@ -8,6 +8,8 @@ import { Prisma, WorkShiftStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AttendanceService } from '../attendance/attendance.service';
+import { HrSettingsService } from '../hr-settings/hr-settings.service';
+import { CreateAttendanceDto } from '../attendance/dto/create-attendance.dto';
 import { ErrorMessages } from '../common/constants/error-messages';
 import {
   CopyWeekDto,
@@ -49,6 +51,7 @@ export class WorkShiftsService {
   constructor(
     private prisma: PrismaService,
     private attendance: AttendanceService,
+    private hrSettings: HrSettingsService,
   ) {}
 
   private dayKey(date: string): Date {
@@ -100,9 +103,32 @@ export class WorkShiftsService {
     }
   }
 
-  /** Датата, на която свършва смяната (следващият ден при нощна смяна) */
-  private endDateKey(dateKey: string, startTime: string, endTime: string) {
-    return endTime > startTime ? dateKey : this.addDays(dateKey, 1);
+  /**
+   * Почивка „от–до": или и двете, или нито една; само в дневна смяна и
+   * изцяло вътре в нея (както ръчната форма в Присъствия разделя деня).
+   */
+  private assertBreak(
+    startTime: string,
+    endTime: string,
+    breakStart: string | null | undefined,
+    breakEnd: string | null | undefined,
+  ) {
+    if (!breakStart && !breakEnd) return;
+    const nightShift = endTime <= startTime;
+    if (
+      !breakStart ||
+      !breakEnd ||
+      nightShift ||
+      !(startTime < breakStart && breakStart < breakEnd && breakEnd < endTime)
+    ) {
+      throw new BadRequestException(ErrorMessages.workShifts.invalidBreak);
+    }
+  }
+
+  /** Почивката по подразбиране от HR > Настройки (за формата и часовете) */
+  async settings(companyId: string) {
+    const s = await this.hrSettings.get(companyId);
+    return { breakStart: s.breakStart, breakEnd: s.breakEnd };
   }
 
   /** Имената на служителите за списъка (без релация в модела) */
@@ -211,6 +237,7 @@ export class WorkShiftsService {
       },
     });
     const leaves = await this.approvedLeaves(companyId, planned);
+    const settings = await this.hrSettings.get(companyId);
     const res = { done: 0, onLeave: 0, failed: 0 };
     for (const shift of planned) {
       if (leaves.has(`${shift.userId}|${dateKey}`)) {
@@ -218,24 +245,46 @@ export class WorkShiftsService {
         continue;
       }
       try {
-        const created = (await this.attendance.create(companyId, shift.userId, {
+        // Същият път като ръчната форма в Присъствия: часове „от–до" +
+        // почивка „от–до" → денят се записва като два сегмента около нея.
+        // Почивката е тази на смяната, иначе — от HR настройките.
+        const breakStart = shift.breakStart ?? settings.breakStart;
+        const breakEnd = shift.breakEnd ?? settings.breakEnd;
+        const useBreak =
+          !!breakStart &&
+          !!breakEnd &&
+          shift.startTime < breakStart &&
+          breakStart < breakEnd &&
+          breakEnd < shift.endTime;
+        const dto = {
           userId: shift.userId,
           date: dateKey,
+          dates: [dateKey],
           siteId: shift.siteId ?? undefined,
-          checkIn: AttendanceService.sofiaTimeToDate(
-            dateKey,
-            shift.startTime,
-          ).toISOString(),
-          checkOut: AttendanceService.sofiaTimeToDate(
-            this.endDateKey(dateKey, shift.startTime, shift.endTime),
-            shift.endTime,
-          ).toISOString(),
-        })) as { id?: string };
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+          ...(useBreak && { breakStart, breakEnd }),
+        } as CreateAttendanceDto;
+        const created = (await this.attendance.create(
+          companyId,
+          shift.userId,
+          dto,
+        )) as { count?: number };
+        if (!created?.count) {
+          // Вече има ръчно въведено присъствие за деня — не го пипаме
+          throw new Error(ErrorMessages.workShifts.alreadyRecorded);
+        }
+        // Първият сегмент на деня: „изтрит в Присъствия" = отново планирана
+        const first = await this.prisma.attendance.findFirst({
+          where: { companyId, userId: shift.userId, date },
+          orderBy: { checkIn: 'asc' },
+          select: { id: true },
+        });
         await this.prisma.workShift.update({
           where: { id: shift.id },
           data: {
             status: WorkShiftStatus.DONE,
-            attendanceId: created?.id ?? null,
+            attendanceId: first?.id ?? null,
             reportedAt: new Date(),
             reportedById: null, // null = автоматично от графика
           },
@@ -297,6 +346,7 @@ export class WorkShiftsService {
    */
   async create(companyId: string, dto: CreateWorkShiftDto) {
     this.assertTimes(dto.startTime, dto.endTime);
+    this.assertBreak(dto.startTime, dto.endTime, dto.breakStart, dto.breakEnd);
     if (dto.siteId) await this.assertSite(companyId, dto.siteId);
     const userIds = await this.assertEmployees(companyId, dto.userIds);
 
@@ -358,6 +408,8 @@ export class WorkShiftsService {
           date: this.dayKey(date),
           startTime: dto.startTime,
           endTime: dto.endTime,
+          breakStart: dto.breakStart ?? null,
+          breakEnd: dto.breakEnd ?? null,
           note: dto.note?.trim() || null,
           seriesId,
         });
@@ -407,6 +459,10 @@ export class WorkShiftsService {
     const startTime = dto.startTime ?? shift.startTime;
     const endTime = dto.endTime ?? shift.endTime;
     this.assertTimes(startTime, endTime);
+    const breakStart =
+      dto.breakStart !== undefined ? dto.breakStart : shift.breakStart;
+    const breakEnd = dto.breakEnd !== undefined ? dto.breakEnd : shift.breakEnd;
+    this.assertBreak(startTime, endTime, breakStart, breakEnd);
 
     const data: Prisma.WorkShiftUpdateManyMutationInput & {
       siteId?: string | null;
@@ -416,6 +472,8 @@ export class WorkShiftsService {
       ...(dto.userId && { userId: dto.userId }),
       ...(dto.startTime && { startTime: dto.startTime }),
       ...(dto.endTime && { endTime: dto.endTime }),
+      ...(dto.breakStart !== undefined && { breakStart: dto.breakStart }),
+      ...(dto.breakEnd !== undefined && { breakEnd: dto.breakEnd }),
       ...(dto.note !== undefined && { note: dto.note?.trim() || null }),
     };
 
@@ -500,6 +558,8 @@ export class WorkShiftsService {
         date: this.dayKey(date),
         startTime: s.startTime,
         endTime: s.endTime,
+        breakStart: s.breakStart,
+        breakEnd: s.breakEnd,
         note: s.note,
         seriesId: s.seriesId,
       });

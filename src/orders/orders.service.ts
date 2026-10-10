@@ -156,7 +156,7 @@ const ORDER_INCLUDE = {
       notes: true,
     },
   },
-  _count: { select: { items: true, invoices: true } },
+  _count: { select: { items: true, invoices: true, proformas: true } },
 } as const;
 
 type OrderForStatus = {

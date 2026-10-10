@@ -15,6 +15,7 @@ const ENTITY_TYPE_MAP = {
   stockReceipt: 'stockReceiptId',
   acceptanceProtocol: 'acceptanceProtocolId',
   ascertainmentProtocol: 'ascertainmentProtocolId',
+  offer: 'offerId',
 } as const;
 
 type EntityType = keyof typeof ENTITY_TYPE_MAP;
@@ -27,6 +28,7 @@ const ENTITY_MODEL_MAP: Record<EntityType, string> = {
   stockReceipt: 'stockReceipt',
   acceptanceProtocol: 'acceptanceProtocol',
   ascertainmentProtocol: 'ascertainmentProtocol',
+  offer: 'offer',
 };
 
 @Injectable()

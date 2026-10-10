@@ -9,6 +9,7 @@ import {
   CreateProformaItemDto,
   UpdateProformaDto,
   QueryProformasDto,
+  CreateProformaFromOrderDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
@@ -200,6 +201,116 @@ export class ProformasService {
         },
         include: this.proformaInclude,
       });
+    });
+  }
+
+  /**
+   * Проформа по продажба (продажба → проформа → аванс/окончателна фактура).
+   * Цялата сума = редовете на продажбата; част = един ред „Проформа по
+   * поръчка …" с пропорционално ДДС (същото като частичната фактура).
+   * Не пипа invoicedAmount — проформата не е данъчен документ.
+   */
+  async createFromOrder(
+    companyId: string,
+    userId: string,
+    dto: CreateProformaFromOrderDto,
+  ) {
+    const order = await this.prisma.order.findFirst({
+      where: { id: dto.orderId, companyId },
+      include: { customer: true, items: { include: { product: true } } },
+    });
+    if (!order) {
+      throw new NotFoundException(ErrorMessages.invoices.orderNotFound);
+    }
+    if (order.status === 'CANCELLED') {
+      throw new BadRequestException(ErrorMessages.proformas.orderCancelled);
+    }
+
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const orderTotal = Number(order.total);
+    const amount = dto.amount !== undefined ? Number(dto.amount) : orderTotal;
+    if (amount > orderTotal + 0.01) {
+      throw new BadRequestException(ErrorMessages.proformas.amountExceedsTotal);
+    }
+    const isFull = Math.abs(amount - orderTotal) < 0.01;
+    const ratio = orderTotal > 0 ? amount / orderTotal : 0;
+    const subtotal = isFull
+      ? order.subtotal
+      : round2(Number(order.subtotal) * ratio);
+    const vatAmount = isFull
+      ? order.vatAmount
+      : round2(Number(order.vatAmount) * ratio);
+    const discount = isFull
+      ? order.discount
+      : round2(Number(order.discount) * ratio);
+    const effectiveVatRate =
+      Number(order.subtotal) > 0
+        ? round2((Number(order.vatAmount) / Number(order.subtotal)) * 100)
+        : 0;
+
+    const items = isFull
+      ? order.items.map((item) => ({
+          productId: item.productId,
+          description: item.description || item.product?.name || 'Артикул',
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          vatRate: item.vatRate,
+          discount: item.discount,
+          total: item.subtotal,
+        }))
+      : [
+          {
+            description: `Проформа по поръчка ${order.orderNumber}`,
+            quantity: 1,
+            unitPrice: Number(subtotal),
+            vatRate: effectiveVatRate,
+            discount: 0,
+            total: Number(subtotal),
+          },
+        ];
+
+    return this.prisma.$transaction(async (tx) => {
+      const proformaNumber = await this.generateProformaNumber(companyId, tx);
+      return tx.proforma.create({
+        data: {
+          proformaNumber,
+          proformaDate: dto.proformaDate
+            ? new Date(dto.proformaDate)
+            : new Date(),
+          dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+          status: 'ISSUED',
+          orderId: order.id,
+          customerId: order.customerId,
+          customerName: order.customerName,
+          customerEik: order.customer?.eik ?? null,
+          customerVatNumber: order.customer?.vatNumber ?? null,
+          customerAddress:
+            order.customer?.address ?? order.shippingAddress ?? null,
+          customerCity: order.customer?.city ?? order.shippingCity ?? null,
+          customerPostalCode:
+            order.customer?.postalCode ?? order.shippingPostalCode ?? null,
+          subtotal,
+          vatAmount,
+          discount,
+          total: amount,
+          paymentMethod: dto.paymentMethod ?? order.paymentMethod ?? null,
+          notes: dto.notes || null,
+          currencyId: order.currencyId,
+          companyId,
+          createdById: userId,
+          items: { create: items },
+        },
+        include: this.proformaInclude,
+      });
+    });
+  }
+
+  /** Проформите по една продажба — за таба „Фактури" на продажбата */
+  async findByOrder(companyId: string, orderId: string) {
+    return this.prisma.proforma.findMany({
+      where: { companyId, orderId },
+      orderBy: { createdAt: 'desc' },
+      include: this.proformaInclude,
     });
   }
 

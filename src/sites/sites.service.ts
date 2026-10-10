@@ -245,11 +245,10 @@ export class SitesService {
       bump(monthKey(new Date(e.expenseDate)), 'expenses', expenseAmount(e));
     }
 
-    // Присъствия на обекта за периода (HR > Присъствия е източникът) —
-    // групирани по служител: колко дни е бил тук.
-    // Труд по присъствия (HR > Присъствие е източникът). Ден, в който човекът е
-    // бил и на друг обект, се дели — по часове, ако всички записи за деня са с
-    // часове, иначе поравно (същата логика като попъпа в Присъствие).
+    // Труд по присъствия (HR > Присъствие е източникът). Денят на обекта се
+    // брои по реалните часове от записите (4 ч = 0,5 ден, 10 ч = 1,25) —
+    // иначе събота с 4 часа излизаше като цял ден (тикет #28). Записи без
+    // часове = цял ден; ден на два обекта без часове се дели поравно.
     const dateFilter =
       dateFrom || dateTo
         ? {
@@ -295,15 +294,19 @@ export class SitesService {
       const k = `${r.userId}|${dayKey(r.date)}`;
       byUserDay.set(k, [...(byUserDay.get(k) || []), r]);
     }
+    const minutesOf = (recs: typeof allRecords) =>
+      recs.reduce((sum, r) => sum + (r.workedMinutes ?? 0), 0);
     const siteShare = (userId: string, day: string) => {
       const recs = byUserDay.get(`${userId}|${day}`) || [];
       const here = recs.filter((r) => r.siteId === id);
-      if (recs.length === 0 || here.length === recs.length) return 1;
-      const allTimed = recs.every((r) => (r.workedMinutes ?? 0) > 0);
-      if (allTimed) {
-        const total = recs.reduce((sum, r) => sum + (r.workedMinutes ?? 0), 0);
-        return here.reduce((sum, r) => sum + (r.workedMinutes ?? 0), 0) / total;
+      if (recs.length === 0) return 1;
+      const hereTimed = here.every((r) => (r.workedMinutes ?? 0) > 0);
+      if (hereTimed && workDayHours > 0) {
+        return minutesOf(here) / (workDayHours * 60);
       }
+      if (here.length === recs.length) return 1;
+      const allTimed = recs.every((r) => (r.workedMinutes ?? 0) > 0);
+      if (allTimed) return minutesOf(here) / minutesOf(recs);
       return here.length / recs.length;
     };
     const attendance = userIds

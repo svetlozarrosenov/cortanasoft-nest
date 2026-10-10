@@ -10,6 +10,7 @@ import {
   QueryExpensesDto,
   MarkExpensePaidDto,
   ExpenseItemDto,
+  DuplicatesQueryDto,
 } from './dto';
 import { Prisma, ExpenseCategory } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
@@ -184,6 +185,56 @@ export class ExpensesService {
         },
       },
     });
+  }
+
+  /**
+   * Дублиран разход (Odoo „Duplicated vendor reference"): същият номер на
+   * фактура при същия доставчик (или без доставчик), а без номер — същият
+   * доставчик + сума + дата. Само предупреждение — записът не се спира.
+   */
+  async findDuplicates(companyId: string, query: DuplicatesQueryDto) {
+    const invoiceNumber = query.invoiceNumber?.trim();
+    const where: Prisma.ExpenseWhereInput = {
+      companyId,
+      status: { not: 'CANCELLED' },
+      ...(query.excludeId && { id: { not: query.excludeId } }),
+    };
+    if (invoiceNumber) {
+      where.invoiceNumber = { equals: invoiceNumber, mode: 'insensitive' };
+      if (query.supplierId) {
+        where.OR = [{ supplierId: query.supplierId }, { supplierId: null }];
+      }
+    } else if (
+      query.supplierId &&
+      query.totalAmount != null &&
+      query.expenseDate
+    ) {
+      where.supplierId = query.supplierId;
+      where.totalAmount = query.totalAmount;
+      where.expenseDate = {
+        gte: new Date(`${query.expenseDate}T00:00:00.000Z`),
+        lt: new Date(`${query.expenseDate}T23:59:59.999Z`),
+      };
+    } else {
+      return [];
+    }
+    const rows = await this.prisma.expense.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: {
+        id: true,
+        description: true,
+        invoiceNumber: true,
+        totalAmount: true,
+        expenseDate: true,
+        status: true,
+        createdAt: true,
+        supplier: { select: { id: true, name: true } },
+        createdBy: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+    return rows.map((r) => ({ ...r, totalAmount: Number(r.totalAmount) }));
   }
 
   async findAll(companyId: string, query: QueryExpensesDto) {

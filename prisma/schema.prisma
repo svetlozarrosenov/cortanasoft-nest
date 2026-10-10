@@ -967,6 +967,11 @@ model WorkShift {
   date      DateTime @db.Date
   startTime String // "18:00"
   endTime   String // "21:00"
+  // Почивка „от–до" вътре в смяната (HH:mm). NULL = почивката от HR
+  // настройките. При отчитане присъствието се разделя около нея на два
+  // сегмента — точно както ръчната форма в Присъствия. Само за дневни смени.
+  breakStart String?
+  breakEnd   String?
   note      String?
 
   status       WorkShiftStatus @default(PLANNED)
@@ -2043,6 +2048,7 @@ model Order {
 
   items               OrderItem[]
   invoices            Invoice[]
+  proformas           Proforma[]
   acceptanceProtocols AcceptanceProtocol[]
   shipments           Shipment[]
   issuedWarranties    IssuedWarranty[]
@@ -2360,6 +2366,7 @@ model Offer {
 
   items          OfferItem[]
   resultingOrder Order?      @relation("OrderFromOffer")
+  documents      Document[]
 
   @@unique([companyId, offerNumber])
   @@index([companyId, status])
@@ -2620,6 +2627,10 @@ model Proforma {
   customerCity       String?
   customerPostalCode String?
 
+  // Проформа по продажба (продажба → проформа → авансова/окончателна фактура)
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
   // Суми
   subtotal  Decimal @db.Decimal(12, 2) // Сума без ДДС
   vatAmount Decimal @db.Decimal(12, 2) // ДДС
@@ -2652,6 +2663,7 @@ model Proforma {
   @@index([companyId, status])
   @@index([companyId, proformaDate])
   @@index([customerId])
+  @@index([orderId])
   @@map("proformas")
 }
 
@@ -3499,6 +3511,9 @@ model Document {
   ascertainmentProtocolId String?
   ascertainmentProtocol   AscertainmentProtocol? @relation(fields: [ascertainmentProtocolId], references: [id], onDelete: Cascade)
 
+  offerId String?
+  offer   Offer?  @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
   @@index([companyId])
   @@index([goodsReceiptId])
   @@index([invoiceId])
@@ -3507,6 +3522,7 @@ model Document {
   @@index([stockReceiptId])
   @@index([acceptanceProtocolId])
   @@index([ascertainmentProtocolId])
+  @@index([offerId])
   @@map("documents")
 }
 

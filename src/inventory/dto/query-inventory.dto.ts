@@ -1,4 +1,5 @@
 import {
+  IsEnum,
   IsOptional,
   IsString,
   IsBoolean,
@@ -8,6 +9,7 @@ import {
   Max,
   IsIn,
 } from 'class-validator';
+import { ProductType } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 
 export class QueryInventoryDto {
@@ -81,6 +83,12 @@ export class QueryStockLevelsDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  // Само продукти от този тип (напр. SERVICE — услугите нямат склад и се
+  // продават и без избрана локация)
+  @IsOptional()
+  @IsEnum(ProductType)
+  type?: ProductType;
 
   @IsOptional()
   @IsString()

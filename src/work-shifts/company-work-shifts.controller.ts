@@ -54,6 +54,14 @@ export class CompanyWorkShiftsController {
     return this.shifts.sites(companyId);
   }
 
+  // Почивката по подразбиране (HR > Настройки) — за формата и часовете в
+  // графика, без да иска правото hr.settings
+  @Get('settings')
+  @RequireView('hr', 'schedule')
+  settings(@Param('companyId') companyId: string) {
+    return this.shifts.settings(companyId);
+  }
+
   @Post()
   @RequireCreate('hr', 'schedule')
   create(

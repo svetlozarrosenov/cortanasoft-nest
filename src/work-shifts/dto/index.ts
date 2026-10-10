@@ -55,6 +55,15 @@ export class CreateWorkShiftDto {
   @Matches(TIME)
   endTime: string;
 
+  // Почивка „от–до" вътре в смяната. Празно = почивката от HR настройките.
+  @Matches(TIME)
+  @IsOptional()
+  breakStart?: string;
+
+  @Matches(TIME)
+  @IsOptional()
+  breakEnd?: string;
+
   @IsString()
   @IsOptional()
   @MaxLength(500)
@@ -114,6 +123,17 @@ export class UpdateWorkShiftDto {
   @Matches(TIME)
   @IsOptional()
   endTime?: string;
+
+  // null = обратно към почивката от HR настройките
+  @ValidateIf((o: UpdateWorkShiftDto) => o.breakStart !== null)
+  @Matches(TIME)
+  @IsOptional()
+  breakStart?: string | null;
+
+  @ValidateIf((o: UpdateWorkShiftDto) => o.breakEnd !== null)
+  @Matches(TIME)
+  @IsOptional()
+  breakEnd?: string | null;
 
   @IsString()
   @IsOptional()
