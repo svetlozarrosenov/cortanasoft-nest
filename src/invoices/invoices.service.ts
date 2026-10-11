@@ -635,9 +635,19 @@ export class InvoicesService {
           .filter((t): t is InvoiceType => allowedTypes.includes(t as InvoiceType)))
       : undefined;
 
+    // Синтетични филтри: неплатени (дължат пари) и просрочени (и с минал падеж)
+    const statusWhere: Prisma.InvoiceWhereInput =
+      status === 'UNPAID'
+        ? { status: { in: ['ISSUED', 'PARTIALLY_PAID'] } }
+        : status === 'OVERDUE'
+          ? { status: { in: ['ISSUED', 'PARTIALLY_PAID'] }, dueDate: { lt: new Date() } }
+          : status
+            ? { status }
+            : {};
+
     const where: Prisma.InvoiceWhereInput = {
       companyId,
-      ...(status && { status }),
+      ...statusWhere,
       ...(typesArray && typesArray.length > 0
         ? { type: { in: typesArray } }
         : type

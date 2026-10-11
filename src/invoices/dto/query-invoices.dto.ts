@@ -15,8 +15,17 @@ export class QueryInvoicesDto {
   search?: string;
 
   @IsOptional()
-  @IsIn(['DRAFT', 'ISSUED', 'PAID', 'PARTIALLY_PAID', 'CANCELLED'])
-  status?: InvoiceStatus;
+  // UNPAID = издадени + частично платени; OVERDUE = неплатени с минал падеж
+  @IsIn([
+    'DRAFT',
+    'ISSUED',
+    'PAID',
+    'PARTIALLY_PAID',
+    'CANCELLED',
+    'UNPAID',
+    'OVERDUE',
+  ])
+  status?: InvoiceStatus | 'UNPAID' | 'OVERDUE';
 
   @IsOptional()
   @IsIn(['REGULAR', 'PROFORMA', 'ADVANCE', 'FINAL', 'CREDIT_NOTE'])

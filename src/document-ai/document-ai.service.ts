@@ -14,6 +14,10 @@ import {
 import Anthropic from '@anthropic-ai/sdk';
 import { lookup } from 'dns/promises';
 import { isIP } from 'net';
+import {
+  reconcileInvoiceAmounts,
+  scaleLinesToSubtotal,
+} from './invoice-amounts.util';
 import { AiSettingsService } from '../ai-settings/ai-settings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ErrorMessages } from '../common/constants/error-messages';
@@ -1664,6 +1668,11 @@ ${EXPENSE_CATEGORY_HINTS}
 - If a value is not found, use null
 - confidence: your estimate of extraction accuracy (0-1)
 - For line items: calculate missing totalPrice = quantity * unitPrice if possible; totalPrice is WITHOUT VAT
+- Amounts: totalAmount = the amount actually paid / "ОБЩА СУМА", "Всичко", "Сума за плащане" (WITH VAT); vatAmount = the VAT shown ("ДДС", "в т.ч. ДДС", "ДДС*B"); subtotal = the taxable base ("Данъчна основа", "нето стойност", "НЕТО СТ-СТ", "ОБОРОТ" minus VAT). subtotal + vatAmount must equal totalAmount — re-check before submitting
+- ONLY for Bulgarian FISCAL RECEIPTS (фискален бон with "ФИСКАЛЕН БОН" / "ОБЩА СУМА" and "в т.ч. ДДС" printed — fuel stations, shops): there the unit price and the line "СУМА" are WITH VAT INCLUDED. On such receipts: totalAmount = "ОБЩА СУМА", vatAmount = "в т.ч. ДДС", subtotal = totalAmount − vatAmount (NOT the line "СУМА"), and for the line item put unitPrice = the printed price ÷ (1 + VAT rate) with totalPrice = subtotal so the line is without VAT. Never add VAT on top of a receipt total
+- Regular and handwritten invoices: take "Данъчна основа", "ДДС" and "Сума за плащане" exactly as printed/written; line prices are already without VAT. If the document shows NO VAT amount (empty ДДС, "неначисляване на ДДС", foreign supplier), set vatAmount = 0 and subtotal = totalAmount — do NOT compute VAT yourself. Copy the line descriptions as written, do not replace them with generic words
+- "ОТСТЪПКА" / discount lines reduce the amounts: use the figures after the discount (the printed total already includes it)
+- Ignore "АКЦИЗ" (excise) — it is part of the price, not a separate charge
 - For each line item set category (same meanings as expenseCategory — lines of one invoice may differ, e.g. tyres → MAINTENANCE and a vignette → TAXES) and vatRate (the VAT % applied to that line: 20, 9 or 0; null if the invoice does not show it)
 - The invoice may be in Bulgarian or any other language - extract data regardless of language`,
               },
@@ -1689,6 +1698,15 @@ ${EXPENSE_CATEGORY_HINTS}
       );
     }
     const parsed = submitted.input as any;
+    // Сверка основа/ДДС/общо (платеното е котвата) и редове → основата
+    const amounts = reconcileInvoiceAmounts(parsed);
+    const rawLines = (parsed.lineItems || []).map((item: any) => ({
+      ...item,
+      quantity: item.quantity || 1,
+      unitPrice: item.unitPrice || 0,
+      totalPrice: item.totalPrice || 0,
+    }));
+    const lines = scaleLinesToSubtotal(rawLines, amounts.subtotal);
 
     return {
       invoiceNumber: parsed.invoiceNumber || undefined,
@@ -1711,17 +1729,15 @@ ${EXPENSE_CATEGORY_HINTS}
       supplierBankName: parsed.supplierBankName || undefined,
       supplierIban: parsed.supplierIban || undefined,
       supplierBic: parsed.supplierBic || undefined,
-      totalAmount: parsed.totalAmount ?? undefined,
-      vatAmount: parsed.vatAmount ?? undefined,
-      subtotal: parsed.subtotal ?? undefined,
+      ...amounts,
       paymentMethod: INVOICE_PAYMENT_METHOD_CODES.includes(parsed.paymentMethod)
         ? (parsed.paymentMethod as PaymentMethod)
         : undefined,
-      lineItems: (parsed.lineItems || []).map((item: any) => ({
+      lineItems: lines.map((item: any) => ({
         description: item.description || '',
-        quantity: item.quantity || 1,
-        unitPrice: item.unitPrice || 0,
-        totalPrice: item.totalPrice || 0,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        totalPrice: item.totalPrice,
         productCode: item.productCode || undefined,
         category: EXPENSE_CATEGORY_CODES.includes(item.category)
           ? (item.category as ExpenseCategory)

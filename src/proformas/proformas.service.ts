@@ -327,9 +327,18 @@ export class ProformasService {
       sortOrder = 'desc',
     } = query;
 
+    const statusWhere: Prisma.ProformaWhereInput =
+      status === 'UNPAID'
+        ? { status: { in: ['ISSUED', 'PARTIALLY_PAID'] } }
+        : status === 'OVERDUE'
+          ? { status: { in: ['ISSUED', 'PARTIALLY_PAID'] }, dueDate: { lt: new Date() } }
+          : status
+            ? { status }
+            : {};
+
     const where: Prisma.ProformaWhereInput = {
       companyId,
-      ...(status && { status }),
+      ...statusWhere,
       ...(customerId && { customerId }),
       ...(dateFrom || dateTo
         ? {
