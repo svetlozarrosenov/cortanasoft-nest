@@ -1,4 +1,12 @@
-import { IsOptional, IsString, IsEnum, IsInt, Min, Max } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsEnum,
+  IsIn,
+  IsInt,
+  Min,
+  Max,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import {
   SupportTicketPriority,
@@ -11,9 +19,10 @@ export class QuerySupportTicketsDto {
   @IsString()
   search?: string;
 
+  // 'OPEN' = виртуален статус: NEW + IN_PROGRESS + WAITING_CUSTOMER (табът „Отворени")
   @IsOptional()
-  @IsEnum(SupportTicketStatus)
-  status?: SupportTicketStatus;
+  @IsIn([...Object.values(SupportTicketStatus), 'OPEN'])
+  status?: SupportTicketStatus | 'OPEN';
 
   @IsOptional()
   @IsEnum(SupportTicketPriority)

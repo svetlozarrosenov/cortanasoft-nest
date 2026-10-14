@@ -17,6 +17,13 @@ import {
 } from './dto';
 import { Prisma, SupportTicketStatus } from '@prisma/client';
 
+// „Отворен" тикет = още има работа по него (от едната или другата страна)
+const OPEN_STATUSES: SupportTicketStatus[] = [
+  SupportTicketStatus.NEW,
+  SupportTicketStatus.IN_PROGRESS,
+  SupportTicketStatus.WAITING_CUSTOMER,
+];
+
 // Базова инфо за автор на тикет/съобщение (без чувствителни полета)
 const authorSelect = {
   id: true,
@@ -103,7 +110,15 @@ export class SupportTicketsService {
     query: QuerySupportTicketsDto,
   ) {
     const where = this.buildWhere({ ...query, companyId });
-    return this.paginate(where, query, { userId, side: 'customer' });
+    const countsWhere = this.buildWhere({
+      ...query,
+      companyId,
+      status: undefined,
+    });
+    return this.paginate(where, countsWhere, query, {
+      userId,
+      side: 'customer',
+    });
   }
 
   /** Брой тикети на фирмата с непрочетени отговори от СВ Софт (бадж в менюто) */
@@ -187,7 +202,14 @@ export class SupportTicketsService {
    */
   async findAllAdmin(userId: string, query: QuerySupportTicketsDto) {
     const where = this.buildWhere(query);
-    return this.paginate(where, query, { userId, side: 'support' }, true);
+    const countsWhere = this.buildWhere({ ...query, status: undefined });
+    return this.paginate(
+      where,
+      countsWhere,
+      query,
+      { userId, side: 'support' },
+      true,
+    );
   }
 
   async findOneAdmin(userId: string, id: string) {
@@ -321,10 +343,7 @@ export class SupportTicketsService {
       acc[g.status] = g._count._all;
       return acc;
     }, {});
-    const open =
-      (byStatus[SupportTicketStatus.NEW] ?? 0) +
-      (byStatus[SupportTicketStatus.IN_PROGRESS] ?? 0) +
-      (byStatus[SupportTicketStatus.WAITING_CUSTOMER] ?? 0);
+    const open = OPEN_STATUSES.reduce((sum, s) => sum + (byStatus[s] ?? 0), 0);
     return { byStatus, open, unread: unread.size };
   }
 
@@ -462,7 +481,11 @@ export class SupportTicketsService {
   ): Prisma.SupportTicketWhereInput {
     const where: Prisma.SupportTicketWhereInput = {};
     if (query.companyId) where.companyId = query.companyId;
-    if (query.status) where.status = query.status;
+    if (query.status === 'OPEN') {
+      where.status = { in: OPEN_STATUSES };
+    } else if (query.status) {
+      where.status = query.status;
+    }
     if (query.priority) where.priority = query.priority;
     if (query.category) where.category = query.category;
     if (query.search) {
@@ -477,8 +500,25 @@ export class SupportTicketsService {
   // Тикетите с непрочетено за потребителя излизат най-отгоре, после останалите
   // в поискания ред. Партицията става в паметта по id-та (тикетите са малко),
   // пълните данни се зареждат само за страницата.
+  // Бройки за табовете Отворени | Разрешени | Затворени | Всички — по същите
+  // филтри като списъка (търсене, приоритет, фирма), но без статуса.
+  private async viewCounts(countsWhere: Prisma.SupportTicketWhereInput) {
+    const grouped = await this.prisma.supportTicket.groupBy({
+      by: ['status'],
+      where: countsWhere,
+      _count: { _all: true },
+    });
+    const byStatus: Partial<Record<SupportTicketStatus, number>> = {};
+    for (const g of grouped) byStatus[g.status] = g._count._all;
+    const open = OPEN_STATUSES.reduce((sum, s) => sum + (byStatus[s] ?? 0), 0);
+    const resolved = byStatus[SupportTicketStatus.RESOLVED] ?? 0;
+    const closed = byStatus[SupportTicketStatus.CLOSED] ?? 0;
+    return { open, resolved, closed, all: open + resolved + closed };
+  }
+
   private async paginate(
     where: Prisma.SupportTicketWhereInput,
+    countsWhere: Prisma.SupportTicketWhereInput,
     query: QuerySupportTicketsDto,
     viewer: Viewer,
     withCompany = false,
@@ -488,13 +528,14 @@ export class SupportTicketsService {
     const sortBy = query.sortBy ?? 'createdAt';
     const sortOrder = query.sortOrder ?? 'desc';
 
-    const [ordered, unread] = await Promise.all([
+    const [ordered, unread, counts] = await Promise.all([
       this.prisma.supportTicket.findMany({
         where,
         select: { id: true },
         orderBy: { [sortBy]: sortOrder },
       }),
       this.unreadByTicket(viewer, { where }),
+      this.viewCounts(countsWhere),
     ]);
     const ids = [
       ...ordered.filter((t) => unread.has(t.id)),
@@ -524,6 +565,7 @@ export class SupportTicketsService {
     return {
       data,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+      counts,
     };
   }
 
