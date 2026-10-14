@@ -238,7 +238,9 @@ export class InventoryService {
                 quantity: true,
                 unitCost: true,
                 sourceBatchNumber: true,
-                product: { select: { id: true, name: true, sku: true, unit: true } },
+                product: {
+                  select: { id: true, name: true, sku: true, unit: true },
+                },
               },
               orderBy: { createdAt: 'asc' as const },
             },
@@ -262,7 +264,9 @@ export class InventoryService {
                 quantity: true,
                 unitCost: true,
                 sourceBatchNumber: true,
-                product: { select: { id: true, name: true, sku: true, unit: true } },
+                product: {
+                  select: { id: true, name: true, sku: true, unit: true },
+                },
               },
               orderBy: { createdAt: 'asc' as const },
             },
@@ -288,7 +292,9 @@ export class InventoryService {
         where: { id: dto.storageZoneId, locationId: batch.locationId },
       });
       if (!zone) {
-        throw new BadRequestException(ErrorMessages.inventory.storageZoneNotFound);
+        throw new BadRequestException(
+          ErrorMessages.inventory.storageZoneNotFound,
+        );
       }
     }
 
@@ -447,10 +453,15 @@ export class InventoryService {
       locationId,
       categoryId,
       hasStock,
+      allLocations,
       belowMinStock,
       page = 1,
       limit = 20,
     } = query;
+    // Партиите/серийните се ограничават до склада в заявката, освен ако
+    // се иска разбивка по всички складове (броят за склада се смята по-долу)
+    const scopeToLocation =
+      locationId && !allLocations ? locationId : undefined;
 
     // Build product filter
     const productWhere: Prisma.ProductWhereInput = {
@@ -495,7 +506,7 @@ export class InventoryService {
         },
         inventoryBatches: {
           where: {
-            ...(locationId && { locationId }),
+            ...(scopeToLocation && { locationId: scopeToLocation }),
           },
           select: {
             id: true,
@@ -514,7 +525,7 @@ export class InventoryService {
         inventorySerials: {
           where: {
             status: 'IN_STOCK',
-            ...(locationId && { locationId }),
+            ...(scopeToLocation && { locationId: scopeToLocation }),
           },
           select: {
             id: true,
@@ -551,10 +562,20 @@ export class InventoryService {
       // мястото, където се вижда доставната стойност след заприходяване
       let stockValue = 0;
 
+      // Наличност/стойност за заявения склад; разбивката по-долу обхожда всичко
+      const scopedSerials =
+        locationId && allLocations
+          ? product.inventorySerials.filter((s) => s.locationId === locationId)
+          : product.inventorySerials;
+      const scopedBatches =
+        locationId && allLocations
+          ? product.inventoryBatches.filter((b) => b.locationId === locationId)
+          : product.inventoryBatches;
+
       if (product.type === 'SERIAL') {
         // For SERIAL products: count InventorySerial records with IN_STOCK status
-        totalQuantity = product.inventorySerials.length;
-        stockValue = product.inventorySerials.reduce(
+        totalQuantity = scopedSerials.length;
+        stockValue = scopedSerials.reduce(
           (sum, s) => sum + Number(s.unitCost),
           0,
         );
@@ -572,11 +593,11 @@ export class InventoryService {
         }
       } else {
         // For PRODUCT, BATCH — sum batch quantities
-        totalQuantity = product.inventoryBatches.reduce(
+        totalQuantity = scopedBatches.reduce(
           (sum, batch) => sum + Number(batch.quantity),
           0,
         );
-        stockValue = product.inventoryBatches.reduce(
+        stockValue = scopedBatches.reduce(
           (sum, batch) => sum + Number(batch.quantity) * Number(batch.unitCost),
           0,
         );
@@ -624,8 +645,8 @@ export class InventoryService {
         locationBreakdown: Array.from(locationMap.values()),
         batchCount:
           product.type === 'SERIAL'
-            ? product.inventorySerials.length
-            : product.inventoryBatches.length,
+            ? scopedSerials.length
+            : scopedBatches.length,
         stockValue: Math.round(stockValue * 100) / 100,
         avgUnitCost:
           totalQuantity > 0
@@ -773,7 +794,12 @@ export class InventoryService {
             where: { order: { status: { not: 'CANCELLED' } } },
             select: {
               order: {
-                select: { id: true, orderNumber: true, customerName: true, orderDate: true },
+                select: {
+                  id: true,
+                  orderNumber: true,
+                  customerName: true,
+                  orderDate: true,
+                },
               },
             },
             take: 1,

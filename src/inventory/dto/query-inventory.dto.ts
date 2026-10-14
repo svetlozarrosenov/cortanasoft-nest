@@ -103,6 +103,14 @@ export class QueryStockLevelsDto {
   @IsBoolean()
   hasStock?: boolean;
 
+  // С locationId: наличността (totalQuantity, hasStock) е за този склад, но
+  // locationBreakdown връща всички складове — каталогът в продажбата показва
+  // „тук 0, в другия склад 4“
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  allLocations?: boolean;
+
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
