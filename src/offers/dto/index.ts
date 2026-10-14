@@ -10,6 +10,7 @@ import {
   Min,
   Max,
   IsBoolean,
+  MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { OfferStatus } from '@prisma/client';
@@ -103,6 +104,11 @@ export class CreateOfferDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
+  subject?: string;
+
+  @IsString()
+  @IsOptional()
   notes?: string;
 
   @IsString()
@@ -184,6 +190,11 @@ export class UpdateOfferDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
+  subject?: string;
+
+  @IsString()
+  @IsOptional()
   notes?: string;
 
   @IsString()
@@ -199,6 +210,12 @@ export class UpdateOfferDto {
   @ValidateNested({ each: true })
   @Type(() => CreateOfferItemDto)
   items?: CreateOfferItemDto[];
+}
+
+// Свободна смяна на статуса (както при продажби и доставки): всеки → всеки
+export class UpdateOfferStatusDto {
+  @IsEnum(OfferStatus)
+  status: OfferStatus;
 }
 
 export class QueryOffersDto {

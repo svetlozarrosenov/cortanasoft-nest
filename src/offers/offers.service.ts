@@ -10,7 +10,7 @@ import {
   UpdateOfferDto,
   QueryOffersDto,
 } from './dto';
-import { Prisma } from '@prisma/client';
+import { OfferStatus, Prisma } from '@prisma/client';
 import { calculateDocumentTotals } from '../common/utils/document-totals';
 
 const OFFER_INCLUDE = {
@@ -223,6 +223,7 @@ export class OffersService {
           discount: offerDiscount,
           discountPercent,
           total,
+          subject: dto.subject?.trim() || null,
           notes: dto.notes || null,
           richDescription: dto.richDescription || null,
           hideTotals: dto.hideTotals ?? false,
@@ -264,6 +265,7 @@ export class OffersService {
       where.OR = [
         { offerNumber: { contains: search, mode: 'insensitive' } },
         { customerName: { contains: search, mode: 'insensitive' } },
+        { subject: { contains: search, mode: 'insensitive' } },
       ];
     }
 
@@ -312,8 +314,18 @@ export class OffersService {
   async update(companyId: string, id: string, dto: UpdateOfferDto) {
     const offer = await this.findOne(companyId, id);
 
-    if (offer.status !== 'DRAFT') {
-      throw new BadRequestException('Може да редактирате само чернови оферти');
+    // Статусът е свободен (както при продажбите), затова редакцията не зависи
+    // от него. Заключваме само анулирана оферта и оферта, от която вече е
+    // създадена продажба — редовете ѝ са копирани там.
+    if (offer.status === 'CANCELLED') {
+      throw new BadRequestException(
+        'Анулирана оферта не може да се редактира. Първо ѝ сменете статуса.',
+      );
+    }
+    if (offer.resultingOrder) {
+      throw new BadRequestException(
+        `От офертата вече е създадена продажба ${offer.resultingOrder.orderNumber} и редовете ѝ са заключени`,
+      );
     }
 
     // Verify a reassigned customer belongs to this company (IDOR guard).
@@ -359,6 +371,9 @@ export class OffersService {
           }),
           ...(dto.validUntil !== undefined && {
             validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
+          }),
+          ...(dto.subject !== undefined && {
+            subject: dto.subject?.trim() || null,
           }),
           ...(dto.notes !== undefined && { notes: dto.notes || null }),
           ...(dto.richDescription !== undefined && {
@@ -442,6 +457,9 @@ export class OffersService {
           ...(dto.validUntil !== undefined && {
             validUntil: dto.validUntil ? new Date(dto.validUntil) : null,
           }),
+          ...(dto.subject !== undefined && {
+            subject: dto.subject?.trim() || null,
+          }),
           ...(dto.notes !== undefined && { notes: dto.notes || null }),
           ...(dto.richDescription !== undefined && {
             richDescription: dto.richDescription || null,
@@ -459,25 +477,22 @@ export class OffersService {
     });
   }
 
-  async send(companyId: string, id: string) {
+  /**
+   * Свободна смяна на статуса: всеки статус → всеки (тикет #30 ИНАТЕХ).
+   * Офертата не движи склад или пари, затова няма какво да се пази с
+   * преходи. Единственият страничен ефект: при „Приета“ потенциалният
+   * клиент (LEAD) става клиент.
+   */
+  async updateStatus(companyId: string, id: string, status: OfferStatus) {
     const offer = await this.findOne(companyId, id);
-    if (offer.status !== 'DRAFT') {
-      throw new BadRequestException('Може да изпратите само чернови оферти');
-    }
-    return this.prisma.offer.update({
-      where: { id },
-      data: { status: 'SENT' },
-      include: OFFER_INCLUDE,
-    });
-  }
+    if (offer.status === status) return offer;
 
-  async accept(companyId: string, id: string) {
-    const offer = await this.findOne(companyId, id);
-    if (offer.status !== 'SENT') {
-      throw new BadRequestException('Може да приемете само изпратени оферти');
-    }
     return this.prisma.$transaction(async (tx) => {
-      if (offer.customer && offer.customer.stage === 'LEAD') {
+      if (
+        status === 'ACCEPTED' &&
+        offer.customer &&
+        offer.customer.stage === 'LEAD'
+      ) {
         await tx.customer.update({
           where: { id: offer.customer.id },
           data: { stage: 'CLIENT' },
@@ -485,45 +500,20 @@ export class OffersService {
       }
       return tx.offer.update({
         where: { id },
-        data: { status: 'ACCEPTED' },
+        data: { status },
         include: OFFER_INCLUDE,
       });
     });
   }
 
-  async reject(companyId: string, id: string) {
-    const offer = await this.findOne(companyId, id);
-    if (offer.status !== 'SENT' && offer.status !== 'DRAFT') {
-      throw new BadRequestException(
-        'Може да отхвърлите само чернови или изпратени оферти',
-      );
-    }
-    return this.prisma.offer.update({
-      where: { id },
-      data: { status: 'REJECTED' },
-      include: OFFER_INCLUDE,
-    });
-  }
-
-  async cancel(companyId: string, id: string) {
-    const offer = await this.findOne(companyId, id);
-    if (offer.status === 'CANCELLED') {
-      throw new BadRequestException('Офертата вече е анулирана');
-    }
-    if (offer.status === 'ACCEPTED') {
-      throw new BadRequestException('Не може да анулирате приета оферта');
-    }
-    return this.prisma.offer.update({
-      where: { id },
-      data: { status: 'CANCELLED' },
-      include: OFFER_INCLUDE,
-    });
-  }
-
   async remove(companyId: string, id: string) {
     const offer = await this.findOne(companyId, id);
-    if (offer.status !== 'DRAFT') {
-      throw new BadRequestException('Може да изтриете само чернови оферти');
+    // Order.offerId е с onDelete: Cascade — триенето на офертата би изтрило
+    // и продажбата. Иначе триенето не зависи от статуса.
+    if (offer.resultingOrder) {
+      throw new BadRequestException(
+        `От офертата вече е създадена продажба ${offer.resultingOrder.orderNumber} и не може да се изтрие`,
+      );
     }
     return this.prisma.offer.delete({ where: { id } });
   }

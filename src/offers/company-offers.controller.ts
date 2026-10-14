@@ -11,7 +11,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { OffersService } from './offers.service';
-import { CreateOfferDto, UpdateOfferDto, QueryOffersDto } from './dto';
+import {
+  CreateOfferDto,
+  UpdateOfferDto,
+  UpdateOfferStatusDto,
+  QueryOffersDto,
+} from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import {
@@ -48,10 +53,7 @@ export class CompanyOffersController {
 
   @Get(':id')
   @RequireView('erp', 'offers')
-  findOne(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-  ) {
+  findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.offersService.findOne(companyId, id);
   }
 
@@ -65,48 +67,19 @@ export class CompanyOffersController {
     return this.offersService.update(companyId, id, dto);
   }
 
-  @Post(':id/send')
+  @Patch(':id/status')
   @RequireEdit('erp', 'offers')
-  send(
+  updateStatus(
     @Param('companyId') companyId: string,
     @Param('id') id: string,
+    @Body() dto: UpdateOfferStatusDto,
   ) {
-    return this.offersService.send(companyId, id);
-  }
-
-  @Post(':id/accept')
-  @RequireEdit('erp', 'offers')
-  accept(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-  ) {
-    return this.offersService.accept(companyId, id);
-  }
-
-  @Post(':id/reject')
-  @RequireEdit('erp', 'offers')
-  reject(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-  ) {
-    return this.offersService.reject(companyId, id);
-  }
-
-  @Post(':id/cancel')
-  @RequireEdit('erp', 'offers')
-  cancel(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-  ) {
-    return this.offersService.cancel(companyId, id);
+    return this.offersService.updateStatus(companyId, id, dto.status);
   }
 
   @Delete(':id')
   @RequireDelete('erp', 'offers')
-  remove(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-  ) {
+  remove(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.offersService.remove(companyId, id);
   }
 }

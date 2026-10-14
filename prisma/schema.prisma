@@ -2340,6 +2340,10 @@ model Offer {
   discountPercent Decimal? @db.Decimal(5, 2) // Отстъпка в %, ако е въведена така
   total           Decimal  @db.Decimal(12, 2) // Обща сума с ДДС
 
+  // Относно — кратко описание за какво е офертата (напр. „Демонтаж на оборудване“),
+  // показва се в списъка с оферти
+  subject String?
+
   notes String? // Бележки
 
   // Подробно описание (rich text, TipTap JSON) — показва се в PDF-а на офертата
