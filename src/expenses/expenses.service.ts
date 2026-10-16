@@ -8,6 +8,7 @@ import {
   CreateExpenseDto,
   UpdateExpenseDto,
   QueryExpensesDto,
+  ExpenseListView,
   MarkExpensePaidDto,
   ExpenseItemDto,
   DuplicatesQueryDto,
@@ -237,11 +238,28 @@ export class ExpensesService {
     return rows.map((r) => ({ ...r, totalAmount: Number(r.totalAmount) }));
   }
 
-  async findAll(companyId: string, query: QueryExpensesDto) {
-    const page = query.page || 1;
-    const limit = query.limit || 20;
-    const skip = (page - 1) * limit;
+  /**
+   * Табовете над списъка:
+   *  active    — всичко без анулираните (работният изглед)
+   *  cancelled — само анулираните
+   *  all / без view — всичко (старото поведение на API-то)
+   */
+  private viewWhere(view?: ExpenseListView): Prisma.ExpenseWhereInput | null {
+    switch (view) {
+      case 'active':
+        return { status: { not: 'CANCELLED' } };
+      case 'cancelled':
+        return { status: 'CANCELLED' };
+      default:
+        return null;
+    }
+  }
 
+  private buildListWhere(
+    companyId: string,
+    query: QueryExpensesDto,
+    withView = true,
+  ): Prisma.ExpenseWhereInput {
     const where: Prisma.ExpenseWhereInput = {
       companyId,
     };
@@ -284,12 +302,45 @@ export class ExpensesService {
       }
     }
 
-    const orderBy: Prisma.ExpenseOrderByWithRelationInput = {};
-    if (query.sortBy) {
-      orderBy[query.sortBy] = query.sortOrder || 'desc';
-    } else {
-      orderBy.expenseDate = 'desc';
+    if (withView) {
+      const viewWhere = this.viewWhere(query.view);
+      if (viewWhere) where.AND = [viewWhere];
     }
+
+    return where;
+  }
+
+  /** Бройки за табовете при текущите останали филтри (без самия изглед). */
+  async countViews(companyId: string, query: QueryExpensesDto) {
+    const base = this.buildListWhere(companyId, query, false);
+    const count = (view: ExpenseListView) =>
+      this.prisma.expense.count({
+        where: { AND: [base, this.viewWhere(view) ?? {}] },
+      });
+    const [active, cancelled, all] = await Promise.all([
+      count('active'),
+      count('cancelled'),
+      count('all'),
+    ]);
+    return { active, cancelled, all };
+  }
+
+  async findAll(companyId: string, query: QueryExpensesDto) {
+    const page = query.page || 1;
+    const limit = query.limit || 20;
+    const skip = (page - 1) * limit;
+
+    const where = this.buildListWhere(companyId, query);
+
+    // По дата на документа, а при еднаква дата — последно въведеното отгоре
+    // (без втори ключ Postgres връща разходите от един ден в случаен ред)
+    const primary: Prisma.ExpenseOrderByWithRelationInput = query.sortBy
+      ? { [query.sortBy]: query.sortOrder || 'desc' }
+      : { expenseDate: 'desc' };
+    const orderBy: Prisma.ExpenseOrderByWithRelationInput[] = [
+      primary,
+      { createdAt: 'desc' },
+    ];
 
     const [data, total] = await Promise.all([
       this.prisma.expense.findMany({

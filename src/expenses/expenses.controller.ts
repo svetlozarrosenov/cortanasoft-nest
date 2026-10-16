@@ -86,6 +86,16 @@ export class ExpensesController {
     return this.expensesService.findAll(companyId, query);
   }
 
+  // Бройки за табовете над списъка (Разходи / Анулирани)
+  @Get('counts')
+  @RequireView('erp', 'expenses')
+  counts(
+    @Param('companyId') companyId: string,
+    @Query() query: QueryExpensesDto,
+  ) {
+    return this.expensesService.countViews(companyId, query);
+  }
+
   // Предупреждение за дублиран разход — ползва се от модала преди запис
   @Get('duplicates')
   @RequireView('erp', 'expenses')
