@@ -125,7 +125,7 @@ export class DashboardService {
         where: {
           companyId,
           orderDate: { gte: startOfLastMonth, lte: endOfLastMonth },
-          status: { not: 'CANCELLED' },
+          status: { notIn: ['CANCELLED', 'RETURNED'] },
         },
       }),
       // Unpaid invoices count
@@ -194,7 +194,7 @@ export class DashboardService {
     // (orderDate), not the row's createdAt. Backfilled / backdated entries need
     // to appear at the right place in the timeline.
     const recentOrders = await this.prisma.order.findMany({
-      where: { companyId, status: { not: 'CANCELLED' } },
+      where: { companyId, status: { notIn: ['CANCELLED', 'RETURNED'] } },
       orderBy: [{ orderDate: 'desc' }, { createdAt: 'desc' }],
       take: 5,
       select: {

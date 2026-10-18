@@ -19,8 +19,8 @@ export class ReportsService {
     const orderWhere: Prisma.OrderWhereInput = {
       companyId,
       partnerCustomerId: { not: null },
-      // Анулираните поръчки не са реален оборот
-      status: { not: 'CANCELLED' },
+      // Анулираните и върнатите поръчки не са реален оборот
+      status: { notIn: ['CANCELLED', 'RETURNED'] },
       ...((query.from || query.to) && {
         orderDate: {
           ...(query.from && { gte: new Date(query.from) }),

@@ -41,6 +41,11 @@ const STOCK_HELD_STATUSES: OrderStatus[] = [
   'DELIVERED',
 ];
 
+// Приключени без продажба: не са оборот, не се дължат, не се фактурират.
+// RETURNED = непотърсена/върната пратка — като CANCELLED за склада и парите,
+// но отделен статус, за да се вижда историята на клиента.
+const CLOSED_STATUSES: OrderStatus[] = ['CANCELLED', 'RETURNED'];
+
 const ORDER_INCLUDE = {
   location: true,
   // referredBy — за бързия преглед на поръчка (партньорска атрибуция)
@@ -619,14 +624,23 @@ export class OrdersService {
 
   /**
    * Табовете над списъка:
+   *  active    — всичко без анулираните и върнатите (първият таб; all = без филтър, за API)
+   *  cancelled — само анулираните (вкл. отказани кредити)
+   *  returned  — само върнатите (непотърсени пратки)
    *  open    — всичко, което още не е приключило (нито доставено, нито анулирано)
    *  to-ship — потвърдени/в обработка с доставка, за които няма активна товарителница
    *  unpaid  — неплатени/частично платени, без анулираните
    */
   private viewWhere(view?: OrderListView): Prisma.OrderWhereInput | null {
     switch (view) {
+      case 'active':
+        return { status: { notIn: CLOSED_STATUSES } };
+      case 'cancelled':
+        return { status: 'CANCELLED' };
+      case 'returned':
+        return { status: 'RETURNED' };
       case 'open':
-        return { status: { notIn: ['DELIVERED', 'CANCELLED'] } };
+        return { status: { notIn: ['DELIVERED', ...CLOSED_STATUSES] } };
       case 'to-ship':
         return {
           status: { in: ['CONFIRMED', 'PROCESSING'] },
@@ -636,7 +650,7 @@ export class OrdersService {
       case 'unpaid':
         return {
           paymentStatus: { in: ['PENDING', 'PARTIAL'] },
-          status: { not: 'CANCELLED' },
+          status: { notIn: CLOSED_STATUSES },
         };
       default:
         return null;
@@ -650,13 +664,17 @@ export class OrdersService {
       this.prisma.order.count({
         where: { AND: [base, this.viewWhere(view) ?? {}] },
       });
-    const [open, toShip, unpaid, all] = await Promise.all([
-      count('open'),
-      count('to-ship'),
-      count('unpaid'),
-      count('all'),
-    ]);
-    return { open, toShip, unpaid, all };
+    const [active, open, toShip, unpaid, cancelled, returned, all] =
+      await Promise.all([
+        count('active'),
+        count('open'),
+        count('to-ship'),
+        count('unpaid'),
+        count('cancelled'),
+        count('returned'),
+        count('all'),
+      ]);
+    return { active, open, toShip, unpaid, cancelled, returned, all };
   }
 
   async findAll(companyId: string, query: QueryOrdersDto) {
@@ -669,13 +687,16 @@ export class OrdersService {
 
     const where = this.buildListWhere(companyId, query);
 
-    // Тотали за целия филтриран набор (не само за страницата). Анулираните
-    // не са оборот и не се дължат — изключваме ги, освен ако потребителят
-    // изрично е филтрирал по статус „Анулирани".
-    const totalsWhere: Prisma.OrderWhereInput =
-      query.status === 'CANCELLED'
-        ? where
-        : { AND: [where, { status: { not: 'CANCELLED' } }] };
+    // Тотали за целия филтриран набор (не само за страницата). Анулираните и
+    // върнатите не са оборот и не се дължат — изключваме ги, освен ако
+    // потребителят изрично гледа точно тях (статус или таб).
+    const lookingAtClosed =
+      (query.status && CLOSED_STATUSES.includes(query.status)) ||
+      query.view === 'cancelled' ||
+      query.view === 'returned';
+    const totalsWhere: Prisma.OrderWhereInput = lookingAtClosed
+      ? where
+      : { AND: [where, { status: { notIn: CLOSED_STATUSES } }] };
 
     // „Доставена на" подрежда по спешност на фактурата (виж invoicing-state).
     // Редът зависи от сравнение на две колони (фактурирано < общо), което
@@ -788,7 +809,7 @@ export class OrdersService {
     const orders = await this.prisma.order.findMany({
       where: {
         companyId,
-        status: { notIn: ['CANCELLED', 'DELIVERED'] },
+        status: { notIn: ['DELIVERED', ...CLOSED_STATUSES] },
         items: { some: pendingItemWhere },
       },
       orderBy: { orderDate: 'asc' },
@@ -1083,6 +1104,8 @@ export class OrdersService {
     //   със стока  = CONFIRMED, PROCESSING, SHIPPED, DELIVERED (изписана при
     //                влизане в групата)
     //   CANCELLED  = стоката е върната; единствен изход е reopen()
+    //   RETURNED   = като CANCELLED (стоката се връща), но не е терминален —
+    //                може да се отвори наново през нормалния преход
     // „без → със" изписва както confirm(); „със → без" връща както cancel()
     // (и анулира гаранциите, издадени при „Доставена"); вътре в група е само
     // статус. Така потребителят може да сменя статусите свободно и складът
@@ -1091,8 +1114,8 @@ export class OrdersService {
       if (order.status === 'CANCELLED') {
         throw new BadRequestException(ErrorMessages.orders.cancelledUseReopen);
       }
-      if (dto.status === 'CANCELLED') {
-        return this.cancel(companyId, id);
+      if (dto.status === 'CANCELLED' || dto.status === 'RETURNED') {
+        return this.cancel(companyId, id, dto.status);
       }
 
       const fromHeld = STOCK_HELD_STATUSES.includes(order.status);
@@ -2137,11 +2160,24 @@ export class OrdersService {
     });
   }
 
-  async cancel(companyId: string, id: string) {
+  // status = RETURNED: непотърсена/върната пратка — същото за склада и
+  // документите, друг статус за историята на клиента.
+  async cancel(
+    companyId: string,
+    id: string,
+    status: 'CANCELLED' | 'RETURNED' = 'CANCELLED',
+  ) {
     const order = await this.findOne(companyId, id);
 
+    if (order.status === status) {
+      throw new BadRequestException(
+        status === 'RETURNED'
+          ? ErrorMessages.orders.alreadyReturned
+          : ErrorMessages.orders.alreadyCancelled,
+      );
+    }
     if (order.status === 'CANCELLED') {
-      throw new BadRequestException(ErrorMessages.orders.alreadyCancelled);
+      throw new BadRequestException(ErrorMessages.orders.cancelledUseReopen);
     }
 
     // Restore inventory if the order holds stock (deducted when it entered the
@@ -2162,7 +2198,7 @@ export class OrdersService {
 
       return tx.order.update({
         where: { id },
-        data: { status: 'CANCELLED' },
+        data: { status },
         include: ORDER_INCLUDE,
       });
     });

@@ -222,7 +222,7 @@ export class ProformasService {
     if (!order) {
       throw new NotFoundException(ErrorMessages.invoices.orderNotFound);
     }
-    if (order.status === 'CANCELLED') {
+    if (order.status === 'CANCELLED' || order.status === 'RETURNED') {
       throw new BadRequestException(ErrorMessages.proformas.orderCancelled);
     }
 

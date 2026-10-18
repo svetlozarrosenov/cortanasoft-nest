@@ -396,7 +396,7 @@ export class CustomersService {
       due,
     ] = await Promise.all([
       this.prisma.order.count({
-        where: { ...scope, status: { not: 'CANCELLED' } },
+        where: { ...scope, status: { notIn: ['CANCELLED', 'RETURNED'] } },
       }),
       this.prisma.invoice.count({
         where: { ...scope, status: { not: 'CANCELLED' } },

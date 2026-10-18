@@ -220,6 +220,19 @@ export class CompanyOrdersController {
       .then((o) => stripDirectDeliveries(user, o));
   }
 
+  // Върната (непотърсена) пратка: като cancel за склада, друг статус
+  @Post(':id/return')
+  @RequireEdit('erp', 'orders')
+  markReturned(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.ordersService
+      .cancel(companyId, id, 'RETURNED')
+      .then((o) => stripDirectDeliveries(user, o));
+  }
+
   @Post(':id/reopen')
   @RequireEdit('erp', 'orders')
   reopen(

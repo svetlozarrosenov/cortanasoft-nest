@@ -225,7 +225,10 @@ export class CreditApplicationsService {
         where: { id: existing.orderId },
         select: { status: true },
       });
-      if (order && order.status !== 'CANCELLED' && order.status !== 'DELIVERED') {
+      if (
+        order &&
+        !['CANCELLED', 'RETURNED', 'DELIVERED'].includes(order.status)
+      ) {
         await this.ordersService.cancel(companyId, existing.orderId);
       }
     }

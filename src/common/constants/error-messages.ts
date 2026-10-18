@@ -90,6 +90,7 @@ export const ErrorMessages = {
     canOnlyUpdatePending: 'Може да редактирате само чакащи поръчки',
     cannotConfirmWithoutItems: 'Не може да потвърдите поръчка без артикули',
     alreadyCancelled: 'Поръчката вече е отменена',
+    alreadyReturned: 'Продажбата вече е върната',
     canOnlyDeletePending: 'Може да изтриете само чакащи поръчки',
     invalidStatusTransition: 'Невалиден преход на статус',
     canOnlyReopenCancelled: 'Само анулирани поръчки могат да бъдат възстановени',

@@ -791,7 +791,7 @@ export class InventoryService {
           },
           // Проследяемост: към коя продажба/клиент е отишъл серийният номер
           orderItems: {
-            where: { order: { status: { not: 'CANCELLED' } } },
+            where: { order: { status: { notIn: ['CANCELLED', 'RETURNED'] } } },
             select: {
               order: {
                 select: {

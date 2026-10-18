@@ -10,7 +10,14 @@ import {
 import { Type } from 'class-transformer';
 import { OrderStatus, PaymentStatus } from '@prisma/client';
 
-export type OrderListView = 'open' | 'to-ship' | 'unpaid' | 'all';
+export type OrderListView =
+  | 'active'
+  | 'open'
+  | 'to-ship'
+  | 'unpaid'
+  | 'cancelled'
+  | 'returned'
+  | 'all';
 
 export class QueryOrdersDto {
   @IsString()
@@ -46,7 +53,7 @@ export class QueryOrdersDto {
   // Работни изгледи (табове): комбинират се с останалите филтри
   @IsString()
   @IsOptional()
-  @IsIn(['open', 'to-ship', 'unpaid', 'all'])
+  @IsIn(['active', 'open', 'to-ship', 'unpaid', 'cancelled', 'returned', 'all'])
   view?: OrderListView;
 
   @IsString()

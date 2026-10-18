@@ -113,7 +113,7 @@ export class DirectDeliveriesService {
   async ensureForOrder(companyId: string, orderId: string, userId?: string) {
     const { order, wanted } = await this.directLinesOfOrder(companyId, orderId);
     if (wanted.size === 0) return null;
-    if (['DRAFT', 'PENDING', 'CANCELLED'].includes(order.status)) {
+    if (['DRAFT', 'PENDING', 'CANCELLED', 'RETURNED'].includes(order.status)) {
       throw new BadRequestException(
         'Заявка към доставчик се създава само за потвърдена продажба',
       );
