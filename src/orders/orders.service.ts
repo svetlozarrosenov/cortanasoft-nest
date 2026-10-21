@@ -1665,12 +1665,16 @@ export class OrdersService {
       if (product.type === 'SERIAL') {
         if (item.inventorySerialId) continue;
         const serialLocId = item.locationId || order.locationId;
+        // Върнат/анулиран ред пази номера за история, но номерът е свободен —
+        // изключваме само закачените към активни продажби (както findAllSerials).
         const serials = await this.prisma.inventorySerial.findMany({
           where: {
             companyId,
             productId: item.productId,
             status: 'IN_STOCK',
-            orderItems: { none: {} },
+            orderItems: {
+              none: { order: { status: { notIn: CLOSED_STATUSES } } },
+            },
             ...(serialLocId && { locationId: serialLocId }),
           },
           orderBy: { createdAt: 'asc' },
