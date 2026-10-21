@@ -40,9 +40,23 @@ async function bootstrap() {
 
   app.use(cookieParser());
 
-  // Trust proxy headers (X-Forwarded-For) so rate limiting uses real client IPs
+  // Доверени проксита за X-Forwarded-For (req.ip → реалният клиент; ползва се
+  // от rate limit-а, Meta CAPI и логовете). Пътят на една заявка от сайта е
+  // браузър → nginx на фронтенда → Next.js rewrite → nginx на бекенда → тук,
+  // т.е. ДВЕ машини преди нас. С „trust proxy = 1" req.ip ставаше адресът на
+  // фронтенд сървъра за всички посетители. Доверяваме се на loopback/частните
+  // мрежи (nginx в docker) и на адресите от TRUSTED_PROXY_IPS (фронтенд сървъра).
   const expressApp = app.getHttpAdapter().getInstance();
-  expressApp.set('trust proxy', 1);
+  const trustedProxies = [
+    'loopback',
+    'linklocal',
+    'uniquelocal',
+    ...(process.env.TRUSTED_PROXY_IPS || '')
+      .split(',')
+      .map((ip) => ip.trim())
+      .filter(Boolean),
+  ];
+  expressApp.set('trust proxy', trustedProxies);
 
   app.enableCors({
     origin: (origin, callback) => {
