@@ -34,15 +34,17 @@ export class SitesService {
     customer: {
       select: { id: true, companyName: true, firstName: true, lastName: true },
     },
+    createdBy: { select: { id: true, firstName: true, lastName: true } },
   } as const;
 
-  async create(companyId: string, dto: CreateSiteDto) {
+  async create(companyId: string, userId: string, dto: CreateSiteDto) {
     await this.assertCustomer(companyId, dto.customerId);
     return this.prisma.site.create({
       data: {
         ...dto,
         checklist: dto.checklist?.map((l) => l.trim()).filter(Boolean),
         companyId,
+        createdById: userId,
       },
       include: this.include,
     });

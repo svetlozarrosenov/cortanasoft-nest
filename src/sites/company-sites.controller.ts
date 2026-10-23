@@ -18,6 +18,7 @@ import {
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import {
   PermissionsGuard,
   RequireView,
@@ -33,8 +34,12 @@ export class CompanySitesController {
 
   @Post()
   @RequireCreate('sites', 'sites')
-  create(@Param('companyId') companyId: string, @Body() dto: CreateSiteDto) {
-    return this.sitesService.create(companyId, dto);
+  create(
+    @Param('companyId') companyId: string,
+    @CurrentUser() user: { id: string },
+    @Body() dto: CreateSiteDto,
+  ) {
+    return this.sitesService.create(companyId, user.id, dto);
   }
 
   @Get()

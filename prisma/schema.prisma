@@ -609,6 +609,9 @@ model User {
   employeeAdvances EmployeeAdvance[] @relation("EmployeeAdvanceUser")
   createdEmployeeAdvances EmployeeAdvance[] @relation("EmployeeAdvanceCreator")
 
+  // Обекти
+  createdSites Site[] @relation("SiteCreator")
+
   // Documents
   uploadedDocuments Document[] @relation("DocumentUploader")
 
@@ -1916,6 +1919,10 @@ model Site {
 
   // Чеклист за посещение („Кошчета", „Подове"…) — отмята се в „Моят екип днес"
   checklist String[] @default([])
+
+  // Кой е създал обекта (колона в списъка); старите обекти са без стойност
+  createdById String?
+  createdBy   User?   @relation("SiteCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   companyId String
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
