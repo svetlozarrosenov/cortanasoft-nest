@@ -25,7 +25,7 @@ export class CreatePositionDto {
   description?: string;
 
   // Заплащане НА ЧАС по подразбиране; null = не е зададено
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 4 })
   @Min(0)
   @IsOptional()
   hourlyRate?: number | null;

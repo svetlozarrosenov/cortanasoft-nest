@@ -775,7 +775,7 @@ model UserCompany {
   // показва и на ден (× часовете от HrSettings). null = наследява от позицията.
   positionId String?
   position   Position? @relation(fields: [positionId], references: [id], onDelete: SetNull)
-  hourlyRate Decimal?  @db.Decimal(10, 2)
+  hourlyRate Decimal?  @db.Decimal(10, 4)
 
   @@unique([userId, companyId])
   @@unique([companyId, workEmail])
@@ -822,7 +822,7 @@ model Position {
   name        String
   code        String?
   description String?
-  hourlyRate  Decimal? @db.Decimal(10, 2) // Заплащане на час по подразбиране
+  hourlyRate  Decimal? @db.Decimal(10, 4) // Заплащане на час по подразбиране (4 знака, за да се връща точно дневният надник)
   isActive    Boolean  @default(true)
 
   companyId String

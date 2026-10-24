@@ -17,7 +17,7 @@ export class UpdateEmployeeDto extends UpdateEmployeePersonalDto {
 
   // Лична ставка НА ЧАС; null = наследява от позицията
   @ValidateIf((_, v) => v !== null)
-  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsNumber({ maxDecimalPlaces: 4 })
   @Min(0)
   @IsOptional()
   hourlyRate?: number | null;
