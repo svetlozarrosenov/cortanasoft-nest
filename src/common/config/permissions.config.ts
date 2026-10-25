@@ -415,7 +415,7 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
               { key: 'address', labelKey: 'common.address' },
               { key: 'city', labelKey: 'common.city' },
               { key: 'orders', labelKey: 'modules.erp.sales' },
-              { key: 'status', labelKey: 'common.status' },
+              // Статусът е таб (Активни / Неактивни), не колона
               { key: 'createdBy', labelKey: 'modules.erp.sites.createdBy' },
               // Сервизни фирми: обектът е на клиент — opt-in, за да не се
               // появява при фирми, чиито обекти са вътрешни проекти
