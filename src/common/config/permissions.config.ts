@@ -337,6 +337,7 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
             labelKey: 'modules.erp.expensesList',
             columns: [
               { key: 'description', labelKey: 'common.description' },
+              { key: 'supplier', labelKey: 'modules.erp.supplier' },
               { key: 'category', labelKey: 'common.category' },
               { key: 'amount', labelKey: 'modules.erp.amount' },
               { key: 'date', labelKey: 'common.date' },
