@@ -504,6 +504,13 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
             columns: [
               { key: 'receiptNumber', labelKey: 'modules.erp.receiptNumber' },
               { key: 'supplier', labelKey: 'modules.erp.supplier' },
+              // Клиентът на продажбата при директна доставка (тикет #38) —
+              // само изрично от ролята; без правото не се вижда и не се търси
+              {
+                key: 'customer',
+                labelKey: 'modules.erp.customer',
+                optIn: true,
+              },
               { key: 'location', labelKey: 'modules.erp.location' },
               { key: 'date', labelKey: 'modules.erp.grOrderedAt' },
               { key: 'deliveredAt', labelKey: 'modules.erp.grReceivedAt' },

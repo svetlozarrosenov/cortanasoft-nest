@@ -24,6 +24,7 @@ import {
   RequireCreate,
   RequireEdit,
   RequireDelete,
+  getVisibleColumns,
 } from '../common/guards/permissions.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
@@ -45,7 +46,15 @@ export class GoodsReceiptsController {
   @Get()
   @RequireView('warehouse', 'goodsReceipts')
   findAll(@CurrentUser() user: any, @Query() query: QueryGoodsReceiptsDto) {
-    return this.goodsReceiptsService.findAll(user.currentCompany.id, query);
+    const columns = getVisibleColumns(
+      user.currentRole?.permissions,
+      'warehouse',
+      'goodsReceipts',
+      'goodsReceiptsList',
+    );
+    return this.goodsReceiptsService.findAll(user.currentCompany.id, query, {
+      searchCustomer: columns?.includes('customer') ?? false,
+    });
   }
 
   @Get(':id')

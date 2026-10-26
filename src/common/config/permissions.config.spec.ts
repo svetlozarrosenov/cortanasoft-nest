@@ -193,6 +193,13 @@ describe('PERMISSIONS_CONFIG structure', () => {
       true,
     );
   });
+
+  it('доставки: „Клиент" (директна доставка) е само изрично от ролята', () => {
+    const warehouse = PERMISSIONS_CONFIG.find((m) => m.key === 'warehouse')!;
+    const page = warehouse.pages.find((p) => p.key === 'goodsReceipts')!;
+    const list = page.tables!.find((t) => t.key === 'goodsReceiptsList')!;
+    expect(list.columns.find((c) => c.key === 'customer')?.optIn).toBe(true);
+  });
 });
 
 // ─── createEmptyPermissions ─────────────────────────────────────────────────

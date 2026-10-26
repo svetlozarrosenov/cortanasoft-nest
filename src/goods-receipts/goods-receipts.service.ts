@@ -358,7 +358,13 @@ export class GoodsReceiptsService {
     return recalcReceiptState(tx, receiptId);
   }
 
-  async findAll(companyId: string, query: QueryGoodsReceiptsDto) {
+  async findAll(
+    companyId: string,
+    query: QueryGoodsReceiptsDto,
+    // Търсене по клиента на продажбата (директна доставка) — само за роли с
+    // колоната „Клиент", иначе търсенето би издавало скрита информация
+    opts: { searchCustomer?: boolean } = {},
+  ) {
     const {
       search,
       status,
@@ -419,6 +425,15 @@ export class GoodsReceiptsService {
           { invoiceNumber: { contains: search, mode: 'insensitive' } },
           // По доставчик — по-лесно се намира от кода на доставката
           { supplier: { name: { contains: search, mode: 'insensitive' } } },
+          ...(opts.searchCustomer
+            ? [
+                {
+                  order: {
+                    customerName: { contains: search, mode: 'insensitive' },
+                  },
+                } as Prisma.GoodsReceiptWhereInput,
+              ]
+            : []),
         ],
       }),
     };
