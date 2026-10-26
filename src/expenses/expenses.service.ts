@@ -15,6 +15,7 @@ import {
 } from './dto';
 import { Prisma, ExpenseCategory } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
+import { alignLineVat } from '../common/utils/vat-rounding';
 
 @Injectable()
 export class ExpensesService {
@@ -62,30 +63,35 @@ export class ExpensesService {
     const round2 = (n: number) => Math.round(n * 100) / 100;
     // Ед. цената пази 4 знака (доставчици с цени 48.6140); сумите са на стотинка
     const round4 = (n: number) => Math.round(n * 10000) / 10000;
-    const items = rows.map((r, i) => {
-      const vatRate = r.vatRate ?? 0;
-      const quantity = r.quantity ?? 1;
-      const unitPrice = r.unitPrice ?? r.amount;
-      // Сумата на реда е количество × ед. цена; amount от клиента е резерва
-      const amount = round2(
-        r.unitPrice != null ? quantity * r.unitPrice : r.amount,
-      );
-      const vatAmount = r.vatAmount ?? round2((amount * vatRate) / 100);
-      return {
-        description: r.description,
-        category: r.category,
-        quantity,
-        unitPrice: round4(unitPrice),
-        amount,
-        vatRate,
-        vatAmount: round2(vatAmount),
-        currencyId: r.currencyId ?? null,
-        exchangeRate: r.exchangeRate ?? 1,
-        includeInStockCost: !!r.includeInStockCost,
-        stockCostAllocation: r.stockCostAllocation ?? 'VALUE',
-        sortOrder: i,
-      };
-    });
+    // ДДС по ставка се изравнява към общата основа (стотинките от
+    // закръглянето по редове отиват върху най-големия ред, както на
+    // фактурата на доставчика); ръчно коригиран ред се пази.
+    const items = alignLineVat(
+      rows.map((r, i) => {
+        const vatRate = r.vatRate ?? 0;
+        const quantity = r.quantity ?? 1;
+        const unitPrice = r.unitPrice ?? r.amount;
+        // Сумата на реда е количество × ед. цена; amount от клиента е резерва
+        const amount = round2(
+          r.unitPrice != null ? quantity * r.unitPrice : r.amount,
+        );
+        const vatAmount = r.vatAmount ?? round2((amount * vatRate) / 100);
+        return {
+          description: r.description,
+          category: r.category,
+          quantity,
+          unitPrice: round4(unitPrice),
+          amount,
+          vatRate,
+          vatAmount: round2(vatAmount),
+          currencyId: r.currencyId ?? null,
+          exchangeRate: r.exchangeRate ?? 1,
+          includeInStockCost: !!r.includeInStockCost,
+          stockCostAllocation: r.stockCostAllocation ?? 'VALUE',
+          sortOrder: i,
+        };
+      }),
+    );
     const amount = round2(
       items.reduce((s, it) => s + it.amount * it.exchangeRate, 0),
     );
