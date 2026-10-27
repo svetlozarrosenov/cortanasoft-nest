@@ -10,6 +10,34 @@ import {
 import { Prisma } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
 
+// Статус на бюджета на обект (тикет #34): сумите са на базата по vatRegistered
+export interface SiteBudgetStatus {
+  amount: number;
+  expenses: number;
+  labor: number;
+  spent: number;
+  remaining: number;
+  /** 0–100+, закръглен; над 100 = надвишен */
+  percent: number;
+}
+
+export function budgetStatus(
+  amount: number,
+  spent: { expenses: number; labor: number },
+): SiteBudgetStatus {
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const total = round2(spent.expenses + spent.labor);
+  return {
+    amount,
+    expenses: spent.expenses,
+    labor: spent.labor,
+    spent: total,
+    remaining: round2(amount - total),
+    percent:
+      amount > 0 ? Math.round((total / amount) * 100) : total > 0 ? 100 : 0,
+  };
+}
+
 @Injectable()
 export class SitesService {
   constructor(
@@ -74,7 +102,7 @@ export class SitesService {
       }),
     };
 
-    const [data, total] = await Promise.all([
+    const [sites, total] = await Promise.all([
       this.prisma.site.findMany({
         where,
         include: this.include,
@@ -84,6 +112,26 @@ export class SitesService {
       }),
       this.prisma.site.count({ where }),
     ]);
+
+    // Бюджет (тикет #34): статусът се смята само за обектите с бюджет
+    let vatRegistered: boolean | null = null;
+    const data = await Promise.all(
+      sites.map(async (site) => {
+        if (site.budget == null) return { ...site, budgetStatus: null };
+        if (vatRegistered == null) {
+          const company = await this.prisma.company.findUnique({
+            where: { id: companyId },
+            select: { vatNumber: true },
+          });
+          vatRegistered = !!company?.vatNumber;
+        }
+        const spent = await this.budgetSpent(companyId, site.id, vatRegistered);
+        return {
+          ...site,
+          budgetStatus: budgetStatus(Number(site.budget), spent),
+        };
+      }),
+    );
 
     return {
       data,
@@ -247,10 +295,64 @@ export class SitesService {
       bump(monthKey(new Date(e.expenseDate)), 'expenses', expenseAmount(e));
     }
 
-    // Труд по присъствия (HR > Присъствие е източникът). Денят на обекта се
-    // брои по реалните часове от записите (4 ч = 0,5 ден, 10 ч = 1,25) —
-    // иначе събота с 4 часа излизаше като цял ден (тикет #28). Записи без
-    // часове = цял ден; ден на два обекта без часове се дели поравно.
+    const { attendance, labor, laborUnrated, workDayHours, siteShare } =
+      await this.laborForSite(companyId, id, dateFrom, dateTo);
+
+    // Бюджет (тикет #34): следи се за целия живот на обекта, не за периода —
+    // при филтър по дати изразходваното се смята отделно, без филтър е същото.
+    const budgetAmount = site.budget != null ? Number(site.budget) : null;
+    let budget: SiteBudgetStatus | null = null;
+    if (budgetAmount != null) {
+      const spent =
+        dateFrom || dateTo
+          ? await this.budgetSpent(companyId, id, vatRegistered)
+          : { expenses: expensesTotal, labor };
+      budget = budgetStatus(budgetAmount, spent);
+    }
+
+    // Трудът влиза и в месечната графика: разпределен по дните на присъствие
+    for (const a of attendance) {
+      if (a.dailyRate == null) continue;
+      for (const d of a.dates) {
+        bumpLabor(d.slice(0, 7), round2(siteShare(a.userId, d) * a.dailyRate));
+      }
+    }
+    const monthly = [...monthlyMap.entries()]
+      .map(([month, values]) => ({ month, ...values }))
+      .sort((a, b) => a.month.localeCompare(b.month));
+
+    return {
+      site,
+      vatRegistered,
+      orders,
+      expenses,
+      monthly,
+      attendance,
+      workDayHours,
+      totals: {
+        revenue,
+        revenueGross,
+        paid,
+        expenses: expensesTotal,
+        labor,
+        laborUnrated,
+        result: round2(revenue - expensesTotal - labor),
+      },
+      budget,
+    };
+  }
+
+  // Труд по присъствия (HR > Присъствие е източникът). Денят на обекта се
+  // брои по реалните часове от записите (4 ч = 0,5 ден, 10 ч = 1,25) —
+  // иначе събота с 4 часа излизаше като цял ден (тикет #28). Записи без
+  // часове = цял ден; ден на два обекта без часове се дели поравно.
+  private async laborForSite(
+    companyId: string,
+    id: string,
+    dateFrom?: Date,
+    dateTo?: Date,
+  ) {
+    const round2 = (n: number) => Math.round(n * 100) / 100;
     const dateFilter =
       dateFrom || dateTo
         ? {
@@ -343,35 +445,31 @@ export class SitesService {
       (a) => a.cost == null && a.days > 0,
     ).length;
 
-    // Трудът влиза и в месечната графика: разпределен по дните на присъствие
-    for (const a of attendance) {
-      if (a.dailyRate == null) continue;
-      for (const d of a.dates) {
-        bumpLabor(d.slice(0, 7), round2(siteShare(a.userId, d) * a.dailyRate));
-      }
-    }
-    const monthly = [...monthlyMap.entries()]
-      .map(([month, values]) => ({ month, ...values }))
-      .sort((a, b) => a.month.localeCompare(b.month));
+    return { attendance, labor, laborUnrated, workDayHours, siteShare };
+  }
 
-    return {
-      site,
-      vatRegistered,
-      orders,
-      expenses,
-      monthly,
-      attendance,
-      workDayHours,
-      totals: {
-        revenue,
-        revenueGross,
-        paid,
-        expenses: expensesTotal,
-        labor,
-        laborUnrated,
-        result: round2(revenue - expensesTotal - labor),
-      },
-    };
+  // Изразходвано от бюджета за целия живот на обекта: разходи (без анулираните,
+  // на базата по vatRegistered) + труд по присъствията.
+  private async budgetSpent(
+    companyId: string,
+    id: string,
+    vatRegistered: boolean,
+  ) {
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const [expenses, { labor }] = await Promise.all([
+      this.prisma.expense.findMany({
+        where: { companyId, siteId: id, status: { not: 'CANCELLED' } },
+        select: { amount: true, totalAmount: true },
+      }),
+      this.laborForSite(companyId, id),
+    ]);
+    const expensesTotal = round2(
+      expenses.reduce(
+        (sum, e) => sum + Number(vatRegistered ? e.amount : e.totalAmount),
+        0,
+      ),
+    );
+    return { expenses: expensesTotal, labor };
   }
 
   async update(companyId: string, id: string, dto: UpdateSiteDto) {

@@ -7,6 +7,8 @@ import {
   IsArray,
   ArrayMaxSize,
   ValidateIf,
+  IsNumber,
+  Min,
 } from 'class-validator';
 
 export class CreateSiteDto {
@@ -39,6 +41,13 @@ export class CreateSiteDto {
   @IsString()
   @IsOptional()
   customerId?: string | null;
+
+  // Бюджет на обекта (сума без ДДС); null изчиства
+  @ValidateIf((o: CreateSiteDto) => o.budget !== null)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @IsOptional()
+  budget?: number | null;
 
   // Чеклист за посещение — редове текст
   @IsArray()
