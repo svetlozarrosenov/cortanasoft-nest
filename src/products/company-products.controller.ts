@@ -14,7 +14,12 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ProductsService } from './products.service';
-import { CreateProductDto, UpdateProductDto, QueryProductsDto } from './dto';
+import {
+  CreateProductDto,
+  UpdateProductDto,
+  QueryProductsDto,
+  BulkCategoryDto,
+} from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import {
@@ -116,6 +121,20 @@ export class CompanyProductsController {
     @Param('id') id: string,
   ) {
     return this.productsService.removeCategory(companyId, id);
+  }
+
+  // Преди ':id', за да не се прихване като продукт с id "bulk-category"
+  @Patch('bulk-category')
+  @RequireEdit('erp', 'products')
+  bulkSetCategory(
+    @Param('companyId') companyId: string,
+    @Body() dto: BulkCategoryDto,
+  ) {
+    return this.productsService.bulkSetCategory(
+      companyId,
+      dto.ids,
+      dto.categoryId,
+    );
   }
 
   @Get(':id')

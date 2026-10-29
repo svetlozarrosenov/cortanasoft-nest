@@ -7,7 +7,12 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { WordPressService } from '../wordpress/wordpress.service';
 import { CloudCartService } from '../cloudcart/cloudcart.service';
-import { CreateProductDto, UpdateProductDto, QueryProductsDto } from './dto';
+import {
+  CreateProductDto,
+  UpdateProductDto,
+  QueryProductsDto,
+  UNCATEGORIZED,
+} from './dto';
 import { Prisma, ProductType } from '@prisma/client';
 import { buildTokenSearch } from '../common/utils/search-tokens';
 
@@ -75,7 +80,12 @@ export class ProductsService {
         );
       }
 
-      await this.assertCourierProduct(tx, companyId, productType, dto.courierProvider ?? null);
+      await this.assertCourierProduct(
+        tx,
+        companyId,
+        productType,
+        dto.courierProvider ?? null,
+      );
 
       // Проверка дали категорията съществува и принадлежи на компанията
       if (dto.categoryId) {
@@ -143,7 +153,9 @@ export class ProductsService {
   ) {
     if (!courierProvider) return;
     if (type !== ProductType.SERVICE) {
-      throw new BadRequestException('Куриерски продукт може да бъде само услуга');
+      throw new BadRequestException(
+        'Куриерски продукт може да бъде само услуга',
+      );
     }
     const taken = await tx.product.findFirst({
       where: {
@@ -194,7 +206,10 @@ export class ProductsService {
       where.type = { not: 'SERVICE' };
     }
 
-    if (categoryId) {
+    // „Без категория“ (тикет #48 Инатех) — стойност UNCATEGORIZED във филтъра
+    if (categoryId === UNCATEGORIZED) {
+      where.categoryId = null;
+    } else if (categoryId) {
       where.categoryId = categoryId;
     }
 
@@ -280,7 +295,9 @@ export class ProductsService {
           tx,
           companyId,
           dto.type ?? existing.type,
-          dto.courierProvider === undefined ? existing.courierProvider : dto.courierProvider,
+          dto.courierProvider === undefined
+            ? existing.courierProvider
+            : dto.courierProvider,
           id,
         );
       }
@@ -337,6 +354,39 @@ export class ProductsService {
     this.cloudCartService.syncProductToCloudCart(companyId, id).catch(() => {});
 
     return updatedProduct;
+  }
+
+  // Масово задаване/изчистване на категория на избрани продукти (тикет #48)
+  async bulkSetCategory(
+    companyId: string,
+    ids: string[],
+    categoryId: string | null,
+  ) {
+    if (categoryId) {
+      const category = await this.prisma.productCategory.findFirst({
+        where: { id: categoryId, companyId },
+        select: { id: true },
+      });
+      if (!category) {
+        throw new NotFoundException('Категорията не е намерена');
+      }
+    }
+
+    const uniqueIds = Array.from(new Set(ids));
+    const { count } = await this.prisma.product.updateMany({
+      where: { id: { in: uniqueIds }, companyId },
+      data: { categoryId },
+    });
+
+    // Външните интеграции се синхронизират както при единична редакция
+    for (const id of uniqueIds) {
+      this.wordPressService.syncProduct(companyId, id).catch(() => {});
+      this.cloudCartService
+        .syncProductToCloudCart(companyId, id)
+        .catch(() => {});
+    }
+
+    return { updated: count };
   }
 
   async remove(companyId: string, id: string) {

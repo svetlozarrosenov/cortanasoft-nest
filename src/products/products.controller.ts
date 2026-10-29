@@ -10,7 +10,12 @@ import {
   Query,
 } from '@nestjs/common';
 import { ProductsService } from './products.service';
-import { CreateProductDto, UpdateProductDto, QueryProductsDto } from './dto';
+import {
+  CreateProductDto,
+  UpdateProductDto,
+  QueryProductsDto,
+  BulkCategoryDto,
+} from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { JwtCompanyGuard } from '../common/guards/jwt-company.guard';
 import {
@@ -72,6 +77,16 @@ export class ProductsController {
   @RequireDelete('erp', 'products')
   removeCategory(@CurrentUser() user: any, @Param('id') id: string) {
     return this.productsService.removeCategory(user.currentCompany.id, id);
+  }
+
+  @Patch('bulk-category')
+  @RequireEdit('erp', 'products')
+  bulkSetCategory(@CurrentUser() user: any, @Body() dto: BulkCategoryDto) {
+    return this.productsService.bulkSetCategory(
+      user.currentCompany.id,
+      dto.ids,
+      dto.categoryId,
+    );
   }
 
   @Get(':id')

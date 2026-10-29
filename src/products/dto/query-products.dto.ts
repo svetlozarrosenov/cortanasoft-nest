@@ -11,6 +11,9 @@ import {
 import { Transform, Type } from 'class-transformer';
 import { ProductType } from '@prisma/client';
 
+/** Стойност на categoryId във филтъра = продукти без категория */
+export const UNCATEGORIZED = 'uncategorized';
+
 export class QueryProductsDto {
   @IsOptional()
   @IsString()
@@ -20,6 +23,7 @@ export class QueryProductsDto {
   @IsEnum(ProductType)
   type?: ProductType;
 
+  // ID на категория или UNCATEGORIZED за продукти без категория
   @IsOptional()
   @IsString()
   categoryId?: string;
