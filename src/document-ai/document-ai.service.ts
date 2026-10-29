@@ -70,6 +70,8 @@ export interface DeliveryScanResult {
     matchedSupplierName?: string | null;
     /** Данни за нов доставчик, когато нищо не съвпада */
     name?: string | null;
+    /** ЕИК/БУЛСТАТ, само цифри (от BG ДДС номера, ако няма отделен) */
+    eik?: string | null;
     vatNumber?: string | null;
     address?: string | null;
   };
@@ -741,6 +743,11 @@ export class DocumentAIService implements OnModuleInit {
                 matchedSupplierId: { type: ['string', 'null'] },
                 matchedSupplierName: { type: ['string', 'null'] },
                 name: { type: ['string', 'null'] },
+                eik: {
+                  type: ['string', 'null'],
+                  description:
+                    "Issuer's ЕИК/БУЛСТАТ, digits only. If only a VAT number BG123456789 is printed, put its digits here too",
+                },
                 vatNumber: { type: ['string', 'null'] },
                 address: { type: ['string', 'null'] },
               },
@@ -816,7 +823,7 @@ export class DocumentAIService implements OnModuleInit {
             type: 'text',
             text: `This is a supplier invoice for a goods delivery. Extract the data and match it against the company's records:
 
-1. Use search_suppliers to find the supplier (try the name and the VAT number).
+1. Use search_suppliers to find the supplier (try the name and the VAT number). When nothing matches, fill supplier.name, eik (ЕИК/БУЛСТАТ digits; from the BG VAT number if no separate ЕИК is printed), vatNumber and address from the document.
 2. Classify every line: kind "goods" for physical products that enter the warehouse; kind "cost" for services and charges that are NOT stock — transport, shipping, freight, delivery, customs duty, packaging, handling, insurance, bank/service fees. For cost lines set costCategory (DELIVERY for transport/shipping/freight/couriers, TAXES for customs duties, INSURANCE for insurance, OTHER otherwise), do NOT search products and do NOT propose newProduct.
 3. For EVERY goods line use search_products to find an existing product. Product names may be in Bulgarian — try translated or simplified queries. Only set matchedProductId when you are reasonably sure it is the same product (set matchConfidence 0-1). If nothing matches, propose newProduct with a sensible Bulgarian name, the SKU/code from the invoice if present, a unit from the allowed list and the purchase price.
 4. vatRate: the VAT percentage the invoice applies (20, 9 or 0); null if not visible.
@@ -1516,7 +1523,7 @@ ${companyContext}
       totalAmount: raw.totalAmount ?? null,
       vatAmount: raw.vatAmount ?? null,
       vatRate: typeof raw.vatRate === 'number' ? raw.vatRate : null,
-      supplier: raw.supplier || {},
+      supplier: this.normalizeScannedSupplier(raw.supplier),
       items: (raw.items || []).map((item) => ({
         description: item.description || '',
         quantity: Number(item.quantity) || 1,
@@ -1746,6 +1753,18 @@ ${EXPENSE_CATEGORY_HINTS}
       })),
       confidence: parsed.confidence || 0.8,
     };
+  }
+
+  // ЕИК само с цифри; ако моделът е дал само BG ДДС номер, ЕИК-ът са
+  // неговите цифри (български доставчик)
+  private normalizeScannedSupplier(
+    supplier: DeliveryScanResult['supplier'] | undefined,
+  ): DeliveryScanResult['supplier'] {
+    const s = supplier || {};
+    const eikDigits = String(s.eik || '').replace(/\D/g, '');
+    const vat = String(s.vatNumber || '').trim();
+    const fromVat = /^BG\d{9,10}$/i.test(vat) ? vat.slice(2) : '';
+    return { ...s, eik: eikDigits || fromVat || null };
   }
 
   private parseDate(value: string): string {
