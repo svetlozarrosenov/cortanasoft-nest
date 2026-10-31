@@ -824,6 +824,7 @@ export class OrdersService {
         currency: { select: { code: true } },
         customerName: true,
         customerEmail: true,
+        locationId: true,
         items: {
           where: pendingItemWhere,
           select: {
@@ -832,6 +833,7 @@ export class OrdersService {
             unitPrice: true,
             inventorySerialId: true,
             inventoryBatchId: true,
+            locationId: true,
             product: {
               select: {
                 id: true,
@@ -854,13 +856,29 @@ export class OrdersService {
       }
     }
 
-    // Build a stock map: productId → available units (IN_STOCK + unassigned)
+    // Build a stock map: `productId:locationId` → available units
+    // (IN_STOCK + unassigned) и `productId` → общо за фирмата. Изписването
+    // при потвърждение гледа локацията на реда (item.locationId ||
+    // order.locationId), затова и готовността тук е по локация — иначе ред,
+    // който чака в един обект, свети „готов", защото стоката е в друг.
+    // Общата сума се ползва само за редове без локация.
     const stockMap = new Map<string, number>();
+    const addStock = (
+      productId: string,
+      locationId: string | null,
+      qty: number,
+    ) => {
+      stockMap.set(productId, (stockMap.get(productId) || 0) + qty);
+      if (locationId) {
+        const key = `${productId}:${locationId}`;
+        stockMap.set(key, (stockMap.get(key) || 0) + qty);
+      }
+    };
     if (productIds.size > 0) {
       // SERIAL products: count InventorySerial rows with status IN_STOCK
       // and no orderItem assigned.
       const serialCounts = await this.prisma.inventorySerial.groupBy({
-        by: ['productId'],
+        by: ['productId', 'locationId'],
         where: {
           companyId,
           productId: { in: Array.from(productIds) },
@@ -870,14 +888,14 @@ export class OrdersService {
         _count: { _all: true },
       });
       for (const r of serialCounts) {
-        stockMap.set(r.productId, r._count._all);
+        addStock(r.productId, r.locationId, r._count._all);
       }
 
       // BATCH / PRODUCT: sum InventoryBatch.quantity (assumes batches are
       // already net of consumed; cortana decrements on order
       // confirmation).
       const batchSums = await this.prisma.inventoryBatch.groupBy({
-        by: ['productId'],
+        by: ['productId', 'locationId'],
         where: {
           companyId,
           productId: { in: Array.from(productIds) },
@@ -886,8 +904,7 @@ export class OrdersService {
         _sum: { quantity: true },
       });
       for (const r of batchSums) {
-        const prev = stockMap.get(r.productId) || 0;
-        stockMap.set(r.productId, prev + Number(r._sum.quantity || 0));
+        addStock(r.productId, r.locationId, Number(r._sum.quantity || 0));
       }
     }
 
@@ -925,7 +942,11 @@ export class OrdersService {
         const hasAllocation = Boolean(
           it.inventorySerialId || it.inventoryBatchId,
         );
-        const stockAvailable = stockMap.get(it.product.id) || 0;
+        const rowLocationId = it.locationId || o.locationId;
+        const stockAvailable =
+          (rowLocationId
+            ? stockMap.get(`${it.product.id}:${rowLocationId}`)
+            : stockMap.get(it.product.id)) || 0;
 
         let readiness:
           | 'ready'
