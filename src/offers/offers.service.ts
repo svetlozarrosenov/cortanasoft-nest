@@ -46,14 +46,24 @@ export class OffersService {
     const year = new Date().getFullYear();
     const prefix = `OFR-${year}-`;
 
-    const count = await db.offer.count({
+    // Последният издаден номер + 1, а не брой + 1: триенето на оферта оставя
+    // дупка в номерацията и брой + 1 се удря в съществуващ номер (уникален
+    // ключ фирма + номер). Както при продажбите, фактурите и проформите.
+    const last = await db.offer.findFirst({
       where: {
         companyId,
         offerNumber: { startsWith: prefix },
       },
+      orderBy: { offerNumber: 'desc' },
+      select: { offerNumber: true },
     });
 
-    return `${prefix}${(count + 1).toString().padStart(5, '0')}`;
+    const lastNum = last
+      ? parseInt(last.offerNumber.slice(prefix.length), 10)
+      : 0;
+    const next = Number.isFinite(lastNum) ? lastNum + 1 : 1;
+
+    return `${prefix}${next.toString().padStart(5, '0')}`;
   }
 
   // Редове: отстъпката на реда е сума (frontend-ът я смята от %), стойността

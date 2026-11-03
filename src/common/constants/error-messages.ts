@@ -353,7 +353,12 @@ export const ErrorMessages = {
 export function getPrismaErrorMessage(error: any): string {
   // P2002 - Unique constraint violation
   if (error.code === 'P2002') {
-    const field = error.meta?.target?.[0];
+    // Съставните ключове започват с companyId (напр. [companyId, offerNumber]);
+    // той не говори нищо на потребителя, затова взимаме следващото поле.
+    const target: string[] = Array.isArray(error.meta?.target)
+      ? error.meta.target
+      : [];
+    const field = target.find((f) => f !== 'companyId') ?? target[0];
     if (field) {
       const fieldTranslations: Record<string, string> = {
         email: 'имейл',
@@ -362,6 +367,11 @@ export function getPrismaErrorMessage(error: any): string {
         code: 'код',
         name: 'име',
         vatNumber: 'ДДС номер',
+        offerNumber: 'номер на оферта',
+        orderNumber: 'номер на продажба',
+        invoiceNumber: 'номер на фактура',
+        proformaNumber: 'номер на проформа',
+        number: 'номер',
       };
       const translatedField = fieldTranslations[field] || field;
       return `Запис с този ${translatedField} вече съществува`;
