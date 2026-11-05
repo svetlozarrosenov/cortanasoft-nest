@@ -20,6 +20,7 @@ import {
   UpdateInvoiceDto,
   QueryInvoicesDto,
   RecordPaymentDto,
+  CorrectInvoiceDto,
 } from './dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
@@ -157,6 +158,18 @@ export class CompanyInvoicesController {
   @RequireEdit('erp', 'invoices')
   cancel(@Param('companyId') companyId: string, @Param('id') id: string) {
     return this.invoicesService.cancel(companyId, id);
+  }
+
+  // Анулирай + издай нова от текущата продажба (една транзакция)
+  @Post(':id/correct')
+  @RequireCreate('erp', 'invoices')
+  correct(
+    @Param('companyId') companyId: string,
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+    @Body() dto: CorrectInvoiceDto,
+  ) {
+    return this.invoicesService.correct(companyId, user.id, id, dto);
   }
 
   @Delete(':id')

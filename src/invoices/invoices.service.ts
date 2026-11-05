@@ -11,10 +11,14 @@ import {
   UpdateInvoiceDto,
   QueryInvoicesDto,
   RecordPaymentDto,
+  CorrectInvoiceDto,
 } from './dto';
 import { Prisma, InvoiceStatus, InvoiceType, OrderStatus } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
 import { PaymentsService } from '../payments/payments.service';
+import { isCoveringInvoice, orderInvoicesDiffer } from './invoice-order-diff';
+
+type Db = Prisma.TransactionClient | PrismaService;
 
 @Injectable()
 export class InvoicesService {
@@ -22,6 +26,15 @@ export class InvoicesService {
     private prisma: PrismaService,
     private paymentsService: PaymentsService,
   ) {}
+
+  // Издаването работи и вътре в чужда транзакция (виж correct()): подадено tx
+  // се ползва директно, иначе се отваря нова.
+  private runInTx<T>(
+    tx: Prisma.TransactionClient | undefined,
+    fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return tx ? fn(tx) : this.prisma.$transaction(fn);
+  }
 
   // Една обща номерация за всички фактури на компанията (обикновени, авансови,
   // окончателни): последният номер + 1, 10 цифри с водещи нули.
@@ -58,6 +71,9 @@ export class InvoicesService {
         orderNumber: true,
         orderDate: true,
         status: true,
+        subtotal: true,
+        vatAmount: true,
+        total: true,
       },
     },
     customer: true,
@@ -155,9 +171,11 @@ export class InvoicesService {
     companyId: string,
     userId: string,
     dto: CreateInvoiceDto,
+    outerTx?: Prisma.TransactionClient,
   ) {
+    const db: Db = outerTx ?? this.prisma;
     // Find order with all data
-    const order = await this.prisma.order.findFirst({
+    const order = await db.order.findFirst({
       where: { id: dto.orderId, companyId },
       include: {
         customer: true,
@@ -186,7 +204,7 @@ export class InvoicesService {
     const billTo = await this.resolveBillTo(companyId, order, dto.billToCustomerId);
 
     // Block REGULAR creation if there are unresolved ADVANCE invoices on this order
-    const activeAdvances = await this.prisma.invoice.count({
+    const activeAdvances = await db.invoice.count({
       where: {
         companyId,
         orderId: order.id,
@@ -238,7 +256,7 @@ export class InvoicesService {
       : 0;
 
     // Generate number + create in a transaction to prevent duplicates
-    return this.prisma.$transaction(async (tx) => {
+    return this.runInTx(outerTx, async (tx) => {
       const invoiceNumber = await this.generateInvoiceNumber(companyId, tx);
 
       const orderPaid = Number(order.paidAmount);
@@ -318,8 +336,10 @@ export class InvoicesService {
     companyId: string,
     userId: string,
     dto: CreateAdvanceInvoiceDto,
+    outerTx?: Prisma.TransactionClient,
   ) {
-    const order = await this.prisma.order.findFirst({
+    const db: Db = outerTx ?? this.prisma;
+    const order = await db.order.findFirst({
       where: { id: dto.orderId, companyId },
       include: { customer: true },
     });
@@ -338,7 +358,7 @@ export class InvoicesService {
     }
 
     // Block advance if there are already non-cancelled REGULAR/FINAL invoices
-    const conflictingInvoices = await this.prisma.invoice.count({
+    const conflictingInvoices = await db.invoice.count({
       where: {
         companyId,
         orderId: order.id,
@@ -374,7 +394,7 @@ export class InvoicesService {
     const partialVatAmount = round2(Number(order.vatAmount) * ratio);
     const effectiveVatRate = this.effectiveVatRateForOrder(order);
 
-    const created = await this.prisma.$transaction(async (tx) => {
+    const created = await this.runInTx(outerTx, async (tx) => {
       const invoiceNumber = await this.generateInvoiceNumber(companyId, tx);
 
       const invoice = await tx.invoice.create({
@@ -427,15 +447,17 @@ export class InvoicesService {
     });
 
     // Re-fetch after transaction — recalculateOrderState mutated paidAmount/status.
-    return this.findOne(companyId, created.id);
+    return this.findOneWith(db, companyId, created.id);
   }
 
   async createFinal(
     companyId: string,
     userId: string,
     dto: CreateFinalInvoiceDto,
+    outerTx?: Prisma.TransactionClient,
   ) {
-    const order = await this.prisma.order.findFirst({
+    const db: Db = outerTx ?? this.prisma;
+    const order = await db.order.findFirst({
       where: { id: dto.orderId, companyId },
       include: {
         customer: true,
@@ -464,12 +486,18 @@ export class InvoicesService {
       throw new BadRequestException(ErrorMessages.invoices.finalRequiresAdvances);
     }
 
-    const advances = await this.prisma.invoice.findMany({
+    // Приспадане се брои само в активна окончателна: анулирана (напр. при
+    // „Коригирай“) освобождава аванса за ново приспадане.
+    const advances = await db.invoice.findMany({
       where: {
         id: { in: dto.advanceInvoiceIds },
         companyId,
       },
-      include: { deductedInFinals: true },
+      include: {
+        deductedInFinals: {
+          where: { finalInvoice: { status: { not: 'CANCELLED' } } },
+        },
+      },
     });
 
     if (advances.length !== dto.advanceInvoiceIds.length) {
@@ -538,7 +566,7 @@ export class InvoicesService {
       total: -Number(adv.subtotal),
     }));
 
-    const created = await this.prisma.$transaction(async (tx) => {
+    const created = await this.runInTx(outerTx, async (tx) => {
       const invoiceNumber = await this.generateInvoiceNumber(companyId, tx);
 
       // Inherit paid amount from advances (they're already paid in real money)
@@ -608,7 +636,67 @@ export class InvoicesService {
     });
 
     // Re-fetch after transaction — recalculateOrderState mutated paidAmount/status.
-    return this.findOne(companyId, created.id);
+    return this.findOneWith(db, companyId, created.id);
+  }
+
+  // Сверка с продажбата за всяка фактура в списък (виж invoice-order-diff.ts).
+  // Активните покриващи фактури на засегнатите продажби се четат наведнъж.
+  private async attachOrderDiff<
+    T extends { orderId: string | null; type: InvoiceType; status: InvoiceStatus },
+  >(db: Db, companyId: string, invoices: T[]): Promise<(T & { differsFromOrder: boolean })[]> {
+    const orderIds = [
+      ...new Set(
+        invoices
+          .filter((i) => i.orderId && isCoveringInvoice(i))
+          .map((i) => i.orderId as string),
+      ),
+    ];
+    if (orderIds.length === 0) {
+      return invoices.map((i) => ({ ...i, differsFromOrder: false }));
+    }
+
+    const [orders, covering] = await Promise.all([
+      db.order.findMany({
+        where: { id: { in: orderIds }, companyId },
+        select: { id: true, subtotal: true, vatAmount: true, total: true },
+      }),
+      db.invoice.findMany({
+        where: {
+          companyId,
+          orderId: { in: orderIds },
+          status: { not: 'CANCELLED' },
+          type: { in: ['REGULAR', 'FINAL'] },
+        },
+        select: {
+          orderId: true,
+          type: true,
+          status: true,
+          subtotal: true,
+          vatAmount: true,
+          total: true,
+          advanceDeductions: {
+            select: { subtotal: true, vatAmount: true, total: true },
+          },
+        },
+      }),
+    ]);
+
+    const byOrder = new Map<string, typeof covering>();
+    for (const inv of covering) {
+      const list = byOrder.get(inv.orderId as string) ?? [];
+      list.push(inv);
+      byOrder.set(inv.orderId as string, list);
+    }
+    const differs = new Map<string, boolean>();
+    for (const order of orders) {
+      differs.set(order.id, orderInvoicesDiffer(order, byOrder.get(order.id) ?? []));
+    }
+
+    return invoices.map((i) => ({
+      ...i,
+      differsFromOrder:
+        !!i.orderId && isCoveringInvoice(i) ? differs.get(i.orderId) ?? false : false,
+    }));
   }
 
   async findAll(companyId: string, query: QueryInvoicesDto) {
@@ -672,7 +760,7 @@ export class InvoicesService {
       }),
     };
 
-    const [data, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       this.prisma.invoice.findMany({
         where,
         include: {
@@ -688,6 +776,7 @@ export class InvoicesService {
       }),
       this.prisma.invoice.count({ where }),
     ]);
+    const data = await this.attachOrderDiff(this.prisma, companyId, rows);
 
     return {
       data,
@@ -701,7 +790,11 @@ export class InvoicesService {
   }
 
   async findOne(companyId: string, id: string) {
-    const invoice = await this.prisma.invoice.findFirst({
+    return this.findOneWith(this.prisma, companyId, id);
+  }
+
+  private async findOneWith(db: Db, companyId: string, id: string) {
+    const invoice = await db.invoice.findFirst({
       where: { id, companyId },
       include: this.invoiceInclude,
     });
@@ -710,7 +803,8 @@ export class InvoicesService {
       throw new NotFoundException(ErrorMessages.invoices.notFound);
     }
 
-    return invoice;
+    const [withDiff] = await this.attachOrderDiff(db, companyId, [invoice]);
+    return withDiff;
   }
 
   async update(companyId: string, id: string, dto: UpdateInvoiceDto) {
@@ -842,10 +936,25 @@ export class InvoicesService {
       }
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction((tx) => this.cancelInTx(tx, invoice));
+  }
+
+  // Анулиране без проверките за плащане: при „Коригирай“ платената фактура се
+  // анулира и парите (които живеят по продажбата) се преразпределят към новата.
+  private async cancelInTx(
+    tx: Prisma.TransactionClient,
+    invoice: {
+      id: string;
+      type: InvoiceType;
+      orderId: string | null;
+      total: Prisma.Decimal;
+    },
+  ) {
+    const { id } = invoice;
+    {
       const updated = await tx.invoice.update({
         where: { id },
-        data: { status: 'CANCELLED' },
+        data: { status: 'CANCELLED', paidAmount: 0, paymentDate: null },
         include: this.invoiceInclude,
       });
 
@@ -861,7 +970,10 @@ export class InvoicesService {
           const deductions = await tx.invoiceAdvanceDeduction.findMany({
             where: { finalInvoiceId: invoice.id },
           });
-          const deductedSum = deductions.reduce((s, d) => s + Number(d.total), 0);
+          const deductedSum = deductions.reduce(
+            (s, d) => s + Number(d.total),
+            0,
+          );
           await tx.order.update({
             where: { id: invoice.orderId },
             data: {
@@ -878,7 +990,168 @@ export class InvoicesService {
         }
       }
       return updated;
+    }
+  }
+
+  // „Коригирай“: анулира фактурата и издава нова от ТЕКУЩОТО състояние на
+  // продажбата в една транзакция. Издадена фактура не се поправя (ЗДДС чл. 116)
+  // — старият номер остава в дневника като анулиран, новата взима следващ номер.
+  // Плащанията живеят по продажбата и се преразпределят към новата фактура.
+  async correct(
+    companyId: string,
+    userId: string,
+    id: string,
+    dto: CorrectInvoiceDto,
+  ) {
+    const invoice = await this.findOne(companyId, id);
+
+    if (invoice.status === 'CANCELLED') {
+      throw new BadRequestException(
+        ErrorMessages.invoices.cannotCorrectCancelled,
+      );
+    }
+    if (!invoice.orderId) {
+      throw new BadRequestException(
+        ErrorMessages.invoices.cannotCorrectWithoutOrder,
+      );
+    }
+    if (!['REGULAR', 'ADVANCE', 'FINAL'].includes(invoice.type)) {
+      throw new BadRequestException(ErrorMessages.invoices.cannotCorrectType);
+    }
+    if (invoice.type === 'ADVANCE') {
+      const activeFinal = await this.prisma.invoiceAdvanceDeduction.findFirst({
+        where: {
+          advanceInvoiceId: invoice.id,
+          finalInvoice: { status: { not: 'CANCELLED' } },
+        },
+        select: { id: true },
+      });
+      if (activeFinal) {
+        throw new BadRequestException(
+          ErrorMessages.invoices.cannotCorrectDeductedAdvance,
+        );
+      }
+    }
+
+    const orderId = invoice.orderId;
+    const inPlace = dto.mode === 'IN_PLACE';
+    // При запазен номер непосочените полета остават както са на фактурата
+    const common = {
+      orderId,
+      invoiceDate:
+        dto.invoiceDate ??
+        (inPlace ? invoice.invoiceDate.toISOString() : undefined),
+      dueDate:
+        dto.dueDate ??
+        (inPlace && invoice.dueDate
+          ? invoice.dueDate.toISOString()
+          : undefined),
+      notes: dto.notes ?? (inPlace ? (invoice.notes ?? undefined) : undefined),
+      paymentMethod:
+        dto.paymentMethod ??
+        (inPlace ? (invoice.paymentMethod ?? undefined) : undefined),
+      billToCustomerId: dto.billToCustomerId,
+    };
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      await this.cancelInTx(tx, invoice);
+
+      let fresh: { id: string };
+      if (invoice.type === 'ADVANCE') {
+        fresh = await this.createAdvance(
+          companyId,
+          userId,
+          {
+            ...common,
+            amount: dto.amount ?? Number(invoice.total),
+            itemDescription:
+              dto.itemDescription ?? invoice.items[0]?.description ?? undefined,
+          },
+          tx,
+        );
+      } else if (invoice.type === 'FINAL') {
+        const advanceInvoiceIds = dto.advanceInvoiceIds?.length
+          ? dto.advanceInvoiceIds
+          : invoice.advanceDeductions.map((d) => d.advanceInvoiceId);
+        fresh = await this.createFinal(
+          companyId,
+          userId,
+          {
+            ...common,
+            advanceInvoiceIds,
+            deductionDescriptionTemplate: dto.deductionDescriptionTemplate,
+          },
+          tx,
+        );
+      } else {
+        fresh = await this.createFromOrder(companyId, userId, common, tx);
+      }
+
+      if (inPlace) {
+        await this.adoptInvoice(tx, invoice.id, fresh.id);
+        fresh = { id: invoice.id };
+      }
+
+      await this.paymentsService.recalculateOrderState(tx, orderId);
+      return fresh;
     });
+
+    return this.findOne(companyId, created.id);
+  }
+
+  // Запазен номер: новата фактура е издадена и валидирана по общия път, а
+  // тук съдържанието ѝ (хедър, редове, приспадания) се прехвърля върху старата
+  // и новият запис се трие. Новата беше с последния номер, така че триенето ѝ
+  // не оставя дупка. Документите/протоколите, закачени за старата, остават.
+  private async adoptInvoice(
+    tx: Prisma.TransactionClient,
+    oldId: string,
+    freshId: string,
+  ) {
+    const fresh = await tx.invoice.findUniqueOrThrow({
+      where: { id: freshId },
+    });
+
+    await tx.invoiceItem.deleteMany({ where: { invoiceId: oldId } });
+    await tx.invoiceItem.updateMany({
+      where: { invoiceId: freshId },
+      data: { invoiceId: oldId },
+    });
+    await tx.invoiceAdvanceDeduction.deleteMany({
+      where: { finalInvoiceId: oldId },
+    });
+    await tx.invoiceAdvanceDeduction.updateMany({
+      where: { finalInvoiceId: freshId },
+      data: { finalInvoiceId: oldId },
+    });
+
+    await tx.invoice.update({
+      where: { id: oldId },
+      data: {
+        invoiceDate: fresh.invoiceDate,
+        dueDate: fresh.dueDate,
+        type: fresh.type,
+        status: fresh.status,
+        paidAmount: fresh.paidAmount,
+        paymentMethod: fresh.paymentMethod,
+        paymentDate: fresh.paymentDate,
+        customerId: fresh.customerId,
+        customerName: fresh.customerName,
+        customerEik: fresh.customerEik,
+        customerVatNumber: fresh.customerVatNumber,
+        customerAddress: fresh.customerAddress,
+        customerCity: fresh.customerCity,
+        customerPostalCode: fresh.customerPostalCode,
+        subtotal: fresh.subtotal,
+        vatAmount: fresh.vatAmount,
+        discount: fresh.discount,
+        total: fresh.total,
+        currencyId: fresh.currencyId,
+        exchangeRate: fresh.exchangeRate,
+        notes: fresh.notes,
+      },
+    });
+    await tx.invoice.delete({ where: { id: freshId } });
   }
 
   async remove(companyId: string, id: string) {
@@ -905,12 +1178,16 @@ export class InvoicesService {
 
   // Get invoices for a specific order
   async findByOrder(companyId: string, orderId: string) {
-    return this.prisma.invoice.findMany({
+    const rows = await this.prisma.invoice.findMany({
       where: { companyId, orderId },
       include: {
         _count: { select: { items: true } },
+        // Табът „Фактури“ на продажбата показва кой аванс е приспаднат и
+        // предлага за окончателна само свободните
+        advanceDeductions: { select: { advanceInvoiceId: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
+    return this.attachOrderDiff(this.prisma, companyId, rows);
   }
 }

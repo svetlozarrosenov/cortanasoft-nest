@@ -1267,7 +1267,7 @@ export class OrdersService {
           });
         });
       }
-      throw new BadRequestException(ErrorMessages.orders.canOnlyUpdatePending);
+      throw new BadRequestException(ErrorMessages.orders.deliveredNotEditable);
     }
 
     // Verify new location if provided

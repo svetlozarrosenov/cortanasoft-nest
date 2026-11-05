@@ -87,7 +87,8 @@ export const ErrorMessages = {
     productsNotFound: 'Един или повече продукти не са намерени',
     directDeliveryService:
       'Услуга не може да бъде директна доставка — няма какво да се достави от доставчик',
-    canOnlyUpdatePending: 'Може да редактирате само чакащи поръчки',
+    deliveredNotEditable:
+      'Доставена продажба не се редактира. Върнете я в „Потвърдена“, направете промяната и я доставете отново.',
     cannotConfirmWithoutItems: 'Не може да потвърдите поръчка без артикули',
     alreadyCancelled: 'Поръчката вече е отменена',
     alreadyReturned: 'Продажбата вече е върната',
@@ -141,6 +142,11 @@ export const ErrorMessages = {
     deductionsExceedOrder: 'Общата сума на избраните аванси надвишава общата сума на поръчката',
     billToCustomerNotFound: 'Клиентът за фактуриране не е намерен',
     cannotEditCancelledProforma: 'Анулирана проформа не може да се редактира',
+    cannotCorrectCancelled: 'Анулирана фактура не може да се коригира',
+    cannotCorrectWithoutOrder: 'Коригират се само фактури към продажба',
+    cannotCorrectType: 'Коригират се само обикновени, авансови и окончателни фактури',
+    cannotCorrectDeductedAdvance:
+      'Авансът е приспаднат в окончателна фактура — коригирайте окончателната.',
   },
 
   // ==================== Приемо-предавателни протоколи ====================

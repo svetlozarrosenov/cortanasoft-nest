@@ -323,18 +323,40 @@ export class WarrantiesService {
 
     if (!order) return;
 
-    // Idempotency: skip if this order already has warranties. Avoids dupes
-    // when a status bounces DELIVERED → SHIPPED → DELIVERED.
-    const existingCount = await client.issuedWarranty.count({
-      where: { orderId, companyId },
+    // Синхронизация с редовете, не „издай веднъж“: продажбата може да се
+    // върне от „Доставена“ в „Потвърдена“, да се редактира и да се достави
+    // наново. Тогава махнатите редове анулират гаранцията си, новите получават,
+    // а запазените (същият продукт и сериен номер) остават с оригиналния срок.
+    const existing = await client.issuedWarranty.findMany({
+      where: { orderId, companyId, status: 'ACTIVE' },
+      select: { id: true, productId: true, serialNumber: true, quantity: true },
     });
-    if (existingCount > 0) return;
+    const keyOf = (productId: string | null, serialNumber: string | null) =>
+      `${productId ?? ''}|${serialNumber ?? ''}`;
+    const existingByKey = new Map(
+      existing.map((w) => [keyOf(w.productId, w.serialNumber), w] as const),
+    );
 
     const warrantiesToCreate: Prisma.IssuedWarrantyCreateManyInput[] = [];
+    const keep = new Set<string>();
 
     for (const item of order.items) {
       const template = item.product?.warrantyTemplate;
       if (!template || !template.isActive) continue;
+
+      const serialNumber = item.inventorySerial?.serialNumber || null;
+      const key = keyOf(item.product.id, serialNumber);
+      const current = existingByKey.get(key);
+      if (current && !keep.has(key)) {
+        keep.add(key);
+        if (Number(current.quantity) !== Number(item.quantity)) {
+          await client.issuedWarranty.update({
+            where: { id: current.id },
+            data: { quantity: Number(item.quantity) },
+          });
+        }
+        continue;
+      }
 
       // Гаранцията тече от реалното предаване на стоката (deliveredAt), не от
       // датата на поръчката — клиентът може да е поръчал седмици по-рано.
@@ -347,7 +369,7 @@ export class WarrantiesService {
         startDate,
         endDate,
         status: 'ACTIVE',
-        serialNumber: item.inventorySerial?.serialNumber || null,
+        serialNumber,
         quantity: Number(item.quantity),
         companyId,
         warrantyTemplateId: template.id,
@@ -357,15 +379,21 @@ export class WarrantiesService {
       });
     }
 
+    const toVoid = existing
+      .filter((w) => !keep.has(keyOf(w.productId, w.serialNumber)))
+      .map((w) => w.id);
+    if (toVoid.length > 0) {
+      await client.issuedWarranty.updateMany({
+        where: { id: { in: toVoid } },
+        data: { status: 'VOIDED' },
+      });
+    }
+
     if (warrantiesToCreate.length > 0) {
       await client.issuedWarranty.createMany({ data: warrantiesToCreate });
     }
   }
 
-  // Marks all ACTIVE warranties for an order as VOIDED. Called when the
-  // order is cancelled — keeping ACTIVE warranties for a cancelled sale is
-  // both wrong (no contract with the customer) and visually misleading.
-  // We void instead of delete to preserve audit trail.
   async voidWarrantiesForOrder(
     companyId: string,
     orderId: string,
