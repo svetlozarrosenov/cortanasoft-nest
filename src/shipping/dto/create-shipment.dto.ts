@@ -6,12 +6,48 @@ import {
   IsEnum,
   IsIn,
   Min,
+  ValidateNested,
+  IsArray,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { DeliveryType } from '@prisma/client';
+
+/** Ред от описа на пратката (Еконт: PackingListElement; иска се при НП по департамент) */
+export class ShipmentPackingItemDto {
+  // Инвентарен/артикулен номер — Еконт го изисква за всеки ред от описа
+  @IsString()
+  @IsOptional()
+  inventoryNum?: string;
+
+  @IsString()
+  description: string;
+
+  @IsNumber()
+  @Min(0)
+  count: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  price?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  weight?: number;
+}
 
 export class CreateShipmentDto {
   @IsString()
   orderId: string;
+
+  // Опис на стоките в пратката (от отметнатите в модала). Ако липсва,
+  // бекендът го прави от редовете на продажбата.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ShipmentPackingItemDto)
+  items?: ShipmentPackingItemDto[];
 
   @IsString()
   @IsIn(['econt', 'speedy'])
@@ -149,6 +185,17 @@ export class CreateShipmentDto {
   @IsOptional()
   declaredValueEnabled?: boolean;
 
+  // Обявена стойност за тази пратка (по подразбиране = стойността на
+  // стоката); без нея се ползва сумата за НП, както досега
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  declaredValueAmount?: number;
+
+  // Override на настройката „SMS известие" само за тази пратка
+  @IsOptional()
+  smsNotification?: boolean;
+
   @IsString()
   @IsOptional()
   shipmentType?: string;
@@ -275,6 +322,17 @@ export class CalculateShippingDto {
 
   @IsOptional()
   declaredValueEnabled?: boolean;
+
+  // Обявена стойност за тази пратка (по подразбиране = стойността на
+  // стоката); без нея се ползва сумата за НП, както досега
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  declaredValueAmount?: number;
+
+  // Override на настройката „SMS известие" само за тази пратка
+  @IsOptional()
+  smsNotification?: boolean;
 
   @IsString()
   @IsOptional()

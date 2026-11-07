@@ -1,16 +1,32 @@
-import { CreateShipmentDto, CalculateShippingDto } from '../dto/create-shipment.dto';
+import {
+  CreateShipmentDto,
+  CalculateShippingDto,
+} from '../dto/create-shipment.dto';
+import {
+  CarrierTrackingOutcome,
+  TrackableShipment,
+} from './carrier-tracking.interface';
 
 /**
- * Унифициран контракт, който всеки carrier модул (Econt, Speedy, DHL...)
- * трябва да имплементира. Това позволява ShippingService да работи с тях
- * без да знае техните specifics.
+ * Унифициран контракт, който всеки куриерски модул (Econt, Speedy, ...)
+ * имплементира. Общият код (ShippingService, ShipmentSyncService, cron)
+ * работи само през него и не знае нищо за конкретните API-та.
+ *
+ * Нов куриер = нов модул със сервиз, който имплементира интерфейса и е
+ * маркиран с @ShippingCarrier(). Регистърът го намира сам — нищо в
+ * съществуващия код не се пипа (виж shipping-provider.registry.ts).
  */
 export interface ShippingProvider {
-  /** Уникален идентификатор: 'econt', 'speedy', 'dhl', ... */
+  /** Уникален идентификатор: 'econt', 'speedy', 'pigeon', ... (= Shipment.provider) */
   readonly name: string;
 
+  /** Има ли фирмата активна и пълна конфигурация за този куриер. */
+  isConfigured(companyId: string): Promise<boolean>;
+
   /** Тества дали credentials-ите работят. */
-  testConnection(companyId: string): Promise<{ success: boolean; [key: string]: any }>;
+  testConnection(
+    companyId: string,
+  ): Promise<{ success: boolean; [key: string]: any }>;
 
   /** Изчислява цена за доставка без да създава пратка. */
   calculateShipping(
@@ -25,9 +41,19 @@ export interface ShippingProvider {
     order: any,
   ): Promise<any>;
 
-  /** Проследяване по shipment ID. */
-  trackShipment(companyId: string, shipment: any): Promise<any>;
+  /**
+   * Статус на много пратки наведнъж (една заявка към куриера, където може).
+   * Връща резултат по Shipment.id; пратка без запис в Map-а = куриерът не е
+   * казал нищо за нея. Само превод от куриера — нищо не се записва тук.
+   */
+  trackShipments(
+    companyId: string,
+    shipments: TrackableShipment[],
+  ): Promise<Map<string, CarrierTrackingOutcome>>;
 
-  /** Анулира пратка в provider API (best-effort). */
+  /**
+   * Анулира/изтрива пратката при куриера. Хвърля при отказ — общият код
+   * тогава НЕ анулира локално.
+   */
   cancelShipment(companyId: string, shipment: any): Promise<void>;
 }

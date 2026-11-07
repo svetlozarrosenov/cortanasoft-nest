@@ -13,7 +13,13 @@ import {
   isEncryptedSecret,
 } from '../common/utils/secret-crypto.util';
 import { SpeedyCredentials, SpeedySettings } from './interfaces';
-import { ShippingProvider } from '../shipping/interfaces';
+import {
+  ShippingProvider,
+  CarrierTrackingOutcome,
+  CarrierTrackingResult,
+  TrackableShipment,
+} from '../shipping/interfaces';
+import { ShippingCarrier } from '../shipping/shipping-provider.registry';
 import {
   CreateShipmentDto,
   CalculateShippingDto,
@@ -23,6 +29,7 @@ import { UpdateSpeedyConfigDto } from './dto/update-speedy-config.dto';
 const PROVIDER = 'speedy';
 
 @Injectable()
+@ShippingCarrier()
 export class SpeedyService implements ShippingProvider, OnModuleInit {
   readonly name = PROVIDER;
   private readonly logger = new Logger(SpeedyService.name);
@@ -222,25 +229,101 @@ export class SpeedyService implements ShippingProvider, OnModuleInit {
     });
   }
 
-  async trackShipment(companyId: string, shipment: any) {
-    const trackingInfo = shipment.trackingData as any;
-    const parcelBarcode =
-      trackingInfo?.parcelBarcode || trackingInfo?.parcels?.[0]?.barcode;
-    if (!parcelBarcode) {
-      throw new BadRequestException('Няма баркод за проследяване');
-    }
+  /** Има ли фирмата активна конфигурация с потребител и парола. */
+  async isConfigured(companyId: string): Promise<boolean> {
+    const config = await this.prisma.speedyConfig.findUnique({
+      where: { companyId },
+      select: { isActive: true, username: true, password: true },
+    });
+    return !!(config?.isActive && config.username && config.password);
+  }
+
+  /**
+   * Статуси на много пратки с една заявка (/track по баркод на пратката).
+   * Преводът към общия формат е по описанието на последната операция —
+   * кодовете на операциите на Спиди не са потвърдени с реален акаунт
+   * (TODO(speedy-codes): сверка с документацията при първия клиент със Спиди).
+   */
+  async trackShipments(
+    companyId: string,
+    shipments: TrackableShipment[],
+  ): Promise<Map<string, CarrierTrackingOutcome>> {
+    const out = new Map<string, CarrierTrackingOutcome>();
+    const barcodeOf = (s: TrackableShipment): string | null => {
+      const td = s.trackingData as any;
+      return td?.parcelBarcode || td?.parcels?.[0]?.barcode || s.shipmentNumber || null;
+    };
+    const trackable = shipments
+      .map((s) => ({ s, barcode: barcodeOf(s) }))
+      .filter((x): x is { s: TrackableShipment; barcode: string } => !!x.barcode);
+    if (trackable.length === 0) return out;
 
     const creds = await this.getCredentials(companyId);
-    const parcels = await this.api.trackParcels(creds, [parcelBarcode]);
-    const status = parcels?.[0] || null;
-
-    if (status) {
-      await this.prisma.shipment.update({
-        where: { id: shipment.id },
-        data: { trackingData: { ...trackingInfo, tracking: status } },
-      });
+    for (let i = 0; i < trackable.length; i += 50) {
+      const chunk = trackable.slice(i, i + 50);
+      const parcels: any[] = await this.api.trackParcels(
+        creds,
+        chunk.map((x) => x.barcode),
+      );
+      for (const { s, barcode } of chunk) {
+        const parcel = parcels.find((p) => String(p?.id) === barcode);
+        if (!parcel) continue;
+        if (parcel.error) {
+          out.set(s.id, {
+            ok: false,
+            error: parcel.error?.message || 'Спиди не върна статус',
+          });
+          continue;
+        }
+        out.set(s.id, { ok: true, result: this.toTrackingResult(parcel) });
+      }
     }
-    return status;
+    return out;
+  }
+
+  private toTrackingResult(parcel: any): CarrierTrackingResult {
+    const ops: any[] = Array.isArray(parcel.operations) ? parcel.operations : [];
+    const sorted = [...ops].sort(
+      (a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime(),
+    );
+    const last = sorted[0];
+    const text = (op: any) => String(op?.description || '');
+    const deliveredOp = sorted.find(
+      (op) => /достав|delivered/i.test(text(op)) && !/недостав|not delivered/i.test(text(op)),
+    );
+    const returnedOp = sorted.find((op) => /върн|return/i.test(text(op)));
+    const cancelledOp = sorted.find((op) => /анулир|cancel/i.test(text(op)));
+    const firstOp = sorted[sorted.length - 1];
+    const toDate = (v: unknown) => {
+      if (!v) return null;
+      const d = new Date(String(v));
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+
+    const status = deliveredOp
+      ? 'DELIVERED'
+      : cancelledOp
+        ? 'CANCELLED'
+        : returnedOp
+          ? 'RETURNED'
+          : sorted.length > 0
+            ? 'IN_TRANSIT'
+            : 'CREATED';
+
+    return {
+      status,
+      shortStatus: last ? text(last) : null,
+      events: sorted.map((op) => ({
+        time: toDate(op.dateTime)?.toISOString() ?? null,
+        description: [text(op), op.place].filter(Boolean).join(', '),
+      })),
+      sentAt: firstOp ? toDate(firstOp.dateTime) : null,
+      deliveredAt: deliveredOp ? toDate(deliveredOp.dateTime) : null,
+      cod: null, // изплащането на НП при Спиди идва от отделен отчет, не от /track
+      origin: null, // TODO(speedy): офис/адрес на подателя от /shipment/info
+      insurance: null,
+      raw: parcel,
+    };
   }
 
   async cancelShipment(companyId: string, shipment: any) {

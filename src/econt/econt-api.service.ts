@@ -1,6 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EcontCredentials, CreateLabelParams, EcontSettings } from './interfaces';
 
+/**
+ * Еконт влага грешките на няколко нива (innerErrors → innerErrors), често
+ * с празно съобщение на горното ниво. Събираме всички непразни съобщения.
+ */
+export function collectEcontErrors(err: unknown): string {
+  const out: string[] = [];
+  const walk = (e: any) => {
+    if (!e || typeof e !== 'object') return;
+    const m = typeof e.message === 'string' ? e.message.trim() : '';
+    if (m && !out.includes(m)) out.push(m);
+    for (const inner of Array.isArray(e.innerErrors) ? e.innerErrors : []) {
+      walk(inner);
+    }
+  };
+  walk(err);
+  return out.join('; ');
+}
+
 const ECONT_BASE = {
   test: 'https://demo.econt.com/ee/services',
   live: 'https://ee.econt.com/services',
@@ -32,13 +50,21 @@ export class EcontApiService {
       },
       body: JSON.stringify(body),
     });
-    const data = await res.json();
-    if (!res.ok || data.type === 'ExInvalidParam') {
-      const errMsg =
-        data?.innerErrors?.[0]?.innerErrors?.[0]?.message ||
-        data?.innerErrors?.[0]?.message ||
-        data?.message ||
-        JSON.stringify(data);
+    // Еконт връща HTML (не JSON) при грешен път или паднал сервиз —
+    // res.json() тогава хвърля „Unexpected end of JSON input", което не
+    // казва нищо на оператора.
+    const text = await res.text();
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      this.logger.error(
+        `Econt API non-JSON response [${creds.mode}] ${path} (HTTP ${res.status}): ${text.slice(0, 300)}`,
+      );
+      throw new Error(`Еконт върна неочакван отговор (HTTP ${res.status})`);
+    }
+    if (!res.ok || data?.type === 'ExInvalidParam') {
+      const errMsg = collectEcontErrors(data) || JSON.stringify(data);
       // Пълният отговор + какво сме пратили (без credentials) — грешките на
       // Еконт често са заровени дълбоко в innerErrors и краткото съобщение
       // не стига за дебъг.
@@ -60,13 +86,34 @@ export class EcontApiService {
     return { success: true, profiles: result.profiles || [] };
   }
 
+  // Офисите са обща номенклатура (~600 записа) — кешираме по среда за 6 часа,
+  // за да не ги теглим при всяко създаване/обновяване на пратка.
+  private officesCache = new Map<string, { at: number; offices: any[] }>();
+
   async getOffices(creds: EcontCredentials, countryCode = 'BGR') {
+    const key = `${creds.mode}:${countryCode}`;
+    const cached = this.officesCache.get(key);
+    if (cached && Date.now() - cached.at < 6 * 60 * 60 * 1000) {
+      return cached.offices;
+    }
     const result = await this.fetch(
       creds,
       'Nomenclatures/NomenclaturesService.getOffices.json',
       { countryCode },
     );
-    return result.offices || [];
+    const offices: any[] = result.offices || [];
+    this.officesCache.set(key, { at: Date.now(), offices });
+    return offices;
+  }
+
+  /** „Град - Име на офис" по код, или null ако не е в номенклатурата. */
+  async officeLabel(creds: EcontCredentials, code: string | null | undefined) {
+    if (!code) return null;
+    const offices = await this.getOffices(creds);
+    const office = offices.find((o) => String(o?.code) === String(code));
+    if (!office) return null;
+    // Името на офиса при Еконт вече включва населеното място
+    return office.name || null;
   }
 
   async getClientProfiles(creds: EcontCredentials) {
@@ -123,11 +170,54 @@ export class EcontApiService {
     };
   }
 
-  async trackShipment(creds: EcontCredentials, shipmentNumber: string) {
-    const result = await this.fetch(creds, 'Shipment/Status', {
-      shipmentNumbers: [shipmentNumber],
+  /**
+   * Статуси на много пратки наведнъж (ShipmentService.getShipmentStatuses).
+   * Отговорът е списък { status: ShipmentStatus | null, error: Error | null }
+   * в реда на заявката; ненамерена пратка идва като error В елемента (HTTP 200).
+   * Връща по номер на пратка.
+   */
+  async getShipmentStatuses(
+    creds: EcontCredentials,
+    shipmentNumbers: string[],
+  ): Promise<Map<string, { status: any | null; error: string | null }>> {
+    const out = new Map<string, { status: any | null; error: string | null }>();
+    if (shipmentNumbers.length === 0) return out;
+    const result = await this.fetch(
+      creds,
+      'Shipments/ShipmentService.getShipmentStatuses.json',
+      { shipmentNumbers },
+    );
+    const entries: any[] = Array.isArray(result?.shipmentStatuses)
+      ? result.shipmentStatuses
+      : [];
+    entries.forEach((entry, i) => {
+      const number = entry?.status?.shipmentNumber || shipmentNumbers[i];
+      if (!number) return;
+      out.set(String(number), {
+        status: entry?.status ?? null,
+        error: entry?.error ? collectEcontErrors(entry.error) || 'Еконт не върна статус' : null,
+      });
     });
-    return result?.shipmentStatuses?.[0] || null;
+    return out;
+  }
+
+  /**
+   * Изтрива етикет в Еконт (LabelService.deleteLabels). Възможно е само
+   * докато пратката не е предадена на куриера; след това Еконт връща грешка.
+   */
+  async deleteLabel(creds: EcontCredentials, shipmentNumber: string) {
+    const result = await this.fetch(
+      creds,
+      'Shipments/LabelService.deleteLabels.json',
+      { shipmentNumbers: [shipmentNumber] },
+    );
+    const entry = result?.results?.[0];
+    if (entry?.error) {
+      throw new Error(
+        collectEcontErrors(entry.error) || 'Еконт отказа изтриването',
+      );
+    }
+    this.logger.log(`Econt deleteLabel OK: shipment=${shipmentNumber}`);
   }
 
   private buildLabel(
@@ -207,15 +297,16 @@ export class EcontApiService {
     //    реалните размери, когато ги знаем — голяма пратка с лъжлив флаг
     //    бива отказана от Еконт. Без размери — от админ дефолта.
     if (maxParcelDim > 0) {
-      if (maxParcelDim < 60) label.sizeUnder60cm = '1';
+      if (maxParcelDim < 60) label.sizeUnder60cm = true;
     } else if (sm.sizeUnder60cm) {
-      label.sizeUnder60cm = '1';
+      label.sizeUnder60cm = true;
     }
     if (sm.keepUpright) label.keepUpright = true;
     if (sm.payAfterAccept) label.payAfterAccept = true;
     if (sm.payAfterTest) label.payAfterTest = true;
     if (sm.partialDelivery) label.partialDelivery = true;
-    if (sm.emailOnDelivery) label['e-mailOnDelivery'] = true;
+    // emailOnDelivery в API-то на Еконт е низ с имейл адрес на получателя,
+    // не флаг — без имейл на получателя няма какво да се прати.
 
     if (params.dimensionsL) label.shipmentDimensionsL = params.dimensionsL;
     if (params.dimensionsW) label.shipmentDimensionsW = params.dimensionsW;
@@ -259,7 +350,11 @@ export class EcontApiService {
       // празно / Необходим е телефон...". cdPayOptions е само за търговци
       // БЕЗ споразумение.
       if (sm.cdAgreementNum) {
-        services.cdAgreementNum = sm.cdAgreementNum;
+        // Споразумението за изплащане (CD…) се подава като cdPayOptionsTemplate
+        // (така е в API-то на Еконт). Старото cdAgreementNum не съществува там:
+        // Еконт го игнорираше и таксуваше НП като изплащане в брой — двойна
+        // такса (86.86 вместо 43.43 за 2800 €, проверено 2026-11-07).
+        services.cdPayOptionsTemplate = sm.cdAgreementNum;
       } else if (sm.cdPayMethod === 'bank' && sm.cdIban) {
         services.cdPayOptions = {
           method: 'bank',
@@ -273,38 +368,69 @@ export class EcontApiService {
       }
     }
 
-    if (
-      sm.declaredValueEnabled &&
-      params.codAmount &&
-      params.codAmount > 0
-    ) {
-      services.declaredValueAmount = params.codAmount;
+    // Обявена стойност: изрична сума за пратката (дефолт = стойността на
+    // стоката от модала), иначе сумата за НП, както беше досега
+    const declared = params.declaredValueAmount ?? params.codAmount;
+    if (sm.declaredValueEnabled && declared && declared > 0) {
+      services.declaredValueAmount = declared;
       services.declaredValueCurrency = params.currency || 'BGN';
     }
 
     if (sm.smsNotification) services.smsNotification = true;
     if (sm.deliveryReceipt) services.deliveryReceipt = true;
 
+    // Споразумение „по департамент" изисква данни за фактура или опис —
+    // пращаме цифров опис на стоките и номера на фактурата, когато има.
+    if (params.packingList && params.packingList.length > 0) {
+      label.packingListType = 'digital';
+      label.packingList = params.packingList.map((it, i) => ({
+        // Еконт отказва ред без инвентарен номер: артикулният номер на
+        // продукта, а без такъв — поредният номер на реда
+        inventoryNum: it.inventoryNum || String(i + 1),
+        description: it.description,
+        count: it.count,
+        ...(it.price != null ? { price: it.price } : {}),
+        ...(it.weight != null ? { weight: it.weight } : {}),
+      }));
+    }
+    if (params.invoiceNum) services.invoiceNum = params.invoiceNum;
+
     if (Object.keys(services).length > 0) {
       label.services = services;
     }
 
+    // Типовете инструкции по API-то са take / give / return / services.
+    // 'give' = при предаване на получателя (бившият ни 'DELIVERY', който
+    // Еконт отказваше с „Невалиден тип инструкция").
     const instructions: Record<string, any>[] = [];
     if (sm.instructionsDefault) {
       instructions.push({
-        type: 'DELIVERY',
+        type: 'give',
+        title: 'Инструкция при доставка',
         description: sm.instructionsDefault,
       });
     }
     if (sm.returnDaysUntilReturn || sm.returnFailAction) {
-      const returnInstr: Record<string, any> = { type: 'return' };
+      // Параметрите живеят в returnInstructionParams; rejectAction приема
+      // contact / instruction / return_to_sender / return_to_office /
+      // return_to_address. „destroy" няма аналог → инструкция в текст.
+      const params: Record<string, any> = {};
       if (sm.returnDaysUntilReturn) {
-        returnInstr.days_until_return = sm.returnDaysUntilReturn;
+        params.daysUntilReturn = sm.returnDaysUntilReturn;
       }
-      if (sm.returnFailAction) {
-        returnInstr.delivery_fail_action = sm.returnFailAction;
+      if (sm.returnFailAction === 'return') {
+        params.rejectAction = 'return_to_sender';
+        params.returnParcelDestination = 'sender';
+      } else if (sm.returnFailAction === 'destroy') {
+        params.rejectAction = 'instruction';
+        params.rejectInstruction = 'При отказ пратката да се унищожи.';
       }
-      instructions.push(returnInstr);
+      instructions.push({
+        type: 'return',
+        title: 'Връщане',
+        description: 'Инструкция за връщане при неуспешна доставка',
+        returnInstructionParams: params,
+      });
     }
     if (instructions.length > 0) {
       label.instructions = instructions;

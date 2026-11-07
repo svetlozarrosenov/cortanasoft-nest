@@ -74,7 +74,12 @@ export class PaymentsService {
     return payment;
   }
 
-  async create(companyId: string, userId: string, dto: CreatePaymentDto) {
+  // userId = null при автоматично записано плащане (напр. изплатен НП от куриера)
+  async create(
+    companyId: string,
+    userId: string | null,
+    dto: CreatePaymentDto,
+  ) {
     if (!dto.orderId === !dto.goodsReceiptId) {
       throw new BadRequestException(
         'Подайте точно едно от orderId / goodsReceiptId',
@@ -113,7 +118,7 @@ export class PaymentsService {
             notes: dto.notes,
             currencyId: dto.currencyId || receipt.currencyId,
             exchangeRate: dto.exchangeRate ?? 1,
-            createdById: userId,
+            createdById: userId ?? undefined,
           },
           include: PAYMENT_INCLUDE,
         });
@@ -151,7 +156,7 @@ export class PaymentsService {
           notes: dto.notes,
           currencyId: dto.currencyId || order.currencyId,
           exchangeRate: dto.exchangeRate ?? 1,
-          createdById: userId,
+          createdById: userId ?? undefined,
         },
         include: PAYMENT_INCLUDE,
       });

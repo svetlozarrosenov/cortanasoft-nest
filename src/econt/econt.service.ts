@@ -7,16 +7,27 @@ import {
   isEncryptedSecret,
 } from '../common/utils/secret-crypto.util';
 import { EcontCredentials, EcontSettings } from './interfaces';
-import { ShippingProvider } from '../shipping/interfaces';
+import {
+  ShippingProvider,
+  CarrierTrackingOutcome,
+  CarrierTrackingResult,
+  TrackableShipment,
+  ShipmentOrigin,
+  ShipmentInsurance,
+} from '../shipping/interfaces';
+import { ShippingCarrier } from '../shipping/shipping-provider.registry';
 import {
   CreateShipmentDto,
   CalculateShippingDto,
 } from '../shipping/dto/create-shipment.dto';
 import { UpdateEcontConfigDto } from './dto/update-econt-config.dto';
+import { ErrorMessages } from '../common/constants/error-messages';
 
 const PROVIDER = 'econt';
 
+
 @Injectable()
+@ShippingCarrier()
 export class EcontService implements ShippingProvider, OnModuleInit {
   readonly name = PROVIDER;
   private readonly logger = new Logger(EcontService.name);
@@ -62,6 +73,7 @@ export class EcontService implements ShippingProvider, OnModuleInit {
     const dbSettings = await this.getSettings(companyId);
 
     const settings = this.mergeSettings(dbSettings, dto);
+    this.assertCodConfigured(settings, dto.codAmount);
 
     return this.api.calculateShipping(creds, settings, {
       orderNumber: 'CALC',
@@ -87,6 +99,7 @@ export class EcontService implements ShippingProvider, OnModuleInit {
       dimensionsH: dto.dimensionsH,
       codAmount: dto.codAmount,
       currency: dto.currency,
+      declaredValueAmount: dto.declaredValueAmount,
     });
   }
 
@@ -106,6 +119,7 @@ export class EcontService implements ShippingProvider, OnModuleInit {
     // Същите override-и като при „изчисли" — иначе цената в модала и
     // реалният етикет се разминават (кой плаща, подател, наложен платеж).
     const settings = this.mergeSettings(this.configToSettings(config), dto);
+    this.assertCodConfigured(settings, dto.codAmount);
 
     const receiverAddress =
       dto.deliveryType === 'ADDRESS' && dto.addressCity
@@ -135,6 +149,9 @@ export class EcontService implements ShippingProvider, OnModuleInit {
       description: dto.description,
       codAmount: dto.codAmount,
       currency: dto.currency,
+      declaredValueAmount: dto.declaredValueAmount,
+      packingList: dto.items,
+      invoiceNum: (dto as CreateShipmentDto & { invoiceNum?: string }).invoiceNum,
     });
 
     return this.prisma.shipment.create({
@@ -168,7 +185,16 @@ export class EcontService implements ShippingProvider, OnModuleInit {
         expectedDeliveryDate: result.expectedDeliveryDate
           ? new Date(result.expectedDeliveryDate)
           : null,
-        trackingData: result.label,
+        // Същата форма като след проследяване: суровият етикет + общите полета
+        trackingData: JSON.parse(
+          JSON.stringify({
+            carrier: result.label,
+            // Отговорът на createLabel не връща подателя — взимаме го от
+            // настройките, с които е издаден етикетът
+            origin: await this.originOf(creds, result.label, settings.senderOfficeCode),
+            insurance: insuranceOf(result.label),
+          }),
+        ),
         orderId: dto.orderId,
         companyId,
       },
@@ -178,23 +204,161 @@ export class EcontService implements ShippingProvider, OnModuleInit {
     });
   }
 
-  async trackShipment(companyId: string, shipment: any) {
-    if (!shipment.shipmentNumber) {
-      throw new BadRequestException('Пратката няма номер за проследяване');
-    }
-    const creds = await this.getCredentials(companyId);
-    const status = await this.api.trackShipment(creds, shipment.shipmentNumber);
-    if (status) {
-      await this.prisma.shipment.update({
-        where: { id: shipment.id },
-        data: { trackingData: status },
-      });
-    }
-    return status;
+  /** Има ли фирмата активна конфигурация с потребител и парола. */
+  async isConfigured(companyId: string): Promise<boolean> {
+    const config = await this.prisma.econtConfig.findUnique({
+      where: { companyId },
+      select: { isActive: true, username: true, password: true },
+    });
+    return !!(config?.isActive && config.username && config.password);
   }
 
-  async cancelShipment(_companyId: string, _shipment: any) {
-    // Econt API не предлага cancel endpoint — анулираме само локално в shipping.service
+  /**
+   * Статусите на много пратки с една заявка към Еконт (на порции по 50),
+   * преведени към общия CarrierTrackingResult. Нищо не се записва тук.
+   */
+  async trackShipments(
+    companyId: string,
+    shipments: TrackableShipment[],
+  ): Promise<Map<string, CarrierTrackingOutcome>> {
+    const out = new Map<string, CarrierTrackingOutcome>();
+    const withNumber = shipments.filter((s) => s.shipmentNumber);
+    if (withNumber.length === 0) return out;
+    const creds = await this.getCredentials(companyId);
+
+    for (let i = 0; i < withNumber.length; i += 50) {
+      const chunk = withNumber.slice(i, i + 50);
+      const statuses = await this.api.getShipmentStatuses(
+        creds,
+        chunk.map((s) => s.shipmentNumber as string),
+      );
+      for (const s of chunk) {
+        const entry = statuses.get(s.shipmentNumber as string);
+        if (!entry) continue;
+        if (entry.error || !entry.status) {
+          out.set(s.id, { ok: false, error: entry.error || 'Еконт не върна статус' });
+          continue;
+        }
+        out.set(s.id, {
+          ok: true,
+          result: {
+            ...this.toTrackingResult(entry.status),
+            origin: await this.originOf(creds, entry.status),
+          },
+        });
+      }
+    }
+    return out;
+  }
+
+  /** Превод на ShipmentStatus на Еконт към общия формат. */
+  private toTrackingResult(status: any): CarrierTrackingResult {
+    const short = String(status.shortDeliveryStatus || '');
+    const deliveredAt = econtTime(status.deliveryTime);
+    const sentAt = econtTime(status.sendTime);
+    const normalized = deliveredAt
+      ? 'DELIVERED'
+      : /анулиран/i.test(short)
+        ? 'CANCELLED'
+        : /върната|върнат/i.test(short)
+          ? 'RETURNED'
+          : sentAt
+            ? 'IN_TRANSIT'
+            : 'CREATED';
+
+    const events = (
+      Array.isArray(status.trackingEvents) ? status.trackingEvents : []
+    )
+      .map((ev: any) => ({
+        time: econtTime(ev.time)?.toISOString() ?? null,
+        description: [ev.destinationDetails, ev.officeName, ev.cityName]
+          .filter((v: unknown) => typeof v === 'string' && v.trim())
+          .join(', '),
+      }))
+      .reverse(); // най-новото първо
+
+    const cdPaid = Number(status.cdPaidAmount) || null;
+    const cdCollected = Number(status.cdCollectedAmount) || null;
+    return {
+      status: normalized,
+      shortStatus: status.shortDeliveryStatus ?? null,
+      events,
+      sentAt,
+      deliveredAt,
+      cod:
+        cdPaid || cdCollected
+          ? {
+              collectedAmount: cdCollected,
+              collectedAt: econtTime(status.cdCollectedTime),
+              paidAmount: cdPaid,
+              paidAt: econtTime(status.cdPaidTime),
+              currency: status.cdPaidCurrency || status.cdCollectedCurrency || null,
+            }
+          : null,
+      origin: null, // попълва се от trackShipments (трябва кешът с офисите)
+      insurance: insuranceOf(status),
+      raw: status,
+    };
+  }
+
+  /** Офисът на подателя по име или адресът му, ако пратката е взета от адрес. */
+  private async originOf(
+    creds: EcontCredentials,
+    label: any,
+    fallbackOfficeCode?: string | null,
+  ): Promise<ShipmentOrigin | null> {
+    const officeCode = label?.senderOfficeCode || fallbackOfficeCode || null;
+    const addr = label?.senderAddress;
+    const address = addr
+      ? [addr.city?.name, [addr.street, addr.num].filter(Boolean).join(' ')]
+          .filter((v) => v && String(v).trim())
+          .join(', ')
+      : null;
+    if (!officeCode && !address) return null;
+    return {
+      officeCode,
+      officeName: officeCode ? await this.api.officeLabel(creds, officeCode) : null,
+      address: address || null,
+    };
+  }
+
+  /**
+   * Еконт няма „анулиране", но има изтриване на етикет докато пратката не е
+   * предадена. Без него етикетът остава активен при Еконт и се таксува, ако
+   * пакетът бъде предаден. Хвърля при отказ, за да НЕ се анулира локално
+   * пратка, която при куриера още е жива; вече изтрит/ненамерен етикет се
+   * приема за анулиран.
+   */
+  async cancelShipment(companyId: string, shipment: any) {
+    if (!shipment.shipmentNumber) return;
+    const creds = await this.getCredentials(companyId);
+    try {
+      await this.api.deleteLabel(creds, shipment.shipmentNumber);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Еконт: „Пратка N не е открита" (ExException) / „Не е намерена пратка"
+      if (/не е открита|не е намерена|not found/i.test(msg)) {
+        this.logger.warn(
+          `Econt label ${shipment.shipmentNumber} already gone at Econt: ${msg}`,
+        );
+        return;
+      }
+      throw new BadRequestException(
+        `${ErrorMessages.shipping.econtCancelFailed}: ${msg}`,
+      );
+    }
+  }
+
+  /**
+   * Наложеният платеж стига до Еконт само когато е включен в настройките.
+   * Етикет с НП > 0 без настройка излизаше без НП, а продажбата се
+   * маркираше като платена при доставка — куриерът предава стоката без да
+   * събере парите. Затова отказваме, вместо да изпускаме сумата мълчаливо.
+   */
+  private assertCodConfigured(settings: EcontSettings, codAmount?: number) {
+    if (Number(codAmount) > 0 && !settings.codEnabled) {
+      throw new BadRequestException(ErrorMessages.shipping.codNotConfigured);
+    }
   }
 
   // ==================== Econt-specific endpoints ====================
@@ -266,6 +430,7 @@ export class EcontService implements ShippingProvider, OnModuleInit {
       | 'paymentBy'
       | 'codEnabled'
       | 'declaredValueEnabled'
+      | 'smsNotification'
       | 'payer'
     >,
   ): EcontSettings {
@@ -284,6 +449,7 @@ export class EcontService implements ShippingProvider, OnModuleInit {
       paymentBy,
       codEnabled: dto.codEnabled ?? dbSettings.codEnabled,
       declaredValueEnabled: dto.declaredValueEnabled ?? dbSettings.declaredValueEnabled,
+      smsNotification: dto.smsNotification ?? dbSettings.smsNotification,
     };
   }
 
@@ -357,4 +523,33 @@ export class EcontService implements ShippingProvider, OnModuleInit {
       paymentSharePercent: config.paymentSharePercent,
     };
   }
+}
+
+/** Еконт дава dateTime като unix ms (понякога секунди или ISO низ). */
+function econtTime(value: unknown): Date | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') {
+    const ms = value < 1e12 ? value * 1000 : value;
+    return new Date(ms);
+  }
+  if (typeof value !== 'string') return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Обявена стойност = услуга тип "OC" в services на етикета/статуса:
+ * count = застрахованата сума, price = какво струва застраховката.
+ */
+function insuranceOf(label: any): ShipmentInsurance | null {
+  const services: any[] = Array.isArray(label?.services) ? label.services : [];
+  const oc = services.find((sv) => sv?.type === 'OC');
+  if (!oc) return null;
+  const amount = Number(oc.count);
+  if (!amount || amount <= 0) return null;
+  return {
+    amount,
+    price: oc.price != null ? Number(oc.price) : null,
+    currency: oc.currency || label?.currency || null,
+  };
 }

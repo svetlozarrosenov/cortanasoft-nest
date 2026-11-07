@@ -257,6 +257,7 @@ model Company {
   hrSettings                   HrSettings?
   positions                    Position[]
   speedyConfig                 SpeedyConfig?
+  shippingAutomation           ShippingAutomation?
   shipments                    Shipment[]
   warrantyTemplates            WarrantyTemplate[]
   issuedWarranties             IssuedWarranty[]
@@ -4075,6 +4076,31 @@ model EcontConfig {
   company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@map("econt_configs")
+}
+
+// ==================== АВТОМАТИЗАЦИЯ НА ПРАТКИТЕ ====================
+
+// Общи за всички куриери (Еконт, Спиди, ...). По подразбиране всичко е
+// изключено — новите функции не пипат работещите фирми.
+model ShippingAutomation {
+  id String @id @default(cuid())
+
+  // На час (cron) + при отваряне на ERP > Пратки: статусите от куриера
+  syncStatuses Boolean @default(false)
+  // Приета от куриера → продажбата „Изпратена"; доставена → „Доставена"
+  markOrdersDelivered Boolean @default(false)
+  // Изплатен наложен платеж от куриера → плащане по продажбата (метод COD)
+  recordCodPayments Boolean @default(false)
+
+  lastSyncAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("shipping_automations")
 }
 
 // ==================== AI (CORTANA) КОНФИГУРАЦИЯ ====================

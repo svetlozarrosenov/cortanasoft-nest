@@ -328,6 +328,14 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         actions: ['view'],
       },
       {
+        // ERP > Пратки: всички товарителници на фирмата (Еконт/Спиди).
+        // view = списък + PDF етикет; edit = проследяване и анулиране.
+        // Създаването остава от продажбата (erp.orders edit).
+        key: 'shipments',
+        labelKey: 'modules.erp.shipmentsPage.title',
+        actions: ['view', 'edit'],
+      },
+      {
         key: 'expenses',
         labelKey: 'modules.erp.expenses',
         actions: ['view', 'create', 'edit', 'delete'],
