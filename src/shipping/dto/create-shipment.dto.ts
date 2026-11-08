@@ -50,7 +50,7 @@ export class CreateShipmentDto {
   items?: ShipmentPackingItemDto[];
 
   @IsString()
-  @IsIn(['econt', 'speedy'])
+  @IsIn(['econt', 'speedy', 'pigeon'])
   provider: string;
 
   @IsEnum(DeliveryType)
@@ -209,11 +209,81 @@ export class CreateShipmentDto {
   @IsIn(['sender', 'receiver'])
   @IsOptional()
   payer?: 'sender' | 'receiver';
+
+  // === Pigeon Express (виж pigeon/pigeon.service.ts) ===
+
+  // До адрес / офис / автомат; без него се извежда от deliveryType
+  @IsString()
+  @IsOptional()
+  @IsIn(['address', 'office', 'locker'])
+  pigeonDeliveryKind?: string;
+
+  // Офис или автомат на получателя (id от номенклатурата на Pigeon)
+  @IsInt()
+  @IsOptional()
+  pigeonOfficeId?: number;
+
+  // Адрес по номенклатурата на Pigeon: град и улица по id
+  @IsInt()
+  @IsOptional()
+  pigeonCityId?: number;
+
+  @IsInt()
+  @IsOptional()
+  pigeonStreetId?: number;
+
+  @IsString()
+  @IsOptional()
+  pigeonEntrance?: string;
+
+  @IsString()
+  @IsOptional()
+  pigeonFloor?: string;
+
+  @IsString()
+  @IsOptional()
+  pigeonApartment?: string;
+
+  // Свободен текст към адреса (задължителен при Pigeon, когато улицата не е от номенклатурата)
+  @IsString()
+  @IsOptional()
+  pigeonAdditionalInfo?: string;
+
+  // Override на подателя само за тази пратка: откъде куриерът взема пратката
+  @IsString()
+  @IsOptional()
+  @IsIn(['address', 'office', 'locker'])
+  pigeonPickupType?: string;
+
+  @IsInt()
+  @IsOptional()
+  pigeonPickupOfficeId?: number;
+
+  @IsInt()
+  @IsOptional()
+  pigeonSenderAddressId?: number;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['standard', 'express'])
+  pigeonServiceType?: string;
+
+  @IsOptional()
+  pigeonReturnAtMyExpense?: boolean;
+
+  @IsString()
+  @IsOptional()
+  receiverEmail?: string;
+
+  // Бележка за куриера (не е описание на съдържанието)
+  @IsString()
+  @IsOptional()
+  note?: string;
 }
 
 export class CalculateShippingDto {
   @IsString()
-  @IsIn(['econt', 'speedy'])
+  @IsIn(['econt', 'speedy', 'pigeon'])
   provider: string;
 
   @IsEnum(DeliveryType)
@@ -347,4 +417,74 @@ export class CalculateShippingDto {
   @IsIn(['sender', 'receiver'])
   @IsOptional()
   payer?: 'sender' | 'receiver';
+
+  // === Pigeon Express (виж pigeon/pigeon.service.ts) ===
+
+  // До адрес / офис / автомат; без него се извежда от deliveryType
+  @IsString()
+  @IsOptional()
+  @IsIn(['address', 'office', 'locker'])
+  pigeonDeliveryKind?: string;
+
+  // Офис или автомат на получателя (id от номенклатурата на Pigeon)
+  @IsInt()
+  @IsOptional()
+  pigeonOfficeId?: number;
+
+  // Адрес по номенклатурата на Pigeon: град и улица по id
+  @IsInt()
+  @IsOptional()
+  pigeonCityId?: number;
+
+  @IsInt()
+  @IsOptional()
+  pigeonStreetId?: number;
+
+  @IsString()
+  @IsOptional()
+  pigeonEntrance?: string;
+
+  @IsString()
+  @IsOptional()
+  pigeonFloor?: string;
+
+  @IsString()
+  @IsOptional()
+  pigeonApartment?: string;
+
+  // Свободен текст към адреса (задължителен при Pigeon, когато улицата не е от номенклатурата)
+  @IsString()
+  @IsOptional()
+  pigeonAdditionalInfo?: string;
+
+  // Override на подателя само за тази пратка: откъде куриерът взема пратката
+  @IsString()
+  @IsOptional()
+  @IsIn(['address', 'office', 'locker'])
+  pigeonPickupType?: string;
+
+  @IsInt()
+  @IsOptional()
+  pigeonPickupOfficeId?: number;
+
+  @IsInt()
+  @IsOptional()
+  pigeonSenderAddressId?: number;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['standard', 'express'])
+  pigeonServiceType?: string;
+
+  @IsOptional()
+  pigeonReturnAtMyExpense?: boolean;
+
+  @IsString()
+  @IsOptional()
+  receiverEmail?: string;
+
+  // Бележка за куриера (не е описание на съдържанието)
+  @IsString()
+  @IsOptional()
+  note?: string;
 }

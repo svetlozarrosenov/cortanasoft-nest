@@ -8,6 +8,7 @@ import { ShippingSyncCron } from './shipping-sync.cron';
 import { PrismaModule } from '../prisma/prisma.module';
 import { EcontModule } from '../econt/econt.module';
 import { SpeedyModule } from '../speedy/speedy.module';
+import { PigeonModule } from '../pigeon/pigeon.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { OrdersModule } from '../orders/orders.module';
 import { PaymentsModule } from '../payments/payments.module';
@@ -21,6 +22,7 @@ import { PaymentsModule } from '../payments/payments.module';
     DiscoveryModule,
     EcontModule,
     SpeedyModule,
+    PigeonModule,
     WebhooksModule,
     OrdersModule,
     PaymentsModule,

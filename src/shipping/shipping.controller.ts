@@ -40,11 +40,13 @@ const EDIT_ORDERS_OR_SHIPMENTS = RequireAnyPermission(
 const VIEW_CARRIER_SETTINGS = RequireAnyPermission(
   { module: 'settings', page: 'econt', action: 'view' },
   { module: 'settings', page: 'speedy', action: 'view' },
+  { module: 'settings', page: 'pigeon', action: 'view' },
   { module: 'erp', page: 'shipments', action: 'view' },
 );
 const EDIT_CARRIER_SETTINGS = RequireAnyPermission(
   { module: 'settings', page: 'econt', action: 'edit' },
   { module: 'settings', page: 'speedy', action: 'edit' },
+  { module: 'settings', page: 'pigeon', action: 'edit' },
 );
 
 @Controller('companies/:companyId/shipping')

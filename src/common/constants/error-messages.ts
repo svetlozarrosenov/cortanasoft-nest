@@ -22,7 +22,8 @@ export const ErrorMessages = {
   // ==================== Prisma / Database грешки ====================
   database: {
     uniqueViolation: 'Запис с тези данни вече съществува',
-    foreignKeyViolation: 'Не може да се изтрие запис, който се използва от други данни',
+    foreignKeyViolation:
+      'Не може да се изтрие запис, който се използва от други данни',
     recordNotFound: 'Записът не е намерен',
     connectionError: 'Грешка при свързване с базата данни',
   },
@@ -38,13 +39,18 @@ export const ErrorMessages = {
   // ==================== Продукти ====================
   products: {
     notFound: 'Продуктът не е намерен',
-    skuExists: (sku: string) => `Продукт с артикулен номер "${sku}" вече съществува`,
+    skuExists: (sku: string) =>
+      `Продукт с артикулен номер "${sku}" вече съществува`,
     categoryNotFound: 'Категорията не е намерена',
     categoryExists: (name: string) => `Категория "${name}" вече съществува`,
-    cannotDeleteCategoryWithProducts: 'Не може да изтриете категория с продукти',
-    cannotDeleteCategoryWithSubcategories: 'Не може да изтриете категория с подкатегории',
-    cannotDeleteWithOrders: 'Не може да изтриете продукт, който има поръчки. Деактивирайте го вместо това.',
-    cannotDeleteWithInventory: 'Не може да изтриете продукт с налични количества',
+    cannotDeleteCategoryWithProducts:
+      'Не може да изтриете категория с продукти',
+    cannotDeleteCategoryWithSubcategories:
+      'Не може да изтриете категория с подкатегории',
+    cannotDeleteWithOrders:
+      'Не може да изтриете продукт, който има поръчки. Деактивирайте го вместо това.',
+    cannotDeleteWithInventory:
+      'Не може да изтриете продукт с налични количества',
   },
 
   // ==================== Клиенти ====================
@@ -56,7 +62,8 @@ export const ErrorMessages = {
     employeeNotInCompany: 'Служителят не е част от компанията',
     invalidTimes: 'Началният и крайният час не може да са еднакви',
     invalidRange: 'Невалиден период',
-    noDates: 'Няма нито един ден в избрания период за избраните дни от седмицата',
+    noDates:
+      'Няма нито един ден в избрания период за избраните дни от седмицата',
     weekMustStartMonday: 'Седмицата трябва да започва от понеделник',
     invalidBreak:
       'Почивката трябва да е „от–до“ изцяло вътре в смяната (не се поддържа при нощна смяна)',
@@ -73,9 +80,11 @@ export const ErrorMessages = {
   customers: {
     notFound: 'Клиентът не е намерен',
     companyNameRequired: 'Името на фирмата е задължително за фирмени клиенти',
-    personalNameRequired: 'Името или фамилията са задължителни за физически лица',
+    personalNameRequired:
+      'Името или фамилията са задължителни за физически лица',
     eikExists: 'Клиент с този ЕИК вече съществува',
-    cannotDeleteWithOrders: 'Не може да изтриете клиент с поръчки. Деактивирайте го вместо това.',
+    cannotDeleteWithOrders:
+      'Не може да изтриете клиент с поръчки. Деактивирайте го вместо това.',
     countryNotFound: 'Държавата не е намерена',
   },
 
@@ -94,7 +103,8 @@ export const ErrorMessages = {
     alreadyReturned: 'Продажбата вече е върната',
     canOnlyDeletePending: 'Може да изтриете само чакащи поръчки',
     invalidStatusTransition: 'Невалиден преход на статус',
-    canOnlyReopenCancelled: 'Само анулирани поръчки могат да бъдат възстановени',
+    canOnlyReopenCancelled:
+      'Само анулирани поръчки могат да бъдат възстановени',
     cancelledUseReopen:
       'Анулирана поръчка не може да сменя статус директно — първо я възстановете (Върни в „Чакаща")',
   },
@@ -103,7 +113,8 @@ export const ErrorMessages = {
   suppliers: {
     notFound: 'Доставчикът не е намерен',
     eikExists: (eik: string) => `Доставчик с ЕИК "${eik}" вече съществува`,
-    cannotDeleteWithOrders: 'Не може да изтриете доставчик със заявки за покупка',
+    cannotDeleteWithOrders:
+      'Не може да изтриете доставчик със заявки за покупка',
   },
 
   // ==================== Фактури ====================
@@ -114,37 +125,49 @@ export const ErrorMessages = {
   invoices: {
     notFound: 'Фактурата не е намерена',
     orderNotFound: 'Поръчката не е намерена',
-    canOnlyCreateFromConfirmed: 'Може да създавате фактури само от потвърдени поръчки',
+    canOnlyCreateFromConfirmed:
+      'Може да създавате фактури само от потвърдени поръчки',
     canOnlyUpdateDraft: 'Може да редактирате само чернови фактури',
     canOnlyIssueDraft: 'Може да издавате само чернови фактури',
-    cannotPayDraft: 'Не може да регистрирате плащане на чернова фактура. Първо я издайте.',
+    cannotPayDraft:
+      'Не може да регистрирате плащане на чернова фактура. Първо я издайте.',
     cannotPayCancelled: 'Не може да регистрирате плащане на анулирана фактура',
     alreadyFullyPaid: 'Фактурата вече е напълно платена',
-    cannotCancelPaid: 'Не може да анулирате платена фактура. Създайте кредитно известие.',
-    cannotCancelPartiallyPaid: 'Не може да анулирате частично платена фактура. Създайте кредитно известие.',
+    cannotCancelPaid:
+      'Не може да анулирате платена фактура. Създайте кредитно известие.',
+    cannotCancelPartiallyPaid:
+      'Не може да анулирате частично платена фактура. Създайте кредитно известие.',
     alreadyCancelled: 'Фактурата вече е анулирана',
     canOnlyDeleteDraft: 'Може да изтриете само чернови фактури',
-    orderFullyInvoiced: 'Поръчката е изцяло фактурирана — няма остатък за издаване',
+    orderFullyInvoiced:
+      'Поръчката е изцяло фактурирана — няма остатък за издаване',
     invalidInvoiceAmount: 'Невалидна сума за фактуриране',
-    amountExceedsRemainder: 'Сумата надвишава остатъка от поръчката, който не е фактуриран',
+    amountExceedsRemainder:
+      'Сумата надвишава остатъка от поръчката, който не е фактуриран',
     regularMustCoverRemainder:
       'Обикновената фактура се издава за целия нефактуриран остатък — тя документира доставката. За част от сумата преди доставка издайте авансова фактура.',
     advanceExceedsOrder: 'Сумата на аванса надвишава остатъка от поръчката',
-    cannotMixAdvanceWithRegular: 'На тази поръчка вече има стандартни фактури — не може да се издава авансова. Създайте кредитно известие първо.',
-    cannotMixRegularWithAdvance: 'На тази поръчка вече има авансови фактури — трябва да се издаде финална фактура с приспадане.',
+    cannotMixAdvanceWithRegular:
+      'На тази поръчка вече има стандартни фактури — не може да се издава авансова. Създайте кредитно известие първо.',
+    cannotMixRegularWithAdvance:
+      'На тази поръчка вече има авансови фактури — трябва да се издаде финална фактура с приспадане.',
     advanceNotFound: 'Авансовата фактура не е намерена',
     notAnAdvanceInvoice: 'Посочената фактура не е авансова',
     advanceNotOnOrder: 'Авансовата фактура не е свързана с тази поръчка',
     advanceAlreadyDeducted: 'Авансовата фактура вече е приспадната във финална',
     advanceCancelled: 'Авансовата фактура е анулирана',
-    cannotCancelDeductedAdvance: 'Не може да анулирате авансова фактура, която е приспадната във финална. Първо анулирайте финалната.',
-    finalRequiresAdvances: 'За издаване на финална фактура изберете поне една авансова за приспадане',
-    deductionsExceedOrder: 'Общата сума на избраните аванси надвишава общата сума на поръчката',
+    cannotCancelDeductedAdvance:
+      'Не може да анулирате авансова фактура, която е приспадната във финална. Първо анулирайте финалната.',
+    finalRequiresAdvances:
+      'За издаване на финална фактура изберете поне една авансова за приспадане',
+    deductionsExceedOrder:
+      'Общата сума на избраните аванси надвишава общата сума на поръчката',
     billToCustomerNotFound: 'Клиентът за фактуриране не е намерен',
     cannotEditCancelledProforma: 'Анулирана проформа не може да се редактира',
     cannotCorrectCancelled: 'Анулирана фактура не може да се коригира',
     cannotCorrectWithoutOrder: 'Коригират се само фактури към продажба',
-    cannotCorrectType: 'Коригират се само обикновени, авансови и окончателни фактури',
+    cannotCorrectType:
+      'Коригират се само обикновени, авансови и окончателни фактури',
     cannotCorrectDeductedAdvance:
       'Авансът е приспаднат в окончателна фактура — коригирайте окончателната.',
   },
@@ -167,9 +190,11 @@ export const ErrorMessages = {
     goodsReceiptNotFound: 'Стоковата разписка не е намерена',
     insufficientStock: 'Недостатъчна наличност',
     serialNotFound: 'Серийният номер не е намерен',
-    serialDuplicate: (sn: string) => `Сериен номер "${sn}" вече съществува за този продукт`,
+    serialDuplicate: (sn: string) =>
+      `Сериен номер "${sn}" вече съществува за този продукт`,
     serialNotInStock: 'Серийният номер не е наличен на склад',
-    serialRequired: (name: string) => `Трябва да изберете сериен номер за продукт "${name}"`,
+    serialRequired: (name: string) =>
+      `Трябва да изберете сериен номер за продукт "${name}"`,
   },
 
   // ==================== Локации ====================
@@ -177,9 +202,11 @@ export const ErrorMessages = {
     notFound: 'Локацията не е намерена',
     codeExists: (code: string) => `Локация с код "${code}" вече съществува`,
     cannotDeleteWithInventory: 'Не може да изтриете локация с налични продукти',
-    zoneCodeExists: (code: string) => `Зона с код "${code}" вече съществува в тази локация`,
+    zoneCodeExists: (code: string) =>
+      `Зона с код "${code}" вече съществува в тази локация`,
     zoneNotFound: 'Зоната не е намерена',
-    cannotDeleteZoneWithInventory: 'Не може да изтриете зона с налични продукти',
+    cannotDeleteZoneWithInventory:
+      'Не може да изтриете зона с налични продукти',
   },
 
   // ==================== Стокови разписки ====================
@@ -191,14 +218,14 @@ export const ErrorMessages = {
     productsNotFound: 'Един или повече продукти не са намерени',
     serviceNotAllowed:
       'Услуга не може да бъде ред в доставка — въведете я в „Разходи по доставката“',
-    canOnlyUpdateExpected: 'Може да редактирате само неполучени доставки (очаквани или в транзит)',
+    canOnlyUpdateExpected:
+      'Може да редактирате само неполучени доставки (очаквани или в транзит)',
     canOnlyConfirmDraft: 'Може да потвърдите само чернови разписки',
     cannotConfirmWithoutItems: 'Не може да потвърдите разписка без артикули',
     alreadyCancelled: 'Доставката вече е анулирана',
     canOnlyDeleteExpected: 'Може да изтриете само очаквани доставки',
     invalidStatusTransition: 'Невалиден преход на статус',
   },
-
 
   // ==================== Потребители ====================
   impersonation: {
@@ -269,7 +296,8 @@ export const ErrorMessages = {
     commentNotFound: 'Коментарът не е намерен',
     cannotDeleteClosed: 'Не може да изтриете затворен тикет',
     invalidStatusTransition: 'Невалиден преход на статус на задача',
-    invalidTimeFormat: 'Невалиден формат за време. Примери: "1d 2h", "3h 30m", "45m"',
+    invalidTimeFormat:
+      'Невалиден формат за време. Примери: "1d 2h", "3h 30m", "45m"',
     timeLogNotFound: 'Записът за време не е намерен',
   },
 
@@ -308,7 +336,8 @@ export const ErrorMessages = {
     productNotFound: 'Продуктът не е намерен',
     materialNotFound: 'Един или повече материали не са намерени',
     circularReference: 'Материалът не може да бъде същият като готовия продукт',
-    cannotDeleteWithProductionOrders: 'Не може да изтриете рецепта, която се използва в производствени поръчки',
+    cannotDeleteWithProductionOrders:
+      'Не може да изтриете рецепта, която се използва в производствени поръчки',
     mustHaveItems: 'Рецептата трябва да има поне една съставка',
   },
 
@@ -318,18 +347,26 @@ export const ErrorMessages = {
     bomNotFound: 'Рецептата не е намерена',
     productNotFound: 'Продуктът не е намерен',
     locationNotFound: 'Локацията не е намерена',
-    canOnlyUpdateDraftOrPlanned: 'Може да редактирате само чернови или планирани поръчки',
-    canOnlyStartDraftOrPlanned: 'Може да стартирате само чернови или планирани поръчки',
+    canOnlyUpdateDraftOrPlanned:
+      'Може да редактирате само чернови или планирани поръчки',
+    canOnlyStartDraftOrPlanned:
+      'Може да стартирате само чернови или планирани поръчки',
     canOnlyCompleteInProgress: 'Може да завършите само поръчки в производство',
     cannotCompleteWithoutMaterials:
       'Не може да завършите производство без изписани материали. Изпишете вложените материали (Изпиши материал) и опитайте отново.',
     alreadyCancelled: 'Поръчката вече е отменена',
-    cannotCancelCompleted: 'Не може да отмените завършена производствена поръчка',
+    cannotCancelCompleted:
+      'Не може да отмените завършена производствена поръчка',
     canOnlyDeleteDraft: 'Може да изтриете само чернови поръчки',
-    insufficientMaterials: (productName: string, available: number, required: number) =>
+    insufficientMaterials: (
+      productName: string,
+      available: number,
+      required: number,
+    ) =>
       `Недостатъчна наличност за "${productName}" - налични: ${available}, необходими: ${required}`,
     customerNotFound: 'Клиентът не е намерен',
-    canOnlyIssueInProgress: 'Може да изписвате материали само по поръчка в производство',
+    canOnlyIssueInProgress:
+      'Може да изписвате материали само по поръчка в производство',
     issuanceNotFound: 'Записът за изписване не е намерен',
     alreadyReturned: 'Материалът вече е върнат',
     cannotReturnCompleted: 'Не може да върнете материал от завършена поръчка',
@@ -341,6 +378,9 @@ export const ErrorMessages = {
     codNotConfigured:
       'Пратката е с наложен платеж, но наложеният платеж не е включен в настройките на Еконт. Включете го и въведете номера на споразумението с Еконт, или издайте етикета без наложен платеж (сума 0).',
     econtCancelFailed: 'Еконт не позволи изтриване на етикета',
+    pigeonNotConfigured:
+      'Pigeon Express не е конфигуриран. Въведете API ключ и секрет в Настройки > Куриери > Pigeon.',
+    pigeonCancelFailed: 'Pigeon не позволи анулиране на пратката',
     activeShipmentExists: (shipmentNumber: string) =>
       `Продажбата вече има активна товарителница ${shipmentNumber}. Анулирайте я, за да издадете нова.`,
   },
@@ -356,8 +396,10 @@ export const ErrorMessages = {
     invalidStatusTransition: (from: string, to: string) =>
       `Невалиден преход на статус от "${from}" към "${to}"`,
     cannotEditClosed: 'Не може да редактирате приключена заявка',
-    canOnlyDeleteNewOrCanceled: 'Може да изтриете само нови или отказани заявки',
-    timerAlreadyRunning: 'Имате стартиран таймер по тази заявка. Спрете го преди да започнете нов.',
+    canOnlyDeleteNewOrCanceled:
+      'Може да изтриете само нови или отказани заявки',
+    timerAlreadyRunning:
+      'Имате стартиран таймер по тази заявка. Спрете го преди да започнете нов.',
     noActiveTimer: 'Няма стартиран таймер по тази заявка',
   },
 };

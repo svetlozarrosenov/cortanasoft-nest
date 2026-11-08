@@ -21,7 +21,7 @@ export class QueryShipmentsDto {
   status?: (typeof SHIPMENT_STATUSES)[number];
 
   @IsOptional()
-  @IsIn(['econt', 'speedy'])
+  @IsIn(['econt', 'speedy', 'pigeon'])
   provider?: string;
 
   // YYYY-MM-DD (локална дата от филтъра), включително
