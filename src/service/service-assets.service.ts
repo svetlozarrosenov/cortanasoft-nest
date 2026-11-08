@@ -136,109 +136,178 @@ export class ServiceAssetsService {
     return this.prisma.serviceAsset.delete({ where: { id } });
   }
 
-  async lookupBySerial(companyId: string, serial: string) {
-    const trimmed = (serial || '').trim();
-    if (!trimmed) {
-      return { existingAssets: [], soldSerials: [] };
-    }
+  /**
+   * Избор на артикул за сервизна заявка: един списък по страници, първо
+   * заведените артикули (на клиента или на всички), после продадени серийни
+   * номера, които още не са заведени — те се завеждат при избор. Търсенето
+   * е от първия знак по име / номер / сериен / IMEI / VIN / продукт.
+   */
+  async pick(companyId: string, query: QueryServiceAssetsDto) {
+    const page = query.page || 1;
+    const limit = query.limit || 10;
+    const search = (query.search || '').trim();
+    const customerId = query.customerId || undefined;
 
-    const existingAssets = await this.prisma.serviceAsset.findMany({
-      where: {
-        companyId,
-        OR: [
-          { serialNumber: trimmed },
-          { imei: trimmed },
-          { vin: trimmed },
-        ],
+    const assetWhere: Prisma.ServiceAssetWhereInput = {
+      companyId,
+      status: 'ACTIVE',
+      ...(customerId ? { customerId } : {}),
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' } },
+              { assetNumber: { contains: search, mode: 'insensitive' } },
+              { serialNumber: { contains: search, mode: 'insensitive' } },
+              { imei: { contains: search, mode: 'insensitive' } },
+              { vin: { contains: search, mode: 'insensitive' } },
+              { brand: { contains: search, mode: 'insensitive' } },
+              { model: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
+    // Продадени серийни номера, които фирмата още не е завела като артикул
+    const registered = await this.prisma.serviceAsset.findMany({
+      where: { companyId, serialNumber: { not: null } },
+      select: { serialNumber: true },
+    });
+    const registeredSerials = registered
+      .map((r) => r.serialNumber)
+      .filter((v): v is string => !!v);
+    const soldWhere: Prisma.InventorySerialWhereInput = {
+      companyId,
+      status: 'SOLD',
+      ...(registeredSerials.length
+        ? { serialNumber: { notIn: registeredSerials } }
+        : {}),
+      orderItems: {
+        some: {
+          order: {
+            companyId,
+            status: { notIn: ['DRAFT', 'CANCELLED'] },
+            ...(customerId ? { customerId } : {}),
+          },
+        },
       },
+      ...(search
+        ? {
+            OR: [
+              { serialNumber: { contains: search, mode: 'insensitive' } },
+              { product: { name: { contains: search, mode: 'insensitive' } } },
+              { product: { sku: { contains: search, mode: 'insensitive' } } },
+            ],
+          }
+        : {}),
+    };
+
+    const [assetsTotal, soldTotal] = await Promise.all([
+      this.prisma.serviceAsset.count({ where: assetWhere }),
+      this.prisma.inventorySerial.count({ where: soldWhere }),
+    ]);
+
+    // Страницата минава през двата списъка един след друг
+    const offset = (page - 1) * limit;
+    const assets =
+      offset < assetsTotal
+        ? await this.prisma.serviceAsset.findMany({
+            where: assetWhere,
+            skip: offset,
+            take: limit,
+            orderBy: { createdAt: 'desc' },
+            include: ASSET_INCLUDE,
+          })
+        : [];
+    const soldTake = limit - assets.length;
+    const soldSkip = Math.max(0, offset - assetsTotal);
+    const serialRows =
+      soldTake > 0 && soldSkip < soldTotal
+        ? await this.prisma.inventorySerial.findMany({
+            where: soldWhere,
+            skip: soldSkip,
+            take: soldTake,
+            orderBy: { updatedAt: 'desc' },
+            include: {
+              product: true,
+              location: { select: { id: true, name: true } },
+            },
+          })
+        : [];
+    const sold = (
+      await Promise.all(
+        serialRows.map((row) => this.describeSoldSerial(companyId, row)),
+      )
+    ).filter((s) => s !== null);
+
+    const total = assetsTotal + soldTotal;
+    return {
+      data: [
+        ...assets.map((asset) => ({ kind: 'asset' as const, asset })),
+        ...sold.map((s) => ({ kind: 'sold' as const, sold: s })),
+      ],
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) || 1 },
+    };
+  }
+
+  // Продаден сериен номер + продажбата, клиентът и активната гаранция към него
+  private async describeSoldSerial(
+    companyId: string,
+    serialRow: Prisma.InventorySerialGetPayload<{
       include: {
-        ...ASSET_INCLUDE,
-        warranty: true,
-        serviceOrders: {
-          orderBy: { receivedAt: 'desc' },
-          take: 10,
+        product: true;
+        location: { select: { id: true; name: true } };
+      };
+    }>,
+  ) {
+    const orderItem = await this.prisma.orderItem.findFirst({
+      where: {
+        inventorySerialId: serialRow.id,
+        order: {
+          companyId,
+          status: { notIn: ['DRAFT', 'CANCELLED'] },
+        },
+      },
+      orderBy: { order: { orderDate: 'desc' } },
+      include: {
+        order: {
           select: {
             id: true,
             orderNumber: true,
+            orderDate: true,
             status: true,
-            receivedAt: true,
-            completedAt: true,
-            customerComplaint: true,
+            customerId: true,
+            customerName: true,
+            customerEmail: true,
+            customerPhone: true,
+            customer: true,
           },
         },
       },
     });
 
-    const inventorySerials = await this.prisma.inventorySerial.findMany({
+    if (!orderItem || !orderItem.order) return null;
+
+    const activeWarranty = await this.prisma.issuedWarranty.findFirst({
       where: {
         companyId,
-        serialNumber: trimmed,
-        status: 'SOLD',
+        serialNumber: serialRow.serialNumber,
+        productId: serialRow.productId,
+        status: 'ACTIVE',
+        endDate: { gte: new Date() },
       },
-      include: {
-        product: true,
-        location: { select: { id: true, name: true } },
-      },
+      orderBy: { endDate: 'desc' },
+      include: { warrantyTemplate: true },
     });
 
-    const soldSerials = await Promise.all(
-      inventorySerials.map(async (serialRow) => {
-        const orderItem = await this.prisma.orderItem.findFirst({
-          where: {
-            inventorySerialId: serialRow.id,
-            order: {
-              companyId,
-              status: { notIn: ['DRAFT', 'CANCELLED'] },
-            },
-          },
-          orderBy: { order: { orderDate: 'desc' } },
-          include: {
-            order: {
-              select: {
-                id: true,
-                orderNumber: true,
-                orderDate: true,
-                status: true,
-                customerId: true,
-                customerName: true,
-                customerEmail: true,
-                customerPhone: true,
-                customer: true,
-              },
-            },
-          },
-        });
-
-        if (!orderItem || !orderItem.order) return null;
-
-        const activeWarranty = await this.prisma.issuedWarranty.findFirst({
-          where: {
-            companyId,
-            serialNumber: trimmed,
-            productId: serialRow.productId,
-            status: 'ACTIVE',
-            endDate: { gte: new Date() },
-          },
-          orderBy: { endDate: 'desc' },
-          include: { warrantyTemplate: true },
-        });
-
-        return {
-          inventorySerial: serialRow,
-          orderItem: {
-            id: orderItem.id,
-            quantity: orderItem.quantity,
-            unitPrice: orderItem.unitPrice,
-          },
-          order: orderItem.order,
-          activeWarranty,
-        };
-      }),
-    );
-
     return {
-      existingAssets,
-      soldSerials: soldSerials.filter((s) => s !== null),
+      inventorySerial: serialRow,
+      orderItem: {
+        id: orderItem.id,
+        quantity: orderItem.quantity,
+        unitPrice: orderItem.unitPrice,
+      },
+      order: orderItem.order,
+      activeWarranty,
     };
   }
 

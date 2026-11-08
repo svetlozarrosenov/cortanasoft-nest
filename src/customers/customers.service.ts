@@ -201,6 +201,34 @@ export class CustomersService {
     return withCategories(customer);
   }
 
+  /** Id-та на клиентите по where, подредени от последно ползвания към най-стария. */
+  private async recentIds(where: Prisma.CustomerWhereInput): Promise<string[]> {
+    const rows = await this.prisma.customer.findMany({
+      where,
+      select: {
+        id: true,
+        updatedAt: true,
+        orders: {
+          select: { createdAt: true },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+        serviceOrders: {
+          select: { createdAt: true },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+    });
+    const stamp = (r: (typeof rows)[number]) =>
+      Math.max(
+        r.updatedAt.getTime(),
+        r.orders[0]?.createdAt.getTime() ?? 0,
+        r.serviceOrders[0]?.createdAt.getTime() ?? 0,
+      );
+    return rows.sort((a, b) => stamp(b) - stamp(a)).map((r) => r.id);
+  }
+
   async findAll(
     companyId: string,
     query: QueryCustomersDto,
@@ -261,9 +289,16 @@ export class CustomersService {
       }),
     };
 
-    const [data, total] = await Promise.all([
+    // „Последно ползвани" (полетата за избор на клиент): по най-новата от
+    // последна продажба, последна сервизна заявка и промяна на картона.
+    // Prisma не сортира по max() на релация, затова първо лека заявка само
+    // с датите за всички съвпадащи клиенти, после се зарежда страницата.
+    const recentIds = sortBy === 'recent' ? await this.recentIds(where) : null;
+    const pageIds = recentIds?.slice((page - 1) * limit, page * limit) ?? null;
+
+    const [rows, total] = await Promise.all([
       this.prisma.customer.findMany({
-        where,
+        where: pageIds ? { id: { in: pageIds } } : where,
         include: {
           country: true,
           assignedTo: { select: { id: true, firstName: true, lastName: true } },
@@ -279,12 +314,21 @@ export class CustomersService {
           categoryLinks: CATEGORY_LINKS_INCLUDE,
           _count: { select: { orders: true, referrals: true } },
         },
-        orderBy: { [sortBy]: sortOrder },
-        skip: (page - 1) * limit,
-        take: limit,
+        ...(pageIds
+          ? {}
+          : {
+              orderBy: { [sortBy]: sortOrder },
+              skip: (page - 1) * limit,
+              take: limit,
+            }),
       }),
-      this.prisma.customer.count({ where }),
+      recentIds
+        ? Promise.resolve(recentIds.length)
+        : this.prisma.customer.count({ where }),
     ]);
+    const data = pageIds
+      ? pageIds.map((id) => rows.find((r) => r.id === id)!).filter(Boolean)
+      : rows;
 
     // Дължимо по продажби за клиентите на страницата (същата формула като
     // справката за вземания) — една заявка за цялата страница

@@ -5,13 +5,11 @@ import { AscertainmentProtocolsModule } from '../ascertainment-protocols/ascerta
 import { ServiceNumberingService } from './service-numbering.service';
 import { ServiceOrdersService } from './service-orders.service';
 import { ServiceAssetsService } from './service-assets.service';
-import { ServiceContractsService } from './service-contracts.service';
 import { ServiceProtocolsService } from './service-protocols.service';
 import { ServiceInvoicingService } from './service-invoicing.service';
 import { ServiceStockService } from './service-stock.service';
 import { CompanyServiceOrdersController } from './company-service-orders.controller';
 import { CompanyServiceAssetsController } from './company-service-assets.controller';
-import { CompanyServiceContractsController } from './company-service-contracts.controller';
 import { ServicePublicController } from './service-public.controller';
 import { WarrantiesModule } from '../warranties/warranties.module';
 import { ServiceSlaCronService } from './service-sla.cron';
@@ -26,19 +24,17 @@ import { ServiceSlaCronService } from './service-sla.cron';
   controllers: [
     CompanyServiceOrdersController,
     CompanyServiceAssetsController,
-    CompanyServiceContractsController,
     ServicePublicController,
   ],
   providers: [
     ServiceNumberingService,
     ServiceOrdersService,
     ServiceAssetsService,
-    ServiceContractsService,
     ServiceProtocolsService,
     ServiceInvoicingService,
     ServiceStockService,
     ServiceSlaCronService,
   ],
-  exports: [ServiceOrdersService, ServiceAssetsService, ServiceContractsService],
+  exports: [ServiceOrdersService, ServiceAssetsService],
 })
 export class ServiceModule {}

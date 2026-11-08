@@ -68,10 +68,6 @@ export class CreateServiceOrderDto {
   @IsOptional()
   technicianId?: string;
 
-  @IsString()
-  @IsOptional()
-  contractId?: string;
-
   @IsBoolean()
   @IsOptional()
   generatePublicToken?: boolean;

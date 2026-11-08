@@ -71,9 +71,22 @@ export class QueryCustomersDto {
   @Transform(({ value }) => parseInt(value, 10))
   limit?: number;
 
-  // Бял списък — sortBy отива директно в Prisma orderBy
+  // Бял списък — sortBy отива директно в Prisma orderBy; 'recent' =
+  // последно ползвани (последна продажба / сервизна заявка / промяна), за
+  // полетата за избор на клиент
   @IsOptional()
-  @IsIn(['createdAt', 'updatedAt', 'companyName', 'firstName', 'lastName', 'email', 'city', 'stage', 'type'])
+  @IsIn([
+    'recent',
+    'createdAt',
+    'updatedAt',
+    'companyName',
+    'firstName',
+    'lastName',
+    'email',
+    'city',
+    'stage',
+    'type',
+  ])
   sortBy?: string;
 
   @IsOptional()

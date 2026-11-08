@@ -48,13 +48,14 @@ export class CompanyServiceAssetsController {
     return this.assets.findAll(companyId, query);
   }
 
-  @Get('lookup')
+  // Избор на артикул във формата за заявка (заведени + продадени, по страници)
+  @Get('pick')
   @RequireView('service', 'assets')
-  lookupBySerial(
+  pick(
     @Param('companyId') companyId: string,
-    @Query('serial') serial: string,
+    @Query() query: QueryServiceAssetsDto,
   ) {
-    return this.assets.lookupBySerial(companyId, serial);
+    return this.assets.pick(companyId, query);
   }
 
   @Post('from-sale')

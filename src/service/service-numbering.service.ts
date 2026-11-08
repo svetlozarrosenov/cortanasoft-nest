@@ -2,12 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
-type Kind = 'order' | 'asset' | 'contract';
+type Kind = 'order' | 'asset';
 
 const PREFIX: Record<Kind, string> = {
   order: 'SRV',
   asset: 'ASSET',
-  contract: 'SVC',
 };
 
 @Injectable()
@@ -23,9 +22,7 @@ export class ServiceNumberingService {
     const year = new Date().getFullYear();
     const prefix = `${PREFIX[kind]}-${year}-`;
 
-    let last:
-      | { orderNumber?: string; assetNumber?: string; contractNumber?: string }
-      | null = null;
+    let last: { orderNumber?: string; assetNumber?: string } | null = null;
 
     if (kind === 'order') {
       last = await client.serviceOrder.findFirst({
@@ -33,25 +30,16 @@ export class ServiceNumberingService {
         orderBy: { orderNumber: 'desc' },
         select: { orderNumber: true },
       });
-    } else if (kind === 'asset') {
+    } else {
       last = await client.serviceAsset.findFirst({
         where: { companyId, assetNumber: { startsWith: prefix } },
         orderBy: { assetNumber: 'desc' },
         select: { assetNumber: true },
       });
-    } else {
-      last = await client.serviceContract.findFirst({
-        where: { companyId, contractNumber: { startsWith: prefix } },
-        orderBy: { contractNumber: 'desc' },
-        select: { contractNumber: true },
-      });
     }
 
     const lastValue =
-      (last as any)?.orderNumber ||
-      (last as any)?.assetNumber ||
-      (last as any)?.contractNumber ||
-      null;
+      (last as any)?.orderNumber || (last as any)?.assetNumber || null;
 
     let nextNumber = 1;
     if (lastValue) {

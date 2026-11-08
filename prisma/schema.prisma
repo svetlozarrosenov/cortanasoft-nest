@@ -257,6 +257,7 @@ model Company {
   hrSettings                   HrSettings?
   positions                    Position[]
   speedyConfig                 SpeedyConfig?
+  pigeonConfig                 PigeonConfig?
   shippingAutomation           ShippingAutomation?
   shipments                    Shipment[]
   warrantyTemplates            WarrantyTemplate[]
@@ -273,7 +274,6 @@ model Company {
   // Сервиз
   serviceOrders    ServiceOrder[]
   serviceAssets    ServiceAsset[]
-  serviceContracts ServiceContract[]
 
   // Електронни трудови досиета
   employmentContracts       EmploymentContract[]
@@ -1631,7 +1631,6 @@ model Customer {
   productionOrders       ProductionOrder[]       @relation("ProductionOrderCustomer")
   serviceOrders          ServiceOrder[]
   serviceAssets          ServiceAsset[]
-  serviceContracts       ServiceContract[]
   creditApplications     CreditApplication[]
   contracts              Contract[]
   customerCases          CustomerCase[]
@@ -4212,6 +4211,41 @@ model SpeedyConfig {
   @@map("speedy_configs")
 }
 
+// Pigeon Express — конфигурация по фирма (Настройки > Куриери > Pigeon).
+// Ключ и секрет се дават от търговския отдел на Pigeon; пазят се шифровани
+// (виж common/utils/secret-crypto.util). Подразбиранията се ползват от
+// модала „Създай пратка" и могат да се сменят за всяка пратка поотделно.
+model PigeonConfig {
+  id       String  @id @default(cuid())
+  isActive Boolean @default(true)
+
+  // Достъп
+  apiKey    String?
+  apiSecret String?
+  mode      String  @default("sandbox") // sandbox | live
+
+  // Подател: откъде куриерът взема пратката
+  pickupType      String @default("office") // address | office | locker
+  pickupOfficeId  Int? // офис/автомат на Pigeon (GET /offices)
+  senderAddressId Int? // запазен адрес от профила в Pigeon (GET /addresses)
+
+  // Подразбирания за пратка
+  serviceType          String  @default("standard") // standard | express
+  whoPays              String  @default("receiver") // sender | receiver
+  codEnabled           Boolean @default(false)
+  declaredValueEnabled Boolean @default(false)
+  smsNotification      Boolean @default(false)
+  returnAtMyExpense    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  companyId String  @unique
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("pigeon_configs")
+}
+
 // Пратка
 model Shipment {
   id             String         @id @default(cuid())
@@ -4538,7 +4572,6 @@ enum ServiceOrderStatus {
 enum ServiceOrderType {
   WARRANTY // Гаранционен
   PAID // Платен
-  CONTRACT // По договор
   GOODWILL // Жест към клиента
 }
 
@@ -4578,12 +4611,6 @@ enum LoanerStatus {
 }
 
 // Статус на сервизен договор
-enum ServiceContractStatus {
-  ACTIVE
-  PAUSED
-  EXPIRED
-  CANCELED
-}
 
 // Регистър на обслужваните устройства/активи
 model ServiceAsset {
@@ -4684,9 +4711,6 @@ model ServiceOrder {
 
   receivedById String?
   receivedBy   User?   @relation("ServiceOrderReceiver", fields: [receivedById], references: [id], onDelete: SetNull)
-
-  contractId String?
-  contract   ServiceContract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
 
   invoiceId String?
   invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
@@ -4840,33 +4864,6 @@ model ServiceLoaner {
 }
 
 // Сервизен договор / абонамент за поддръжка
-model ServiceContract {
-  id                    String                @id @default(cuid())
-  contractNumber        String // SVC-2026-00001
-  name                  String
-  status                ServiceContractStatus @default(ACTIVE)
-  startDate             DateTime
-  endDate               DateTime?
-  monthlyFee            Decimal               @default(0) @db.Decimal(12, 2)
-  includedHoursPerMonth Decimal               @default(0) @db.Decimal(8, 2)
-  responseTimeHours     Int? // SLA в часове
-  notes                 String?               @db.Text
-
-  companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-
-  serviceOrders ServiceOrder[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([companyId, contractNumber])
-  @@index([companyId, status])
-  @@map("service_contracts")
-}
 
 // ==================== ЕЛЕКТРОННИ ТРУДОВИ ДОСИЕТА ====================
 // Наредба за вида и изискванията за създаването и съхраняването на електронни

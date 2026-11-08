@@ -6,11 +6,7 @@ import {
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { MailService } from '../mail/mail.service';
-import {
-  Prisma,
-  ServiceOrderStatus,
-  ServicePartSource,
-} from '@prisma/client';
+import { Prisma, ServiceOrderStatus, ServicePartSource } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ErrorMessages } from '../common/constants/error-messages';
 import { ServiceNumberingService } from './service-numbering.service';
@@ -37,7 +33,6 @@ const ORDER_INCLUDE = {
   receivedBy: {
     select: { id: true, firstName: true, lastName: true },
   },
-  contract: true,
   invoice: true,
   parts: {
     include: { product: true, inventoryBatch: true, inventorySerial: true },
@@ -69,7 +64,13 @@ function round2(n: number): number {
 
 const ALLOWED_TRANSITIONS: Record<ServiceOrderStatus, ServiceOrderStatus[]> = {
   NEW: ['DIAGNOSING', 'AWAITING_QUOTE', 'IN_REPAIR', 'CANCELED'],
-  DIAGNOSING: ['AWAITING_QUOTE', 'AWAITING_APPROVAL', 'AWAITING_PARTS', 'IN_REPAIR', 'CANCELED'],
+  DIAGNOSING: [
+    'AWAITING_QUOTE',
+    'AWAITING_APPROVAL',
+    'AWAITING_PARTS',
+    'IN_REPAIR',
+    'CANCELED',
+  ],
   AWAITING_QUOTE: ['AWAITING_APPROVAL', 'CANCELED'],
   AWAITING_APPROVAL: ['IN_REPAIR', 'AWAITING_PARTS', 'CANCELED'],
   AWAITING_PARTS: ['IN_REPAIR', 'CANCELED'],
@@ -112,12 +113,7 @@ export class ServiceOrdersService {
         if (!asset) throw new NotFoundException('Активът не е намерен');
       }
 
-      if (dto.contractId) {
-        const contract = await tx.serviceContract.findFirst({
-          where: { id: dto.contractId, companyId },
-        });
-        if (!contract) throw new NotFoundException('Договорът не е намерен');
-      }
+      await this.assertTechnician(companyId, dto.technicianId, tx);
 
       const orderNumber =
         dto.orderNumber || (await this.numbering.next('order', companyId, tx));
@@ -147,7 +143,6 @@ export class ServiceOrdersService {
           assetId: dto.assetId,
           technicianId: dto.technicianId,
           receivedById: userId,
-          contractId: dto.contractId,
         },
         include: ORDER_INCLUDE,
       });
@@ -236,9 +231,7 @@ export class ServiceOrdersService {
     const existing = await this.findOne(companyId, id);
 
     if (existing.status === 'DELIVERED' || existing.status === 'CANCELED') {
-      throw new BadRequestException(
-        'Не може да редактирате приключена заявка',
-      );
+      throw new BadRequestException('Не може да редактирате приключена заявка');
     }
 
     if (dto.assetId) {
@@ -248,12 +241,7 @@ export class ServiceOrdersService {
       if (!asset) throw new NotFoundException('Активът не е намерен');
     }
 
-    if (dto.contractId) {
-      const contract = await this.prisma.serviceContract.findFirst({
-        where: { id: dto.contractId, companyId },
-      });
-      if (!contract) throw new NotFoundException('Договорът не е намерен');
-    }
+    await this.assertTechnician(companyId, dto.technicianId);
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.serviceOrder.update({
@@ -301,58 +289,60 @@ export class ServiceOrdersService {
     // note preserve intent if anything goes wrong. ALLOWED_TRANSITIONS is kept
     // in code as documentation of the "happy-path" flow.
 
-    return this.prisma.$transaction(async (tx) => {
-      const data: Prisma.ServiceOrderUpdateInput = { status: dto.status };
+    return this.prisma
+      .$transaction(async (tx) => {
+        const data: Prisma.ServiceOrderUpdateInput = { status: dto.status };
 
-      const now = new Date();
-      if (dto.status === 'DIAGNOSING' && !order.diagnosedAt) {
-        data.diagnosedAt = now;
-      }
-      if (dto.status === 'IN_REPAIR' && !order.approvedAt) {
-        data.approvedAt = now;
-      }
-      if (dto.status === 'READY' && !order.completedAt) {
-        data.completedAt = now;
-      }
-      if (dto.status === 'DELIVERED') {
-        // Only set deliveredAt and deduct stock the FIRST time we enter DELIVERED —
-        // otherwise re-DELIVERING (e.g. after a bounce back to IN_REPAIR) would
-        // double-deduct BATCH inventory.
-        if (!order.deliveredAt) {
-          data.deliveredAt = now;
-          await this.stock.deductPartsForOrder(tx, id, companyId);
+        const now = new Date();
+        if (dto.status === 'DIAGNOSING' && !order.diagnosedAt) {
+          data.diagnosedAt = now;
         }
-      }
+        if (dto.status === 'IN_REPAIR' && !order.approvedAt) {
+          data.approvedAt = now;
+        }
+        if (dto.status === 'READY' && !order.completedAt) {
+          data.completedAt = now;
+        }
+        if (dto.status === 'DELIVERED') {
+          // Only set deliveredAt and deduct stock the FIRST time we enter DELIVERED —
+          // otherwise re-DELIVERING (e.g. after a bounce back to IN_REPAIR) would
+          // double-deduct BATCH inventory.
+          if (!order.deliveredAt) {
+            data.deliveredAt = now;
+            await this.stock.deductPartsForOrder(tx, id, companyId);
+          }
+        }
 
-      const updated = await tx.serviceOrder.update({
-        where: { id },
-        data,
-      });
+        const updated = await tx.serviceOrder.update({
+          where: { id },
+          data,
+        });
 
-      await tx.serviceOrderStatusHistory.create({
-        data: {
-          serviceOrderId: id,
-          fromStatus: order.status,
-          toStatus: dto.status,
-          note: dto.note,
-          changedById: userId,
-        },
-      });
+        await tx.serviceOrderStatusHistory.create({
+          data: {
+            serviceOrderId: id,
+            fromStatus: order.status,
+            toStatus: dto.status,
+            note: dto.note,
+            changedById: userId,
+          },
+        });
 
-      return tx.serviceOrder.findUniqueOrThrow({
-        where: { id: updated.id },
-        include: ORDER_INCLUDE,
+        return tx.serviceOrder.findUniqueOrThrow({
+          where: { id: updated.id },
+          include: ORDER_INCLUDE,
+        });
+      })
+      .then(async (result) => {
+        // Клиентска комуникация (best-effort, извън транзакцията):
+        // при READY клиентът получава „готово за получаване" с tracking линка.
+        if (dto.status === 'READY' && result.notifyCustomer) {
+          await this.emailCustomerStatus(result as any).catch((err) =>
+            this.logger.error('Failed to email customer on READY', err),
+          );
+        }
+        return result;
       });
-    }).then(async (result) => {
-      // Клиентска комуникация (best-effort, извън транзакцията):
-      // при READY клиентът получава „готово за получаване" с tracking линка.
-      if (dto.status === 'READY' && result.notifyCustomer) {
-        await this.emailCustomerStatus(result as any).catch((err) =>
-          this.logger.error('Failed to email customer on READY', err),
-        );
-      }
-      return result;
-    });
   }
 
   /** Имейл до клиента при готов ремонт (ако има имейл + notifyCustomer). */
@@ -374,7 +364,9 @@ export class ServiceOrdersService {
       html:
         `<p>Здравейте${order.customer?.firstName ? `, ${order.customer.firstName}` : ''},</p>` +
         `<p>${order.asset?.name ? `Вашето устройство „${order.asset.name}"` : 'Вашата сервизна заявка'} по заявка <b>${order.orderNumber}</b> е готово за получаване.</p>` +
-        (link ? `<p>Статус на заявката: <a href="${link}">${link}</a></p>` : '') +
+        (link
+          ? `<p>Статус на заявката: <a href="${link}">${link}</a></p>`
+          : '') +
         `<p>(изпратено автоматично от CortanaSoft)</p>`,
     });
   }
@@ -678,7 +670,8 @@ export class ServiceOrdersService {
     // Клиентът може да одобри само докато чакаме оферта/одобрение
     const canApprove =
       !order.isApprovedByCustomer &&
-      (order.status === 'AWAITING_QUOTE' || order.status === 'AWAITING_APPROVAL');
+      (order.status === 'AWAITING_QUOTE' ||
+        order.status === 'AWAITING_APPROVAL');
     return { ...order, canApprove };
   }
 
@@ -698,10 +691,11 @@ export class ServiceOrdersService {
     if (order.isApprovedByCustomer) {
       throw new BadRequestException('Ремонтът вече е одобрен');
     }
-    if (order.status !== 'AWAITING_QUOTE' && order.status !== 'AWAITING_APPROVAL') {
-      throw new BadRequestException(
-        'Заявката не очаква одобрение в момента',
-      );
+    if (
+      order.status !== 'AWAITING_QUOTE' &&
+      order.status !== 'AWAITING_APPROVAL'
+    ) {
+      throw new BadRequestException('Заявката не очаква одобрение в момента');
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -728,6 +722,25 @@ export class ServiceOrdersService {
   }
 
   // ==================== Helpers ====================
+
+  /**
+   * Техникът трябва да е потребител на същата фирма (служител с или без
+   * достъп). Без проверката API-то приема произволен userId от друг наемател.
+   */
+  private async assertTechnician(
+    companyId: string,
+    technicianId: string | null | undefined,
+    tx: Prisma.TransactionClient = this.prisma,
+  ) {
+    if (!technicianId) return;
+    const membership = await tx.userCompany.findFirst({
+      where: { companyId, userId: technicianId },
+      select: { id: true },
+    });
+    if (!membership) {
+      throw new NotFoundException(ErrorMessages.employees.notFound);
+    }
+  }
 
   private async recomputeTotals(
     serviceOrderId: string,

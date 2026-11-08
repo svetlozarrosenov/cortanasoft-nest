@@ -985,11 +985,6 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         actions: ['view', 'create', 'edit', 'delete'],
       },
       {
-        key: 'contracts',
-        labelKey: 'modules.service.contracts',
-        actions: ['view', 'create', 'edit', 'delete'],
-      },
-      {
         key: 'calendar',
         labelKey: 'modules.service.calendar',
         actions: ['view'],
@@ -1024,6 +1019,11 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
       {
         key: 'speedy',
         labelKey: 'modules.settings.speedy',
+        actions: ['view', 'edit'],
+      },
+      {
+        key: 'pigeon',
+        labelKey: 'modules.settings.pigeon',
         actions: ['view', 'edit'],
       },
       {

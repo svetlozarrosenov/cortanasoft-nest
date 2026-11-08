@@ -66,10 +66,6 @@ export class UpdateServiceOrderDto {
   @IsOptional()
   assetId?: string;
 
-  @IsString()
-  @IsOptional()
-  contractId?: string;
-
   @IsNumber()
   @IsOptional()
   @Min(0)

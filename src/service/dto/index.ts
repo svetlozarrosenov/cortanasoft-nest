@@ -8,8 +8,5 @@ export * from './add-attachment.dto';
 export * from './create-service-asset.dto';
 export * from './update-service-asset.dto';
 export * from './query-service-assets.dto';
-export * from './create-service-contract.dto';
-export * from './update-service-contract.dto';
-export * from './query-service-contracts.dto';
 export * from './create-loaner.dto';
 export * from './start-time-log.dto';
