@@ -1,11 +1,8 @@
 import { config } from 'dotenv';
-import { existsSync } from 'fs';
 
-// Load .env.local first (if exists), then .env as fallback
-// Must run before any module imports that read process.env
-if (existsSync('.env.local')) {
-  config({ path: '.env.local', override: true });
-}
+// Единственият env файл е .env — локално и на прод. Трябва да се зареди
+// преди импортите на модулите, които четат process.env.
+config();
 
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
@@ -58,14 +55,18 @@ async function bootstrap() {
   ];
   expressApp.set('trust proxy', trustedProxies);
 
+  // Разрешени произходи = FRONTEND_URL + CORS_ORIGINS (списък със запетаи).
+  // Нищо не е вградено в кода: локалните адреси се описват в .env.
+  const allowedOrigins = Array.from(
+    new Set(
+      [process.env.FRONTEND_URL, ...(process.env.CORS_ORIGINS || '').split(',')]
+        .map((o) => (o || '').trim().replace(/\/+$/, ''))
+        .filter(Boolean),
+    ),
+  );
+
   app.enableCors({
     origin: (origin, callback) => {
-      const allowedOrigins = [
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
-        process.env.FRONTEND_URL,
-      ].filter(Boolean);
-
       // Allow requests with no origin (native mobile apps, Postman, etc.).
       // Browsers always send an Origin on cross-origin requests, so this only
       // matches non-browser clients and is not a CSRF vector.
@@ -82,7 +83,10 @@ async function bootstrap() {
           origin,
         );
 
-      if (allowedOrigins.includes(origin) || isLocalNetwork) {
+      if (
+        allowedOrigins.includes(origin.replace(/\/+$/, '')) ||
+        isLocalNetwork
+      ) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));

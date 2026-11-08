@@ -13,9 +13,7 @@
  * Идемпотентно — може да се пуска многократно. Не пипа JWT_SECRET/сесиите.
  */
 import { config } from 'dotenv';
-import { existsSync } from 'fs';
 
-if (existsSync('.env.local')) config({ path: '.env.local', override: true });
 config();
 
 import { PrismaClient } from '@prisma/client';
