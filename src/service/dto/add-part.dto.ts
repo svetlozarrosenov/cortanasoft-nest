@@ -1,11 +1,4 @@
-import {
-  IsString,
-  IsOptional,
-  IsNumber,
-  IsEnum,
-  IsBoolean,
-  Min,
-} from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsEnum, Min } from 'class-validator';
 import { ServicePartSource } from '@prisma/client';
 
 export class AddServicePartDto {
@@ -19,14 +12,6 @@ export class AddServicePartDto {
   @IsNumber()
   @Min(0.001)
   quantity: number;
-
-  @IsNumber()
-  @Min(0)
-  unitPrice: number;
-
-  @IsBoolean()
-  @IsOptional()
-  isWarranty?: boolean;
 
   @IsString()
   @IsOptional()

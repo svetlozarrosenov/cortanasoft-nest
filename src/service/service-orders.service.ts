@@ -1,28 +1,30 @@
 import {
   Injectable,
-  Logger,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { randomBytes } from 'crypto';
-import { MailService } from '../mail/mail.service';
 import { Prisma, ServiceOrderStatus, ServicePartSource } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ErrorMessages } from '../common/constants/error-messages';
 import { ServiceNumberingService } from './service-numbering.service';
 import { ServiceStockService } from './service-stock.service';
+import { UploadsService } from '../uploads/uploads.service';
+import { decodeUploadedFileName } from '../common/utils/upload-filename';
 import {
   CreateServiceOrderDto,
   UpdateServiceOrderDto,
   QueryServiceOrdersDto,
   ChangeServiceOrderStatusDto,
   AddServicePartDto,
-  AddServiceLaborDto,
-  AddServiceAttachmentDto,
-  CreateLoanerDto,
-  StartTimeLogDto,
-  StopTimeLogDto,
 } from './dto';
+
+export const SERVICE_ATTACHMENT_KINDS = [
+  'photo_in',
+  'photo_out',
+  'invoice_supplier',
+  'other',
+] as const;
+export type ServiceAttachmentKind = (typeof SERVICE_ATTACHMENT_KINDS)[number];
 
 const ORDER_INCLUDE = {
   customer: true,
@@ -33,12 +35,9 @@ const ORDER_INCLUDE = {
   receivedBy: {
     select: { id: true, firstName: true, lastName: true },
   },
-  invoice: true,
   parts: {
     include: { product: true, inventoryBatch: true, inventorySerial: true },
   },
-  labor: true,
-  loaners: { include: { product: true } },
   attachments: {
     include: {
       uploadedBy: { select: { id: true, firstName: true, lastName: true } },
@@ -50,45 +49,19 @@ const ORDER_INCLUDE = {
       changedBy: { select: { id: true, firstName: true, lastName: true } },
     },
   },
-  timeLogs: {
-    orderBy: { startedAt: 'desc' },
-    include: {
-      technician: { select: { id: true, firstName: true, lastName: true } },
-    },
-  },
 } as const satisfies Prisma.ServiceOrderInclude;
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
-
-const ALLOWED_TRANSITIONS: Record<ServiceOrderStatus, ServiceOrderStatus[]> = {
-  NEW: ['DIAGNOSING', 'AWAITING_QUOTE', 'IN_REPAIR', 'CANCELED'],
-  DIAGNOSING: [
-    'AWAITING_QUOTE',
-    'AWAITING_APPROVAL',
-    'AWAITING_PARTS',
-    'IN_REPAIR',
-    'CANCELED',
-  ],
-  AWAITING_QUOTE: ['AWAITING_APPROVAL', 'CANCELED'],
-  AWAITING_APPROVAL: ['IN_REPAIR', 'AWAITING_PARTS', 'CANCELED'],
-  AWAITING_PARTS: ['IN_REPAIR', 'CANCELED'],
-  IN_REPAIR: ['AWAITING_PARTS', 'READY', 'CANCELED'],
-  READY: ['DELIVERED', 'IN_REPAIR'],
-  DELIVERED: [],
-  CANCELED: [],
-};
+// Естественият път на заявката (само документация — всеки статус може да
+// се смени към всеки, историята пази промените):
+// NEW → DIAGNOSING → AWAITING_PARTS → IN_REPAIR → READY → DELIVERED
 
 @Injectable()
 export class ServiceOrdersService {
-  private readonly logger = new Logger(ServiceOrdersService.name);
-
   constructor(
     private prisma: PrismaService,
     private numbering: ServiceNumberingService,
     private stock: ServiceStockService,
-    private mail: MailService,
+    private uploads: UploadsService,
   ) {}
 
   // ==================== CRUD ====================
@@ -110,35 +83,34 @@ export class ServiceOrdersService {
         const asset = await tx.serviceAsset.findFirst({
           where: { id: dto.assetId, companyId },
         });
-        if (!asset) throw new NotFoundException('Активът не е намерен');
+        if (!asset) throw new NotFoundException('Артикулът не е намерен');
       }
 
       await this.assertTechnician(companyId, dto.technicianId, tx);
 
+      const receivedAt = dto.receivedAt ? new Date(dto.receivedAt) : new Date();
+      const warrantyEndAt = await this.resolveWarrantyEndAt(
+        tx,
+        companyId,
+        dto.assetId,
+      );
+
       const orderNumber =
         dto.orderNumber || (await this.numbering.next('order', companyId, tx));
-
-      const publicToken = dto.generatePublicToken
-        ? randomBytes(24).toString('hex')
-        : null;
 
       const order = await tx.serviceOrder.create({
         data: {
           companyId,
           orderNumber,
-          type: dto.type || 'PAID',
           priority: dto.priority || 'NORMAL',
-          serviceLocation: dto.serviceLocation || 'IN_HOUSE',
-          receivedAt: dto.receivedAt ? new Date(dto.receivedAt) : new Date(),
+          receivedAt,
           promisedAt: dto.promisedAt ? new Date(dto.promisedAt) : null,
+          warrantyEndAt,
           customerComplaint: dto.customerComplaint,
           accessories: dto.accessories,
           cosmeticState: dto.cosmeticState,
           declaredFault: dto.declaredFault,
           internalNotes: dto.internalNotes,
-          estimatedCost: dto.estimatedCost,
-          notifyCustomer: dto.notifyCustomer ?? true,
-          publicToken,
           customerId: dto.customerId,
           assetId: dto.assetId,
           technicianId: dto.technicianId,
@@ -167,7 +139,6 @@ export class ServiceOrdersService {
 
     const where: Prisma.ServiceOrderWhereInput = { companyId };
     if (query.status) where.status = query.status;
-    if (query.type) where.type = query.type;
     if (query.priority) where.priority = query.priority;
     if (query.technicianId) where.technicianId = query.technicianId;
     if (query.customerId) where.customerId = query.customerId;
@@ -201,7 +172,23 @@ export class ServiceOrdersService {
           technician: {
             select: { id: true, firstName: true, lastName: true },
           },
-          _count: { select: { parts: true, labor: true, attachments: true } },
+          // Иконите за приемен/предавателен протокол в реда
+          acceptanceProtocols: {
+            where: { status: { not: 'CANCELLED' } },
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true,
+              documentNumber: true,
+              status: true,
+              serviceKind: true,
+            },
+          },
+          ascertainmentProtocols: {
+            where: { status: { not: 'CANCELLED' } },
+            orderBy: { createdAt: 'desc' },
+            select: { id: true, documentNumber: true, status: true },
+          },
+          _count: { select: { parts: true, attachments: true } },
         },
         orderBy: { [sortBy]: sortOrder },
         skip: (page - 1) * limit,
@@ -238,37 +225,26 @@ export class ServiceOrdersService {
       const asset = await this.prisma.serviceAsset.findFirst({
         where: { id: dto.assetId, companyId },
       });
-      if (!asset) throw new NotFoundException('Активът не е намерен');
+      if (!asset) throw new NotFoundException('Артикулът не е намерен');
     }
 
     await this.assertTechnician(companyId, dto.technicianId);
 
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.serviceOrder.update({
-        where: { id },
-        data: {
-          ...dto,
-          promisedAt: dto.promisedAt ? new Date(dto.promisedAt) : undefined,
-        },
-        include: ORDER_INCLUDE,
-      });
+    // Смяна на артикула → снимката на гаранцията се прави наново
+    const warrantyEndAt =
+      dto.assetId && dto.assetId !== existing.assetId
+        ? await this.resolveWarrantyEndAt(this.prisma, companyId, dto.assetId)
+        : undefined;
 
-      await this.recomputeTotals(updated.id, tx);
-      return tx.serviceOrder.findUniqueOrThrow({
-        where: { id: updated.id },
-        include: ORDER_INCLUDE,
-      });
+    return this.prisma.serviceOrder.update({
+      where: { id },
+      data: {
+        ...dto,
+        promisedAt: dto.promisedAt ? new Date(dto.promisedAt) : undefined,
+        warrantyEndAt,
+      },
+      include: ORDER_INCLUDE,
     });
-  }
-
-  async remove(companyId: string, id: string) {
-    const order = await this.findOne(companyId, id);
-    if (order.status !== 'NEW' && order.status !== 'CANCELED') {
-      throw new BadRequestException(
-        'Може да изтриете само нови или отказани заявки',
-      );
-    }
-    return this.prisma.serviceOrder.delete({ where: { id } });
   }
 
   // ==================== Status flow ====================
@@ -283,124 +259,50 @@ export class ServiceOrdersService {
 
     if (order.status === dto.status) return order;
 
-    // State machine restriction lifted at user request — workshop owners want
-    // full flexibility to override status (re-open a cancelled order, move back
-    // from READY to IN_REPAIR, etc.). The status_history audit log + per-change
-    // note preserve intent if anything goes wrong. ALLOWED_TRANSITIONS is kept
-    // in code as documentation of the "happy-path" flow.
+    // Без ограничения в преходите (по желание на потребителя): собственикът
+    // на сервиза може да върне назад или да отвори отказана заявка; историята
+    // на статусите пази кой, кога и защо.
 
-    return this.prisma
-      .$transaction(async (tx) => {
-        const data: Prisma.ServiceOrderUpdateInput = { status: dto.status };
+    return this.prisma.$transaction(async (tx) => {
+      const data: Prisma.ServiceOrderUpdateInput = { status: dto.status };
 
-        const now = new Date();
-        if (dto.status === 'DIAGNOSING' && !order.diagnosedAt) {
-          data.diagnosedAt = now;
+      const now = new Date();
+      if (dto.status === 'DIAGNOSING' && !order.diagnosedAt) {
+        data.diagnosedAt = now;
+      }
+      if (dto.status === 'READY' && !order.completedAt) {
+        data.completedAt = now;
+      }
+      if (dto.status === 'DELIVERED') {
+        // Only set deliveredAt and deduct stock the FIRST time we enter DELIVERED —
+        // otherwise re-DELIVERING (e.g. after a bounce back to IN_REPAIR) would
+        // double-deduct BATCH inventory.
+        if (!order.deliveredAt) {
+          data.deliveredAt = now;
+          await this.stock.deductPartsForOrder(tx, id, companyId);
         }
-        if (dto.status === 'IN_REPAIR' && !order.approvedAt) {
-          data.approvedAt = now;
-        }
-        if (dto.status === 'READY' && !order.completedAt) {
-          data.completedAt = now;
-        }
-        if (dto.status === 'DELIVERED') {
-          // Only set deliveredAt and deduct stock the FIRST time we enter DELIVERED —
-          // otherwise re-DELIVERING (e.g. after a bounce back to IN_REPAIR) would
-          // double-deduct BATCH inventory.
-          if (!order.deliveredAt) {
-            data.deliveredAt = now;
-            await this.stock.deductPartsForOrder(tx, id, companyId);
-          }
-        }
+      }
 
-        const updated = await tx.serviceOrder.update({
-          where: { id },
-          data,
-        });
-
-        await tx.serviceOrderStatusHistory.create({
-          data: {
-            serviceOrderId: id,
-            fromStatus: order.status,
-            toStatus: dto.status,
-            note: dto.note,
-            changedById: userId,
-          },
-        });
-
-        return tx.serviceOrder.findUniqueOrThrow({
-          where: { id: updated.id },
-          include: ORDER_INCLUDE,
-        });
-      })
-      .then(async (result) => {
-        // Клиентска комуникация (best-effort, извън транзакцията):
-        // при READY клиентът получава „готово за получаване" с tracking линка.
-        if (dto.status === 'READY' && result.notifyCustomer) {
-          await this.emailCustomerStatus(result as any).catch((err) =>
-            this.logger.error('Failed to email customer on READY', err),
-          );
-        }
-        return result;
-      });
-  }
-
-  /** Имейл до клиента при готов ремонт (ако има имейл + notifyCustomer). */
-  private async emailCustomerStatus(order: {
-    id: string;
-    orderNumber: string;
-    publicToken: string | null;
-    customer: { email: string | null; firstName: string | null } | null;
-    asset: { name: string } | null;
-  }) {
-    const email = order.customer?.email;
-    if (!email) return;
-    const link = order.publicToken
-      ? `${process.env.FRONTEND_URL || 'https://cortanasoft.com'}/service-status/${order.publicToken}`
-      : null;
-    await this.mail.send({
-      to: email,
-      subject: `Ремонтът по заявка ${order.orderNumber} е готов`,
-      html:
-        `<p>Здравейте${order.customer?.firstName ? `, ${order.customer.firstName}` : ''},</p>` +
-        `<p>${order.asset?.name ? `Вашето устройство „${order.asset.name}"` : 'Вашата сервизна заявка'} по заявка <b>${order.orderNumber}</b> е готово за получаване.</p>` +
-        (link
-          ? `<p>Статус на заявката: <a href="${link}">${link}</a></p>`
-          : '') +
-        `<p>(изпратено автоматично от CortanaSoft)</p>`,
-    });
-  }
-
-  /**
-   * Изпраща tracking линка на клиента по имейл. Генерира публичен токен,
-   * ако заявката е създадена без такъв.
-   */
-  async sendTrackingLink(companyId: string, id: string) {
-    const order = await this.findOne(companyId, id);
-    const email = (order as any).customer?.email;
-    if (!email) {
-      throw new BadRequestException('Клиентът няма въведен имейл');
-    }
-
-    let token = order.publicToken;
-    if (!token) {
-      token = randomBytes(24).toString('hex');
-      await this.prisma.serviceOrder.update({
+      const updated = await tx.serviceOrder.update({
         where: { id },
-        data: { publicToken: token },
+        data,
       });
-    }
 
-    const link = `${process.env.FRONTEND_URL || 'https://cortanasoft.com'}/service-status/${token}`;
-    await this.mail.send({
-      to: email,
-      subject: `Проследяване на сервизна заявка ${order.orderNumber}`,
-      html:
-        `<p>Здравейте,</p><p>Можете да следите статуса на вашата сервизна заявка <b>${order.orderNumber}</b> на адрес:</p>` +
-        `<p><a href="${link}">${link}</a></p><p>(изпратено автоматично от CortanaSoft)</p>`,
+      await tx.serviceOrderStatusHistory.create({
+        data: {
+          serviceOrderId: id,
+          fromStatus: order.status,
+          toStatus: dto.status,
+          note: dto.note,
+          changedById: userId,
+        },
+      });
+
+      return tx.serviceOrder.findUniqueOrThrow({
+        where: { id: updated.id },
+        include: ORDER_INCLUDE,
+      });
     });
-
-    return { success: true, publicToken: token, sentTo: email };
   }
 
   private assertEditable(order: { status: ServiceOrderStatus }) {
@@ -424,27 +326,17 @@ export class ServiceOrdersService {
       throw new NotFoundException(ErrorMessages.products.notFound);
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const totalPrice = round2(dto.quantity * dto.unitPrice);
-      await tx.serviceOrderPart.create({
-        data: {
-          serviceOrderId: order.id,
-          productId: dto.productId,
-          source: dto.source || ServicePartSource.STOCK,
-          quantity: dto.quantity,
-          unitPrice: dto.unitPrice,
-          totalPrice,
-          isWarranty: dto.isWarranty ?? false,
-          inventoryBatchId: dto.inventoryBatchId,
-          inventorySerialId: dto.inventorySerialId,
-        },
-      });
-      await this.recomputeTotals(order.id, tx);
-      return tx.serviceOrder.findUniqueOrThrow({
-        where: { id: order.id },
-        include: ORDER_INCLUDE,
-      });
+    await this.prisma.serviceOrderPart.create({
+      data: {
+        serviceOrderId: order.id,
+        productId: dto.productId,
+        source: dto.source || ServicePartSource.STOCK,
+        quantity: dto.quantity,
+        inventoryBatchId: dto.inventoryBatchId,
+        inventorySerialId: dto.inventorySerialId,
+      },
     });
+    return this.findOne(companyId, id);
   }
 
   async removePart(companyId: string, id: string, partId: string) {
@@ -456,143 +348,58 @@ export class ServiceOrdersService {
     if (!part || part.serviceOrderId !== order.id) {
       throw new NotFoundException('Резервната част не е намерена');
     }
-    return this.prisma.$transaction(async (tx) => {
-      await tx.serviceOrderPart.delete({ where: { id: partId } });
-      await this.recomputeTotals(order.id, tx);
-      return tx.serviceOrder.findUniqueOrThrow({
-        where: { id: order.id },
-        include: ORDER_INCLUDE,
-      });
-    });
-  }
-
-  // ==================== Labor ====================
-
-  async addLabor(companyId: string, id: string, dto: AddServiceLaborDto) {
-    const order = await this.findOne(companyId, id);
-    this.assertEditable(order);
-
-    return this.prisma.$transaction(async (tx) => {
-      const totalPrice = round2(dto.hours * dto.hourlyRate);
-      await tx.serviceOrderLabor.create({
-        data: {
-          serviceOrderId: order.id,
-          description: dto.description,
-          hours: dto.hours,
-          hourlyRate: dto.hourlyRate,
-          totalPrice,
-          isWarranty: dto.isWarranty ?? false,
-        },
-      });
-      await this.recomputeTotals(order.id, tx);
-      return tx.serviceOrder.findUniqueOrThrow({
-        where: { id: order.id },
-        include: ORDER_INCLUDE,
-      });
-    });
-  }
-
-  async removeLabor(companyId: string, id: string, laborId: string) {
-    const order = await this.findOne(companyId, id);
-    this.assertEditable(order);
-    const labor = await this.prisma.serviceOrderLabor.findUnique({
-      where: { id: laborId },
-    });
-    if (!labor || labor.serviceOrderId !== order.id) {
-      throw new NotFoundException('Записът за труд не е намерен');
-    }
-    return this.prisma.$transaction(async (tx) => {
-      await tx.serviceOrderLabor.delete({ where: { id: laborId } });
-      await this.recomputeTotals(order.id, tx);
-      return tx.serviceOrder.findUniqueOrThrow({
-        where: { id: order.id },
-        include: ORDER_INCLUDE,
-      });
-    });
-  }
-
-  // ==================== Time logs ====================
-
-  async startTimeLog(
-    companyId: string,
-    id: string,
-    technicianId: string,
-    dto: StartTimeLogDto,
-  ) {
-    const order = await this.findOne(companyId, id);
-    this.assertEditable(order);
-
-    const open = await this.prisma.serviceOrderTimeLog.findFirst({
-      where: { serviceOrderId: order.id, technicianId, endedAt: null },
-    });
-    if (open) {
-      throw new BadRequestException(
-        'Имате стартиран таймер по тази заявка. Спрете го преди да започнете нов.',
-      );
-    }
-
-    return this.prisma.serviceOrderTimeLog.create({
-      data: {
-        serviceOrderId: order.id,
-        technicianId,
-        startedAt: new Date(),
-        notes: dto.notes,
-      },
-    });
-  }
-
-  async stopTimeLog(
-    companyId: string,
-    id: string,
-    technicianId: string,
-    dto: StopTimeLogDto,
-  ) {
-    const order = await this.findOne(companyId, id);
-
-    const open = await this.prisma.serviceOrderTimeLog.findFirst({
-      where: { serviceOrderId: order.id, technicianId, endedAt: null },
-      orderBy: { startedAt: 'desc' },
-    });
-    if (!open) {
-      throw new BadRequestException('Няма стартиран таймер по тази заявка');
-    }
-
-    const endedAt = new Date();
-    const minutes = Math.max(
-      0,
-      Math.round((endedAt.getTime() - open.startedAt.getTime()) / 60000),
-    );
-
-    return this.prisma.serviceOrderTimeLog.update({
-      where: { id: open.id },
-      data: {
-        endedAt,
-        minutes,
-        notes: dto.notes ?? open.notes,
-      },
-    });
+    await this.prisma.serviceOrderPart.delete({ where: { id: partId } });
+    return this.findOne(companyId, id);
   }
 
   // ==================== Attachments ====================
 
+  // Файлът отива в R2 (частен bucket); клиентът го отваря през
+  // GET :id/attachments/:attachmentId/file
   async addAttachment(
     companyId: string,
     id: string,
     userId: string | undefined,
-    dto: AddServiceAttachmentDto,
+    file: Express.Multer.File,
+    kind: ServiceAttachmentKind | undefined,
   ) {
     const order = await this.findOne(companyId, id);
     this.assertEditable(order);
+    const { key } = await this.uploads.uploadFile(
+      companyId,
+      'service-orders',
+      file,
+    );
     return this.prisma.serviceOrderAttachment.create({
       data: {
         serviceOrderId: order.id,
-        url: dto.url,
-        fileName: dto.fileName,
-        mimeType: dto.mimeType,
-        kind: dto.kind,
+        fileKey: key,
+        fileSize: file.size,
+        fileName: decodeUploadedFileName(file.originalname),
+        mimeType: file.mimetype,
+        kind: kind ?? 'other',
         uploadedById: userId,
       },
     });
+  }
+
+  async getAttachmentStream(
+    companyId: string,
+    id: string,
+    attachmentId: string,
+  ) {
+    const att = await this.prisma.serviceOrderAttachment.findFirst({
+      where: {
+        id: attachmentId,
+        serviceOrderId: id,
+        serviceOrder: { companyId },
+      },
+    });
+    if (!att || !att.fileKey) {
+      throw new NotFoundException('Прикаченият файл не е намерен');
+    }
+    const { stream, contentType } = await this.uploads.getFile(att.fileKey);
+    return { stream, contentType, fileName: att.fileName };
   }
 
   async removeAttachment(companyId: string, id: string, attachmentId: string) {
@@ -603,125 +410,45 @@ export class ServiceOrdersService {
     if (!att || att.serviceOrderId !== order.id) {
       throw new NotFoundException('Прикаченият файл не е намерен');
     }
-    return this.prisma.serviceOrderAttachment.delete({
+    const deleted = await this.prisma.serviceOrderAttachment.delete({
       where: { id: attachmentId },
     });
-  }
-
-  // ==================== Loaners ====================
-
-  async addLoaner(companyId: string, id: string, dto: CreateLoanerDto) {
-    const order = await this.findOne(companyId, id);
-    this.assertEditable(order);
-    return this.prisma.serviceLoaner.create({
-      data: {
-        serviceOrderId: order.id,
-        productId: dto.productId,
-        serialNumber: dto.serialNumber,
-        description: dto.description,
-      },
-      include: { product: true },
-    });
-  }
-
-  async returnLoaner(companyId: string, id: string, loanerId: string) {
-    const order = await this.findOne(companyId, id);
-    const loaner = await this.prisma.serviceLoaner.findUnique({
-      where: { id: loanerId },
-    });
-    if (!loaner || loaner.serviceOrderId !== order.id) {
-      throw new NotFoundException('Заетото устройство не е намерено');
-    }
-    return this.prisma.serviceLoaner.update({
-      where: { id: loanerId },
-      data: { status: 'RETURNED', returnedAt: new Date() },
-      include: { product: true },
-    });
-  }
-
-  // ==================== Public tracking ====================
-
-  async findByPublicToken(token: string) {
-    const order = await this.prisma.serviceOrder.findUnique({
-      where: { publicToken: token },
-      select: {
-        orderNumber: true,
-        status: true,
-        receivedAt: true,
-        promisedAt: true,
-        completedAt: true,
-        deliveredAt: true,
-        estimatedCost: true,
-        isApprovedByCustomer: true,
-        asset: { select: { name: true, brand: true, model: true } },
-        statusHistory: {
-          orderBy: { createdAt: 'desc' },
-          select: {
-            toStatus: true,
-            createdAt: true,
-            note: true,
-          },
-        },
-      },
-    });
-    if (!order) {
-      throw new NotFoundException('Заявката не е намерена');
-    }
-    // Клиентът може да одобри само докато чакаме оферта/одобрение
-    const canApprove =
-      !order.isApprovedByCustomer &&
-      (order.status === 'AWAITING_QUOTE' ||
-        order.status === 'AWAITING_APPROVAL');
-    return { ...order, canApprove };
-  }
-
-  /**
-   * Одобрение на ремонта от клиента през публичната tracking страница.
-   * Токенът е тайната (24 байта) — не изискваме друга автентикация.
-   * При одобрение заявката минава в IN_REPAIR със запис в историята.
-   */
-  async approveByPublicToken(token: string) {
-    const order = await this.prisma.serviceOrder.findUnique({
-      where: { publicToken: token },
-      select: { id: true, status: true, isApprovedByCustomer: true },
-    });
-    if (!order) {
-      throw new NotFoundException('Заявката не е намерена');
-    }
-    if (order.isApprovedByCustomer) {
-      throw new BadRequestException('Ремонтът вече е одобрен');
-    }
-    if (
-      order.status !== 'AWAITING_QUOTE' &&
-      order.status !== 'AWAITING_APPROVAL'
-    ) {
-      throw new BadRequestException('Заявката не очаква одобрение в момента');
-    }
-
-    await this.prisma.$transaction(async (tx) => {
-      await tx.serviceOrder.update({
-        where: { id: order.id },
-        data: {
-          isApprovedByCustomer: true,
-          approvalChannel: 'portal',
-          approvedAt: new Date(),
-          status: 'IN_REPAIR',
-        },
-      });
-      await tx.serviceOrderStatusHistory.create({
-        data: {
-          serviceOrderId: order.id,
-          fromStatus: order.status,
-          toStatus: 'IN_REPAIR',
-          note: 'Одобрено от клиента през публичната страница',
-        },
-      });
-    });
-
-    return { success: true };
+    if (att.fileKey) await this.uploads.deleteFile(att.fileKey);
+    return deleted;
   }
 
   // ==================== Helpers ====================
+
+  /**
+   * До кога е валидна гаранцията на артикула: първо закачената за него,
+   * иначе най-дългата активна гаранция по сериен номер + продукт (както при
+   * завеждане от продажба). Статусът EXPIRED/VOIDED не се брои.
+   */
+  private async resolveWarrantyEndAt(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    assetId: string | null | undefined,
+  ): Promise<Date | null> {
+    if (!assetId) return null;
+    const asset = await tx.serviceAsset.findFirst({
+      where: { id: assetId, companyId },
+      include: { warranty: { select: { status: true, endDate: true } } },
+    });
+    if (!asset) return null;
+    if (asset.warranty?.status === 'ACTIVE') return asset.warranty.endDate;
+    if (!asset.serialNumber || !asset.productId) return null;
+    const bySerial = await tx.issuedWarranty.findFirst({
+      where: {
+        companyId,
+        serialNumber: asset.serialNumber,
+        productId: asset.productId,
+        status: 'ACTIVE',
+      },
+      orderBy: { endDate: 'desc' },
+      select: { endDate: true },
+    });
+    return bySerial?.endDate ?? null;
+  }
 
   /**
    * Техникът трябва да е потребител на същата фирма (служител с или без
@@ -740,39 +467,5 @@ export class ServiceOrdersService {
     if (!membership) {
       throw new NotFoundException(ErrorMessages.employees.notFound);
     }
-  }
-
-  private async recomputeTotals(
-    serviceOrderId: string,
-    tx: Prisma.TransactionClient,
-  ) {
-    const [parts, labor, current] = await Promise.all([
-      tx.serviceOrderPart.findMany({
-        where: { serviceOrderId },
-        select: { totalPrice: true },
-      }),
-      tx.serviceOrderLabor.findMany({
-        where: { serviceOrderId },
-        select: { totalPrice: true },
-      }),
-      tx.serviceOrder.findUnique({
-        where: { id: serviceOrderId },
-        select: { discountAmount: true },
-      }),
-    ]);
-
-    const partsTotal = round2(
-      parts.reduce((acc, p) => acc + Number(p.totalPrice), 0),
-    );
-    const laborTotal = round2(
-      labor.reduce((acc, l) => acc + Number(l.totalPrice), 0),
-    );
-    const discount = current ? Number(current.discountAmount) : 0;
-    const totalAmount = round2(Math.max(0, partsTotal + laborTotal - discount));
-
-    await tx.serviceOrder.update({
-      where: { id: serviceOrderId },
-      data: { partsTotal, laborTotal, totalAmount },
-    });
   }
 }

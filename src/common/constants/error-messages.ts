@@ -392,7 +392,6 @@ export const ErrorMessages = {
     partNotFound: 'Резервната част не е намерена',
     laborNotFound: 'Записът за труд не е намерен',
     attachmentNotFound: 'Прикаченият файл не е намерен',
-    loanerNotFound: 'Заетото устройство не е намерено',
     invalidStatusTransition: (from: string, to: string) =>
       `Невалиден преход на статус от "${from}" към "${to}"`,
     cannotEditClosed: 'Не може да редактирате приключена заявка',

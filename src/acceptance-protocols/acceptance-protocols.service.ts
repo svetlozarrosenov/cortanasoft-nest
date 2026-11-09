@@ -92,7 +92,9 @@ export class AcceptanceProtocolsService {
       return tx.acceptanceProtocol.create({
         data: {
           documentNumber,
-          documentDate: dto.documentDate ? new Date(dto.documentDate) : new Date(),
+          documentDate: dto.documentDate
+            ? new Date(dto.documentDate)
+            : new Date(),
           status: 'ISSUED',
           customerId: dto.customerId || null,
           recipientName: dto.recipientName,
@@ -107,6 +109,7 @@ export class AcceptanceProtocolsService {
           orderId: dto.orderId || null,
           invoiceId: dto.invoiceId || null,
           serviceOrderId: dto.serviceOrderId || null,
+          serviceKind: dto.serviceKind || null,
           notes: dto.notes || null,
           companyId,
           createdById: userId,
@@ -196,7 +199,9 @@ export class AcceptanceProtocolsService {
       include: this.include,
     });
     if (!doc) {
-      throw new NotFoundException('Приемо-предавателният протокол не е намерен');
+      throw new NotFoundException(
+        'Приемо-предавателният протокол не е намерен',
+      );
     }
     return doc;
   }
@@ -228,16 +233,37 @@ export class AcceptanceProtocolsService {
         ...(dto.documentDate !== undefined && {
           documentDate: new Date(dto.documentDate),
         }),
-        ...(dto.customerId !== undefined && { customerId: dto.customerId || null }),
-        ...(dto.recipientName !== undefined && { recipientName: dto.recipientName }),
-        ...(dto.recipientEik !== undefined && { recipientEik: dto.recipientEik || null }),
-        ...(dto.recipientAddress !== undefined && { recipientAddress: dto.recipientAddress || null }),
-        ...(dto.recipientCity !== undefined && { recipientCity: dto.recipientCity || null }),
-        ...(dto.senderRepresentative !== undefined && { senderRepresentative: dto.senderRepresentative || null }),
-        ...(dto.receiverRepresentative !== undefined && { receiverRepresentative: dto.receiverRepresentative || null }),
+        ...(dto.customerId !== undefined && {
+          customerId: dto.customerId || null,
+        }),
+        ...(dto.recipientName !== undefined && {
+          recipientName: dto.recipientName,
+        }),
+        ...(dto.recipientEik !== undefined && {
+          recipientEik: dto.recipientEik || null,
+        }),
+        ...(dto.recipientAddress !== undefined && {
+          recipientAddress: dto.recipientAddress || null,
+        }),
+        ...(dto.recipientCity !== undefined && {
+          recipientCity: dto.recipientCity || null,
+        }),
+        ...(dto.senderRepresentative !== undefined && {
+          senderRepresentative: dto.senderRepresentative || null,
+        }),
+        ...(dto.receiverRepresentative !== undefined && {
+          receiverRepresentative: dto.receiverRepresentative || null,
+        }),
         ...(dto.orderId !== undefined && { orderId: dto.orderId || null }),
-        ...(dto.invoiceId !== undefined && { invoiceId: dto.invoiceId || null }),
-        ...(dto.serviceOrderId !== undefined && { serviceOrderId: dto.serviceOrderId || null }),
+        ...(dto.invoiceId !== undefined && {
+          invoiceId: dto.invoiceId || null,
+        }),
+        ...(dto.serviceOrderId !== undefined && {
+          serviceOrderId: dto.serviceOrderId || null,
+        }),
+        ...(dto.serviceKind !== undefined && {
+          serviceKind: dto.serviceKind || null,
+        }),
         ...(dto.notes !== undefined && { notes: dto.notes || null }),
         ...(totals && {
           subtotal: totals.subtotal,

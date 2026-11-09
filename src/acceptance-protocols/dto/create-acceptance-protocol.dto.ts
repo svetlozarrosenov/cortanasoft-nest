@@ -1,4 +1,5 @@
 import {
+  IsIn,
   IsArray,
   IsNumber,
   IsOptional,
@@ -75,6 +76,11 @@ export class CreateAcceptanceProtocolDto {
   @IsOptional()
   @IsString()
   serviceOrderId?: string;
+
+  // Само при сервизна заявка: приемен или предавателен протокол
+  @IsOptional()
+  @IsIn(['intake', 'handover'])
+  serviceKind?: 'intake' | 'handover';
 
   @IsOptional()
   @IsString()

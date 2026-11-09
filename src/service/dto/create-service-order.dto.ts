@@ -1,34 +1,14 @@
-import {
-  IsString,
-  IsOptional,
-  IsEnum,
-  IsBoolean,
-  IsDateString,
-  IsNumber,
-  Min,
-} from 'class-validator';
-import {
-  ServiceOrderType,
-  ServiceOrderPriority,
-  ServiceLocation,
-} from '@prisma/client';
+import { IsString, IsOptional, IsEnum, IsDateString } from 'class-validator';
+import { ServiceOrderPriority } from '@prisma/client';
 
 export class CreateServiceOrderDto {
   @IsString()
   @IsOptional()
   orderNumber?: string;
 
-  @IsEnum(ServiceOrderType)
-  @IsOptional()
-  type?: ServiceOrderType;
-
   @IsEnum(ServiceOrderPriority)
   @IsOptional()
   priority?: ServiceOrderPriority;
-
-  @IsEnum(ServiceLocation)
-  @IsOptional()
-  serviceLocation?: ServiceLocation;
 
   @IsDateString()
   @IsOptional()
@@ -67,17 +47,4 @@ export class CreateServiceOrderDto {
   @IsString()
   @IsOptional()
   technicianId?: string;
-
-  @IsBoolean()
-  @IsOptional()
-  generatePublicToken?: boolean;
-
-  @IsNumber()
-  @Min(0)
-  @IsOptional()
-  estimatedCost?: number;
-
-  @IsBoolean()
-  @IsOptional()
-  notifyCustomer?: boolean;
 }

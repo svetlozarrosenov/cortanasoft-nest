@@ -33,7 +33,11 @@ export class ServiceStockService {
         }
 
         const serial = await tx.inventorySerial.findFirst({
-          where: { id: part.inventorySerialId, companyId, productId: part.productId },
+          where: {
+            id: part.inventorySerialId,
+            companyId,
+            productId: part.productId,
+          },
         });
 
         if (!serial) {

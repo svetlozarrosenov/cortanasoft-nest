@@ -1,10 +1,14 @@
-import { IsOptional, IsString, IsInt, IsEnum, Min, Max, IsIn } from 'class-validator';
-import { Type } from 'class-transformer';
 import {
-  ServiceOrderStatus,
-  ServiceOrderType,
-  ServiceOrderPriority,
-} from '@prisma/client';
+  IsOptional,
+  IsString,
+  IsInt,
+  IsEnum,
+  Min,
+  Max,
+  IsIn,
+} from 'class-validator';
+import { Type } from 'class-transformer';
+import { ServiceOrderStatus, ServiceOrderPriority } from '@prisma/client';
 
 export class QueryServiceOrdersDto {
   @IsString()
@@ -14,10 +18,6 @@ export class QueryServiceOrdersDto {
   @IsEnum(ServiceOrderStatus)
   @IsOptional()
   status?: ServiceOrderStatus;
-
-  @IsEnum(ServiceOrderType)
-  @IsOptional()
-  type?: ServiceOrderType;
 
   @IsEnum(ServiceOrderPriority)
   @IsOptional()
@@ -58,7 +58,7 @@ export class QueryServiceOrdersDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['createdAt', 'receivedAt', 'orderNumber', 'status', 'priority', 'totalAmount'])
+  @IsIn(['createdAt', 'receivedAt', 'orderNumber', 'status', 'priority'])
   sortBy?: string;
 
   @IsString()

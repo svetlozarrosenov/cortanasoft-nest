@@ -67,12 +67,6 @@ export class CompanyServiceAssetsController {
     return this.assets.createFromSale(companyId, dto);
   }
 
-  @Get(':id')
-  @RequireView('service', 'assets')
-  findOne(@Param('companyId') companyId: string, @Param('id') id: string) {
-    return this.assets.findOne(companyId, id);
-  }
-
   @Patch(':id')
   @RequireEdit('service', 'assets')
   update(

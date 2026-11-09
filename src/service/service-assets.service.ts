@@ -114,7 +114,7 @@ export class ServiceAssetsService {
       },
     });
     if (!asset) {
-      throw new NotFoundException('Активът не е намерен');
+      throw new NotFoundException('Артикулът не е намерен');
     }
     return asset;
   }
