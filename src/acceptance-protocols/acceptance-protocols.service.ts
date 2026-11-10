@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertOwned, assertAllOwned } from '../common/utils/assert-owned';
 import {
   CreateAcceptanceProtocolDto,
   CreateAcceptanceProtocolItemDto,
@@ -77,6 +78,29 @@ export class AcceptanceProtocolsService {
     return { subtotal, vatAmount, total: subtotal + vatAmount, itemsData };
   }
 
+  // Клиент, продажба, фактура, сервизна заявка и продуктите по редовете
+  // идват от заявката — трябва да са на същата фирма.
+  private async assertLinks(
+    companyId: string,
+    dto: UpdateAcceptanceProtocolDto,
+  ) {
+    await assertOwned(this.prisma, 'customer', dto.customerId, companyId);
+    await assertOwned(this.prisma, 'order', dto.orderId, companyId);
+    await assertOwned(this.prisma, 'invoice', dto.invoiceId, companyId);
+    await assertOwned(
+      this.prisma,
+      'serviceOrder',
+      dto.serviceOrderId,
+      companyId,
+    );
+    await assertAllOwned(
+      this.prisma,
+      'product',
+      (dto.items || []).map((i) => i.productId),
+      companyId,
+    );
+  }
+
   async create(
     companyId: string,
     userId: string,
@@ -86,6 +110,7 @@ export class AcceptanceProtocolsService {
       dto.items || [],
     );
     const hasItems = itemsData.length > 0;
+    await this.assertLinks(companyId, dto);
 
     return this.prisma.$transaction(async (tx) => {
       const documentNumber = await this.generateDocumentNumber(companyId, tx);
@@ -217,6 +242,7 @@ export class AcceptanceProtocolsService {
         'Анулирани протоколи не могат да бъдат редактирани',
       );
     }
+    await this.assertLinks(companyId, dto);
 
     const totals =
       dto.items !== undefined ? this.buildItemsAndTotals(dto.items) : undefined;

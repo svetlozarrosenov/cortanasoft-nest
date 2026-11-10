@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ErrorMessages } from '../common/constants/error-messages';
 import { ServiceNumberingService } from './service-numbering.service';
+import { assertOwned } from '../common/utils/assert-owned';
 import {
   CreateServiceAssetDto,
   UpdateServiceAssetDto,
@@ -31,6 +32,8 @@ export class ServiceAssetsService {
       if (!customer) {
         throw new NotFoundException(ErrorMessages.customers.notFound);
       }
+      await assertOwned(tx, 'product', dto.productId, companyId);
+      await assertOwned(tx, 'issuedWarranty', dto.warrantyId, companyId);
 
       const assetNumber =
         dto.assetNumber || (await this.numbering.next('asset', companyId, tx));
@@ -121,6 +124,8 @@ export class ServiceAssetsService {
 
   async update(companyId: string, id: string, dto: UpdateServiceAssetDto) {
     await this.findOne(companyId, id);
+    await assertOwned(this.prisma, 'product', dto.productId, companyId);
+    await assertOwned(this.prisma, 'issuedWarranty', dto.warrantyId, companyId);
     return this.prisma.serviceAsset.update({
       where: { id },
       data: {

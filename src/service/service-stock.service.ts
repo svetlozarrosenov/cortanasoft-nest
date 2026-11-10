@@ -64,8 +64,12 @@ export class ServiceStockService {
       const quantity = Number(part.quantity);
 
       if (part.inventoryBatchId) {
-        const batch = await tx.inventoryBatch.findUnique({
-          where: { id: part.inventoryBatchId },
+        const batch = await tx.inventoryBatch.findFirst({
+          where: {
+            id: part.inventoryBatchId,
+            companyId,
+            productId: part.productId,
+          },
         });
         if (!batch) {
           throw new BadRequestException(

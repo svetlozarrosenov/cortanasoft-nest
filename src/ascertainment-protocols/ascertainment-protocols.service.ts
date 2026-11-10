@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertOwned } from '../common/utils/assert-owned';
 import {
   CreateAscertainmentProtocolDto,
   QueryAscertainmentProtocolsDto,
@@ -39,11 +40,26 @@ export class AscertainmentProtocolsService {
     return `${prefix}${next.toString().padStart(5, '0')}`;
   }
 
+  // Клиентът и сервизната заявка идват от заявката — трябва да са на фирмата.
+  private async assertLinks(
+    companyId: string,
+    dto: UpdateAscertainmentProtocolDto,
+  ) {
+    await assertOwned(this.prisma, 'customer', dto.customerId, companyId);
+    await assertOwned(
+      this.prisma,
+      'serviceOrder',
+      dto.serviceOrderId,
+      companyId,
+    );
+  }
+
   async create(
     companyId: string,
     userId: string,
     dto: CreateAscertainmentProtocolDto,
   ) {
+    await this.assertLinks(companyId, dto);
     return this.prisma.$transaction(async (tx) => {
       const documentNumber = await this.generateDocumentNumber(companyId, tx);
       return tx.ascertainmentProtocol.create({
@@ -156,6 +172,7 @@ export class AscertainmentProtocolsService {
         'Анулирани протоколи не могат да бъдат редактирани',
       );
     }
+    await this.assertLinks(companyId, dto);
 
     return this.prisma.ascertainmentProtocol.update({
       where: { id },

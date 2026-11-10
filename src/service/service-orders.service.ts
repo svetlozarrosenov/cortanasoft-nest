@@ -10,6 +10,7 @@ import { ServiceNumberingService } from './service-numbering.service';
 import { ServiceStockService } from './service-stock.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { decodeUploadedFileName } from '../common/utils/upload-filename';
+import { assertOwned } from '../common/utils/assert-owned';
 import {
   CreateServiceOrderDto,
   UpdateServiceOrderDto,
@@ -324,6 +325,27 @@ export class ServiceOrdersService {
     });
     if (!product) {
       throw new NotFoundException(ErrorMessages.products.notFound);
+    }
+    // Партидата и серийният номер трябва да са на фирмата и на този продукт
+    await assertOwned(
+      this.prisma,
+      'inventoryBatch',
+      dto.inventoryBatchId,
+      companyId,
+      { productId: dto.productId },
+    );
+    if (dto.inventorySerialId) {
+      const serial = await this.prisma.inventorySerial.findFirst({
+        where: {
+          id: dto.inventorySerialId,
+          companyId,
+          productId: dto.productId,
+        },
+        select: { id: true },
+      });
+      if (!serial) {
+        throw new NotFoundException('Серийният номер не е намерен');
+      }
     }
 
     await this.prisma.serviceOrderPart.create({

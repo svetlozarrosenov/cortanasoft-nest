@@ -24,6 +24,7 @@ import { DocumentAIService, ParsedInvoiceData } from './document-ai.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { fetchPublicUrl, isCompanyFileKey } from '../common/utils/safe-url';
 
 // NB: глобалният ValidationPipe е с whitelist:true — полета БЕЗ декоратор
 // се режат от тялото. Всяко DTO поле тук трябва да носи валидатор.
@@ -435,12 +436,16 @@ export class DocumentAIController {
     // fileUrl пази R2 ключ; стари записи може да носят пълен URL
     let content: Buffer;
     if (/^https?:\/\//i.test(statement.fileUrl)) {
-      const res = await fetch(statement.fileUrl);
-      if (!res.ok) {
+      // Само публични адреси, без пренасочвания (виж safe-url.ts)
+      const fetched = await fetchPublicUrl(statement.fileUrl);
+      if (!fetched) {
         throw new BadRequestException('Файлът на извлечението не е достъпен');
       }
-      content = Buffer.from(await res.arrayBuffer());
+      content = fetched;
     } else {
+      if (!isCompanyFileKey(statement.fileUrl, companyId)) {
+        throw new BadRequestException('Файлът на извлечението не е достъпен');
+      }
       const { stream } = await this.uploads.getFile(statement.fileUrl);
       const chunks: Buffer[] = [];
       for await (const chunk of stream) {

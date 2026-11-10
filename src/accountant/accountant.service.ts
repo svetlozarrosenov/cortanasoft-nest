@@ -17,6 +17,11 @@ import {
   SendToAccountantDto,
 } from './dto';
 import { decodeUploadedFileName } from '../common/utils/upload-filename';
+import {
+  assertCompanyFileKey,
+  fetchPublicUrl,
+  isCompanyFileKey,
+} from '../common/utils/safe-url';
 
 // Етикети за описа (Excel е на български за счетоводителя)
 const PAYMENT_METHOD_LABELS: Record<string, string> = {
@@ -338,6 +343,8 @@ export class AccountantService {
   }
 
   async createStatement(companyId: string, dto: CreateBankStatementDto) {
+    // Само качен файл на тази фирма — никакви външни адреси или чужди ключове
+    assertCompanyFileKey(dto.fileUrl, companyId);
     return this.prisma.bankStatement.create({
       data: {
         companyId,
@@ -628,13 +635,15 @@ export class AccountantService {
    * може да носят пълен URL — тогава теглим по HTTP.
    */
   private async statementContent(
+    companyId: string,
     fileUrl: string,
   ): Promise<{ content: Buffer; contentType?: string } | null> {
     if (/^https?:\/\//i.test(fileUrl)) {
-      const res = await fetch(fileUrl);
-      if (!res.ok) return null;
-      return { content: Buffer.from(await res.arrayBuffer()) };
+      // Само публични адреси, без пренасочвания (виж safe-url.ts)
+      const content = await fetchPublicUrl(fileUrl);
+      return content ? { content } : null;
     }
+    if (!isCompanyFileKey(fileUrl, companyId)) return null;
     const { stream, contentType } = await this.uploads.getFile(fileUrl);
     const chunks: Buffer[] = [];
     for await (const chunk of stream) {
@@ -701,7 +710,7 @@ export class AccountantService {
     let skippedStatements = 0;
     for (const s of statements) {
       try {
-        const file = await this.statementContent(s.fileUrl);
+        const file = await this.statementContent(companyId, s.fileUrl);
         if (!file) continue;
         if (
           attachedBytes + file.content.length >

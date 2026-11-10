@@ -5,6 +5,10 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  assertOwned,
+  assertCompanyMember,
+} from '../common/utils/assert-owned';
+import {
   CreateTicketDto,
   UpdateTicketDto,
   QueryTicketDto,
@@ -57,6 +61,8 @@ export class TicketsService {
   // ==================== CRUD Operations ====================
 
   async create(companyId: string, userId: string, dto: CreateTicketDto) {
+    await this.assertTicketLinks(companyId, dto);
+
     const ticketNumber = await this.generateTicketNumber(companyId);
 
     // plannedStartDate/plannedEndDate са required — DTO го валидира. plannedEndDate може
@@ -102,7 +108,7 @@ export class TicketsService {
     });
 
     await this.ensureSprintMembership(companyId, ticket.sprintId, ticket.assigneeId);
-    if (ticket.sprintId) await this.recalcSprintEnd(ticket.sprintId);
+    if (ticket.sprintId) await this.recalcSprintEnd(companyId, ticket.sprintId);
 
     return ticket;
   }
@@ -246,6 +252,11 @@ export class TicketsService {
       throw new NotFoundException(ErrorMessages.tickets.notFound);
     }
 
+    if (dto.parentId && dto.parentId === id) {
+      throw new BadRequestException('Задачата не може да е подзадача на себе си');
+    }
+    await this.assertTicketLinks(companyId, dto);
+
     const updateData: any = { ...dto };
 
     // Handle sprintId
@@ -322,9 +333,9 @@ export class TicketsService {
 
     await this.ensureSprintMembership(companyId, updated.sprintId, updated.assigneeId);
     // Recalc sprint's endDate if this ticket is in a sprint (or was moved to/from one)
-    if (updated.sprintId) await this.recalcSprintEnd(updated.sprintId);
+    if (updated.sprintId) await this.recalcSprintEnd(companyId, updated.sprintId);
     if (ticket.sprintId && ticket.sprintId !== updated.sprintId) {
-      await this.recalcSprintEnd(ticket.sprintId);
+      await this.recalcSprintEnd(companyId, ticket.sprintId);
     }
 
     return updated;
@@ -960,21 +971,32 @@ export class TicketsService {
 
   // Recompute parent sprint's endDate = max(non-CANCELLED ticket.plannedEndDate).
   // Called after any ticket mutation that could affect sprint boundaries.
-  private async recalcSprintEnd(sprintId: string) {
+  private async recalcSprintEnd(companyId: string, sprintId: string) {
     const result = await this.prisma.ticket.aggregate({
-      where: { sprintId, status: { not: 'CANCELLED' } },
+      where: { sprintId, companyId, status: { not: 'CANCELLED' } },
       _max: { plannedEndDate: true },
     });
-    const sprint = await this.prisma.sprint.findUnique({
-      where: { id: sprintId },
+    const sprint = await this.prisma.sprint.findFirst({
+      where: { id: sprintId, companyId },
       select: { startDate: true },
     });
     if (!sprint) return;
     const endDate = result._max.plannedEndDate ?? sprint.startDate ?? null;
-    await this.prisma.sprint.update({
-      where: { id: sprintId },
+    await this.prisma.sprint.updateMany({
+      where: { id: sprintId, companyId },
       data: { endDate },
     });
+  }
+
+  // Спринтът, родителската задача и изпълнителят идват от заявката —
+  // трябва да са на същата фирма.
+  private async assertTicketLinks(
+    companyId: string,
+    dto: { sprintId?: string; parentId?: string; assigneeId?: string },
+  ) {
+    await assertOwned(this.prisma, 'sprint', dto.sprintId, companyId);
+    await assertOwned(this.prisma, 'ticket', dto.parentId, companyId);
+    await assertCompanyMember(this.prisma, dto.assigneeId, companyId);
   }
 
   private async recalculateActualHours(ticketId: string) {

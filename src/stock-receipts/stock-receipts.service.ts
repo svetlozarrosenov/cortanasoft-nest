@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertOwned, assertAllOwned } from '../common/utils/assert-owned';
 import {
   CreateStockReceiptDto,
   CreateStockReceiptItemDto,
@@ -69,11 +70,31 @@ export class StockReceiptsService {
     return { subtotal, vatAmount, total: subtotal + vatAmount, itemsData };
   }
 
+  // Клиент, фактура, сервизна заявка и продуктите по редовете идват от
+  // заявката — трябва да са на същата фирма.
+  private async assertLinks(companyId: string, dto: UpdateStockReceiptDto) {
+    await assertOwned(this.prisma, 'customer', dto.customerId, companyId);
+    await assertOwned(this.prisma, 'invoice', dto.invoiceId, companyId);
+    await assertOwned(
+      this.prisma,
+      'serviceOrder',
+      dto.serviceOrderId,
+      companyId,
+    );
+    await assertAllOwned(
+      this.prisma,
+      'product',
+      (dto.items || []).map((i) => i.productId),
+      companyId,
+    );
+  }
+
   async create(companyId: string, userId: string, dto: CreateStockReceiptDto) {
     const { subtotal, vatAmount, total, itemsData } = this.buildItemsAndTotals(
       dto.items || [],
     );
     const hasItems = itemsData.length > 0;
+    await this.assertLinks(companyId, dto);
 
     return this.prisma.$transaction(async (tx) => {
       const documentNumber = await this.generateDocumentNumber(companyId, tx);
@@ -184,6 +205,7 @@ export class StockReceiptsService {
         'Анулирани разписки не могат да бъдат редактирани',
       );
     }
+    await this.assertLinks(companyId, dto);
 
     const totals =
       dto.items !== undefined ? this.buildItemsAndTotals(dto.items) : undefined;

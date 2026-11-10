@@ -4,6 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertOwned } from '../common/utils/assert-owned';
 import {
   CreateProductionOrderDto,
   UpdateProductionOrderDto,
@@ -191,6 +192,12 @@ export class ProductionService {
         ErrorMessages.production.canOnlyUpdateDraftOrPlanned,
       );
     }
+
+    // Същите проверки като при създаване
+    await assertOwned(this.prisma, 'product', dto.productId, companyId);
+    await assertOwned(this.prisma, 'billOfMaterial', dto.bomId, companyId);
+    await assertOwned(this.prisma, 'location', dto.locationId, companyId);
+    await assertOwned(this.prisma, 'customer', dto.customerId, companyId);
 
     return this.prisma.productionOrder.update({
       where: { id },
@@ -381,6 +388,7 @@ export class ProductionService {
     if (!product) {
       throw new NotFoundException(ErrorMessages.production.productNotFound);
     }
+    await assertOwned(this.prisma, 'location', dto.locationId, companyId);
 
     return this.prisma.$transaction(async (tx) => {
       const issuance = await this.deductAndLog(tx, {
