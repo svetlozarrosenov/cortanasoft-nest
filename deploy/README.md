@@ -24,7 +24,7 @@
 2. **GitHub Secrets** (Settings → Secrets → Actions): `SERVER_IP`, `SERVER_USER` (root),
    `SSH_PRIVATE_KEY`, `PROJECT_PATH` (`/home/cortanasoft-nest`).
 3. **Тайните** за `.env` (виж `.env.example` за пълния списък и значението) — в мениджъра на пароли.
-   Най-важни: `DATABASE_URL` (от DO панела), `JWT_SECRET` (същият като във frontend), `ENCRYPTION_KEY`
+   Най-важни: `DATABASE_URL` (от DO панела), `JWT_SECRET` (само тук — frontend-ът не го държи), `ENCRYPTION_KEY`
    (веднъж зададен НЕ се сменя — шифрова тайни в базата), R2, SMTP, Firebase, Anthropic.
 4. **Достъп до базата**: в DO Managed Postgres → Trusted sources добави IP-то на новия сървър,
    иначе връзката се отхвърля.
