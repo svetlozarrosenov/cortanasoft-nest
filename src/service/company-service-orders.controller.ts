@@ -22,7 +22,6 @@ import {
   ServiceAttachmentKind,
 } from './service-orders.service';
 import { ServiceProtocolsService } from './service-protocols.service';
-import { WarrantiesService } from '../warranties/warranties.service';
 import {
   CreateAcceptanceProtocolDto,
   UpdateAcceptanceProtocolDto,
@@ -38,16 +37,6 @@ import {
   ChangeServiceOrderStatusDto,
   AddServicePartDto,
 } from './dto';
-import { IsOptional, IsString } from 'class-validator';
-
-class IssueServiceWarrantyDto {
-  @IsString()
-  warrantyTemplateId: string;
-
-  @IsString()
-  @IsOptional()
-  notes?: string;
-}
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import {
@@ -64,7 +53,6 @@ export class CompanyServiceOrdersController {
   constructor(
     private readonly orders: ServiceOrdersService,
     private readonly protocols: ServiceProtocolsService,
-    private readonly warranties: WarrantiesService,
   ) {}
 
   @Post()
@@ -310,40 +298,5 @@ export class CompanyServiceOrdersController {
       'ascertainment',
       protocolId,
     );
-  }
-
-  // Гаранционните шаблони за модала „Издай гаранция" — през service права,
-  // за да не изискваме warranties.templates view от сервизния екип.
-  @Get(':id/warranty-templates')
-  @RequireView('service', 'orders')
-  warrantyTemplates(@Param('companyId') companyId: string) {
-    return this.warranties.findAllTemplates(companyId, {
-      isActive: true,
-      limit: 100,
-    } as any);
-  }
-
-  // Ремонтна гаранция през модул Гаранции (същите шаблони и номерация)
-  @Post(':id/issue-warranty')
-  @RequireEdit('service', 'orders')
-  issueWarranty(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-    @Body() dto: IssueServiceWarrantyDto,
-  ) {
-    return this.warranties.issueForServiceOrder(companyId, {
-      serviceOrderId: id,
-      warrantyTemplateId: dto.warrantyTemplateId,
-      notes: dto.notes,
-    });
-  }
-
-  @Get(':id/warranties')
-  @RequireView('service', 'orders')
-  listWarranties(
-    @Param('companyId') companyId: string,
-    @Param('id') id: string,
-  ) {
-    return this.warranties.listForServiceOrder(companyId, id);
   }
 }

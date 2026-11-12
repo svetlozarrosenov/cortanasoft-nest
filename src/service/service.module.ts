@@ -9,7 +9,6 @@ import { ServiceProtocolsService } from './service-protocols.service';
 import { ServiceStockService } from './service-stock.service';
 import { CompanyServiceOrdersController } from './company-service-orders.controller';
 import { CompanyServiceAssetsController } from './company-service-assets.controller';
-import { WarrantiesModule } from '../warranties/warranties.module';
 import { UploadsModule } from '../uploads/uploads.module';
 
 @Module({
@@ -17,7 +16,6 @@ import { UploadsModule } from '../uploads/uploads.module';
     PrismaModule,
     AcceptanceProtocolsModule,
     AscertainmentProtocolsModule,
-    WarrantiesModule,
     UploadsModule,
   ],
   controllers: [CompanyServiceOrdersController, CompanyServiceAssetsController],
