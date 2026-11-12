@@ -557,6 +557,14 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
           },
         ],
       },
+      {
+        // Изписване към обект: стока излиза от склада към обект без продажба.
+        // Без правото няма меню, няма секция „Материали" в обекта и backend-ът
+        // отказва. Дава се ръчно на ролите — не е част от стандартния склад.
+        key: 'siteIssues',
+        labelKey: 'modules.warehouse.siteIssues.title',
+        actions: ['view', 'create', 'edit', 'delete'],
+      },
     ],
   },
   {

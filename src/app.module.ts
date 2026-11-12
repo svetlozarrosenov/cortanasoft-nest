@@ -56,6 +56,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { CustomWebsiteModule } from './custom-website/custom-website.module';
 import { StockTransfersModule } from './stock-transfers/stock-transfers.module';
+import { SiteIssuesModule } from './site-issues/site-issues.module';
 import { MailModule } from './mail/mail.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { OffersModule } from './offers/offers.module';
@@ -149,6 +150,7 @@ import { HealthModule } from './health/health.module';
     WebhooksModule,
     CustomWebsiteModule,
     StockTransfersModule,
+    SiteIssuesModule,
     MailModule,
     ShippingModule,
     OffersModule,

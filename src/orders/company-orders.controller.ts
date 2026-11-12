@@ -45,6 +45,15 @@ const canDirectDelivery = (user: any) =>
     'view',
   );
 
+// Редовете от „Изписване към обект" са зад warehouse.siteIssues
+const canSiteIssues = (user: any) =>
+  checkPermission(
+    user?.currentRole?.permissions,
+    'warehouse',
+    'siteIssues',
+    'view',
+  );
+
 // Дропшип заявките (доставчик, покупни цени) в отговора на поръчката са само
 // за роли с erp.directDelivery — останалите получават поръчката без тях.
 function stripDirectDeliveries<T>(user: any, result: T): T {
@@ -87,6 +96,11 @@ export class CompanyOrdersController {
         'Нямате право да създавате редове с директна доставка',
       );
     }
+    if (dto.items?.some((it) => it.siteIssueItemId) && !canSiteIssues(user)) {
+      throw new ForbiddenException(
+        'Нямате право да добавяте материали от изписване към обект',
+      );
+    }
     return this.ordersService
       .create(companyId, user.id, dto)
       .then((o) => stripDirectDeliveries(user, o));
@@ -97,7 +111,7 @@ export class CompanyOrdersController {
   findAll(
     @Param('companyId') companyId: string,
     @Query() query: QueryOrdersDto,
-    @CurrentUser() user: any
+    @CurrentUser() user: any,
   ) {
     return this.ordersService
       .findAll(companyId, query)
@@ -191,7 +205,8 @@ export class CompanyOrdersController {
     // Без правото могат да се запазят само вече съществуващи директни редове
     return this.ordersService
       .update(companyId, id, dto, {
-      canDirectDelivery: canDirectDelivery(user),
+        canDirectDelivery: canDirectDelivery(user),
+        canSiteIssues: canSiteIssues(user),
       })
       .then((o) => stripDirectDeliveries(user, o));
   }

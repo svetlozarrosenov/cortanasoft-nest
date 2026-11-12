@@ -163,10 +163,10 @@ model Company {
 
   // Номер на първата фактура на компанията (Администрация > Компании). Ползва се
   // само докато няма издадени фактури — за клиент, който продължава номерация.
-  invoiceDefaultStartNumber Int @default(1)
+  invoiceDefaultStartNumber  Int     @default(1)
   // Същото за проформите — те имат собствена, независима номерация.
-  proformaDefaultStartNumber Int @default(1)
-  serviceProtocolTemplateKey       String?
+  proformaDefaultStartNumber Int     @default(1)
+  serviceProtocolTemplateKey String?
 
   // Контакти
   phone   String? // Телефон
@@ -251,6 +251,7 @@ model Company {
   productionConsumptions       ProductionConsumption[]
   apiKeys                      ApiKey[]
   stockTransfers               StockTransfer[]
+  siteIssues                   SiteIssue[]
   econtConfig                  EcontConfig?
   aiSettings                   AiSettings?
   aiJobs                       AiJob[]
@@ -272,8 +273,8 @@ model Company {
   creditApplications           CreditApplication[]
 
   // Сервиз
-  serviceOrders    ServiceOrder[]
-  serviceAssets    ServiceAsset[]
+  serviceOrders ServiceOrder[]
+  serviceAssets ServiceAsset[]
 
   // Електронни трудови досиета
   employmentContracts       EmploymentContract[]
@@ -550,9 +551,9 @@ model User {
   loginEnabled Boolean @default(true)
 
   // Двуфакторна автентикация — тайният ключ е шифрован (enc:v1:, secret-crypto.util)
-  twoFactorMode      TwoFactorMode @default(NOT_REQUIRED)
-  twoFactorSecret    String?
-  twoFactorEnabledAt DateTime?
+  twoFactorMode       TwoFactorMode        @default(NOT_REQUIRED)
+  twoFactorSecret     String?
+  twoFactorEnabledAt  DateTime?
   trustedDevices      TrustedDevice[]
   twoFactorChallenges TwoFactorChallenge[]
 
@@ -604,10 +605,10 @@ model User {
   pushSubscriptions PushSubscription[]
 
   // Expenses
-  createdExpenses  Expense[] @relation("ExpenseCreator")
-  approvedExpenses Expense[] @relation("ExpenseApprover")
-  advanceExpenses  Expense[] @relation("ExpenseAdvanceUser")
-  employeeAdvances EmployeeAdvance[] @relation("EmployeeAdvanceUser")
+  createdExpenses         Expense[]         @relation("ExpenseCreator")
+  approvedExpenses        Expense[]         @relation("ExpenseApprover")
+  advanceExpenses         Expense[]         @relation("ExpenseAdvanceUser")
+  employeeAdvances        EmployeeAdvance[] @relation("EmployeeAdvanceUser")
   createdEmployeeAdvances EmployeeAdvance[] @relation("EmployeeAdvanceCreator")
 
   // Обекти
@@ -628,6 +629,8 @@ model User {
   shippedStockTransfers     StockTransfer[] @relation("StockTransferShippedBy")
   receivedStockTransfers    StockTransfer[] @relation("StockTransferReceivedBy")
   createdStockTransfers     StockTransfer[] @relation("StockTransferCreator")
+  createdSiteIssues         SiteIssue[]     @relation("SiteIssueCreator")
+  issuedSiteIssues          SiteIssue[]     @relation("SiteIssueIssuer")
 
   // Гаранции
   createdWarrantyTemplates WarrantyTemplate[] @relation("WarrantyTemplateCreator")
@@ -787,15 +790,15 @@ model UserCompany {
 model HrSettings {
   id String @id @default(cuid())
 
-  workDayStart String @default("08:00") // HH:mm
-  workDayEnd   String @default("17:00") // HH:mm
+  workDayStart          String  @default("08:00") // HH:mm
+  workDayEnd            String  @default("17:00") // HH:mm
   // Почивка „от–до" вътре в работния ден; и двете null = без почивка.
   // Дължината (breakMinutes) се извежда — не се пази отделно.
-  breakStart String? @default("12:00") // HH:mm
-  breakEnd   String? @default("13:00") // HH:mm
+  breakStart            String? @default("12:00") // HH:mm
+  breakEnd              String? @default("13:00") // HH:mm
   // Допустим недостиг на отработени часове за месеца, преди човекът да
   // светне в червено в матрицата на присъствията
-  hoursToleranceMinutes Int @default(30)
+  hoursToleranceMinutes Int     @default(30)
 
   // Политика за отсъствия
   leaveMaxBackdateDays Int @default(90) // Колко дни назад HR може да въвежда отсъствие (0 = без ограничение)
@@ -967,15 +970,15 @@ enum WorkShiftStatus {
 model WorkShift {
   id String @id @default(cuid())
 
-  date      DateTime @db.Date
-  startTime String // "18:00"
-  endTime   String // "21:00"
+  date       DateTime @db.Date
+  startTime  String // "18:00"
+  endTime    String // "21:00"
   // Почивка „от–до" вътре в смяната (HH:mm). NULL = почивката от HR
   // настройките. При отчитане присъствието се разделя около нея на два
   // сегмента — точно както ръчната форма в Присъствия. Само за дневни смени.
   breakStart String?
   breakEnd   String?
-  note      String?
+  note       String?
 
   status       WorkShiftStatus @default(PLANNED)
   reportedAt   DateTime?
@@ -983,7 +986,7 @@ model WorkShift {
   // Присъствието, създадено при отчитане (без релация — Attendance не се пипа)
   attendanceId String?
   // Отметки по чеклиста на обекта: { "Кошчета": true, ... }
-  checklist Json?
+  checklist    Json?
 
   // Серия от повтарящи се смени (създадени заедно с „повтаряй всяка седмица")
   seriesId String?
@@ -1151,6 +1154,7 @@ enum GoodsReceiptStatus {
 enum SerialStatus {
   IN_STOCK // На склад
   IN_TRANSIT // В транзит (преместване между складове)
+  ON_SITE // На обект (изписан към обект, още непродаден)
   RESERVED // Резервиран
   SOLD // Продаден
   RETURNED // Върнат
@@ -1205,15 +1209,15 @@ model Product {
   // Цени по подразбиране (без ДДС)
   // Покупна цена към доставчика (ръчна; предпопълва реда в нова доставка).
   // НЕ се презаписва от доставките — транспортът не бива да влиза тук.
-  purchasePrice Decimal? @db.Decimal(12, 4) // 4 знака: доставчици с цени 48.6140 (тикет #18 Инатех)
+  purchasePrice    Decimal?  @db.Decimal(12, 4) // 4 знака: доставчици с цени 48.6140 (тикет #18 Инатех)
   // Последна доставна стойност за единица: цена × курс + дял от разходите по
   // доставката, във валутата на компанията. Обновява се при всяка потвърдена
   // доставка (складова или дропшип). Справочна колона в Продукти; складът си
   // пази стойността на всяка доставка отделно (FIFO).
   lastLandedCost   Decimal?  @db.Decimal(10, 2)
   lastLandedCostAt DateTime?
-  salePrice     Decimal  @db.Decimal(10, 2) // Продажна цена по подразбиране
-  vatRate       Decimal  @default(20) @db.Decimal(5, 2) // ДДС ставка (%)
+  salePrice        Decimal   @db.Decimal(10, 2) // Продажна цена по подразбиране
+  vatRate          Decimal   @default(20) @db.Decimal(5, 2) // ДДС ставка (%)
 
   // Тегло и размери (за доставка)
   weight      Decimal? @db.Decimal(10, 3) // Тегло в кг
@@ -1281,6 +1285,7 @@ model Product {
 
   // Трансфери между складове
   stockTransferItems StockTransferItem[]
+  siteIssueItems     SiteIssueItem[]
 
   // Гаранции
   issuedWarranties IssuedWarranty[]
@@ -1378,6 +1383,7 @@ model Location {
   productionIssuances ProductionMaterialIssuance[] @relation("IssuanceLocation")
   stockTransfersFrom  StockTransfer[]              @relation("StockTransferFrom")
   stockTransfersTo    StockTransfer[]              @relation("StockTransferTo")
+  siteIssues          SiteIssue[]
 
   @@unique([companyId, code])
   @@map("locations")
@@ -1407,23 +1413,23 @@ model StorageZone {
 
 // Приемане на стока (Goods Receipt / Стокова разписка)
 model GoodsReceipt {
-  id            String             @id @default(cuid())
-  receiptNumber String // Номер на документа
-  receiptDate   DateTime           @default(now()) // Дата на поръчката (когато сме поръчали при доставчика)
-  deliveredAt   DateTime? // Дата на реалната доставка — попълва се при EXPECTED → DELIVERED
-  status        GoodsReceiptStatus @default(EXPECTED) // Статус на доставката (физически)
-  paymentStatus PaymentStatus      @default(PENDING) // Статус на плащане (отделен от доставката)
-  totalAmount   Decimal            @default(0) @db.Decimal(12, 2) // Обща сума (редове + разходи), за статуса на плащане
-  paidAmount    Decimal            @default(0) @db.Decimal(12, 2) // Сумиран еквивалент на Payment-ите (derived)
-  notes         String? // Бележки
-  invoiceNumber String? // Номер на фактура от доставчик
-  invoiceDate   DateTime? // Дата на фактура
-  exchangeRate  Decimal            @default(1) @db.Decimal(10, 6) // Курс към валутата на компанията
-  attachmentUrl String? // URL към сканирана фактура (Firebase Storage)
+  id               String             @id @default(cuid())
+  receiptNumber    String // Номер на документа
+  receiptDate      DateTime           @default(now()) // Дата на поръчката (когато сме поръчали при доставчика)
+  deliveredAt      DateTime? // Дата на реалната доставка — попълва се при EXPECTED → DELIVERED
+  status           GoodsReceiptStatus @default(EXPECTED) // Статус на доставката (физически)
+  paymentStatus    PaymentStatus      @default(PENDING) // Статус на плащане (отделен от доставката)
+  totalAmount      Decimal            @default(0) @db.Decimal(12, 2) // Обща сума (редове + разходи), за статуса на плащане
+  paidAmount       Decimal            @default(0) @db.Decimal(12, 2) // Сумиран еквивалент на Payment-ите (derived)
+  notes            String? // Бележки
+  invoiceNumber    String? // Номер на фактура от доставчик
+  invoiceDate      DateTime? // Дата на фактура
+  exchangeRate     Decimal            @default(1) @db.Decimal(10, 6) // Курс към валутата на компанията
+  attachmentUrl    String? // URL към сканирана фактура (Firebase Storage)
   // Доставка от ЕС без ДДС (ВОП, самоначисляване с протокол от счетоводството):
   // фактурата е нетна, ДДС по всички редове е 0 и общата сума = платеното.
   // Не е за внос от трета страна — там ДДС/мито са разход по доставката.
-  reverseChargeVat Boolean @default(false)
+  reverseChargeVat Boolean            @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1445,9 +1451,9 @@ model GoodsReceipt {
   // Директна доставка към клиент (drop-ship): доставката е за конкретна
   // продажба и при DELIVERED не създава партиди/серийни номера — вместо това
   // записва покупната цена в директните редове на поръчката (OrderItem.unitCost).
-  directDelivery Boolean @default(false)
-  orderId        String?
-  order          Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  directDelivery   Boolean   @default(false)
+  orderId          String?
+  order            Order?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
   // Кога заявката е изпратена на доставчика (само при directDelivery).
   // null = още е „заявка" (чака доставчик/цени); стъпка 2 от 3 в UI.
   sentToSupplierAt DateTime?
@@ -1933,6 +1939,7 @@ model Site {
   expenses    Expense[]
   attendances Attendance[]
   workShifts  WorkShift[]
+  siteIssues  SiteIssue[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1985,7 +1992,7 @@ model Order {
   site   Site?   @relation(fields: [siteId], references: [id], onDelete: SetNull)
 
   // Доставка
-  deliveryMethod     String  @default("none") // none, manual, econt_office, econt_address
+  deliveryMethod     String   @default("none") // none, manual, econt_office, econt_address
   shippingAddress    String? // Адрес за доставка
   shippingCity       String? // Град
   shippingPostalCode String? // Пощенски код
@@ -1994,13 +2001,13 @@ model Order {
   econtOfficeCode    String? // Код на офис на Еконт
   econtOfficeName    String? // Име на офис на Еконт
   // Спиди: населено място и офис (id-та от Спиди API)
-  speedySiteId     Int?
-  speedyOfficeId   Int?
-  speedyOfficeName String?
+  speedySiteId       Int?
+  speedyOfficeId     Int?
+  speedyOfficeName   String?
   // Чернова на пратката от реда „Доставка" (тегло/брой пакети) — за да не се
   // въвежда втори път при „Създай пратка"
-  shipmentWeight    Decimal? @db.Decimal(10, 3)
-  shipmentPackCount Int?
+  shipmentWeight     Decimal? @db.Decimal(10, 3)
+  shipmentPackCount  Int?
 
   // Експедиционен лист: попълва се при първото издаване. NULL = още не е
   // издаван. Документът носи номера на поръчката (няма отделна номерация);
@@ -2022,9 +2029,9 @@ model Order {
   advancedAmount Decimal       @default(0) @db.Decimal(12, 2) // Сумарна сума на ADVANCE фактурите, които предстои да бъдат приспаднати във FINAL
 
   // Суми
-  subtotal     Decimal @db.Decimal(12, 2) // Сума без ДДС
-  vatAmount    Decimal @db.Decimal(12, 2) // ДДС
-  shippingCost Decimal @default(0) @db.Decimal(10, 2) // Цена за доставка
+  subtotal        Decimal  @db.Decimal(12, 2) // Сума без ДДС
+  vatAmount       Decimal  @db.Decimal(12, 2) // ДДС
+  shippingCost    Decimal  @default(0) @db.Decimal(10, 2) // Цена за доставка
   // Отстъпка на документа — сума преди ДДС, разпределена пропорционално по
   // редовете при изчисляване на ДДС (данъчната основа е subtotal − discount).
   // discountPercent е зададеният процент, ако отстъпката е въведена като %.
@@ -2124,6 +2131,13 @@ model OrderItem {
   directDelivery Boolean  @default(false)
   unitCost       Decimal? @db.Decimal(12, 4) // Покупна цена (снапшот) — само за директни редове
 
+  // Ред, взет от „Изписване към обект": стоката вече е излязла от склада към
+  // обекта, затова продажбата НЕ я изписва втори път (stockDeducted=false, не
+  // е backorder). unitCost е цената на придобиване от изписването; серийният
+  // номер става SOLD/ON_SITE със статуса на продажбата. Гейт: warehouse.siteIssues.
+  siteIssueItemId String?
+  siteIssueItem   SiteIssueItem? @relation(fields: [siteIssueItemId], references: [id], onDelete: SetNull)
+
   invoiceItems InvoiceItem[]
 
   // Точно от кои партиди (и по колко) е изписан редът. Попълва се при
@@ -2136,6 +2150,7 @@ model OrderItem {
   @@index([productId])
   @@index([inventoryBatchId])
   @@index([inventorySerialId])
+  @@index([siteIssueItemId])
   @@map("order_items")
 }
 
@@ -2451,6 +2466,8 @@ model InventoryBatch {
   orderItems             OrderItem[]
   orderItemAllocations   OrderItemBatchAllocation[]
   stockTransferItems     StockTransferItem[]
+  siteIssueItems         SiteIssueItem[]
+  siteIssueAllocations   SiteIssueAllocation[]
   serviceOrderParts      ServiceOrderPart[]
   productionConsumptions ProductionConsumption[]
 
@@ -2490,6 +2507,7 @@ model InventorySerial {
 
   orderItems           OrderItem[]
   stockTransferSerials StockTransferSerial[]
+  siteIssueItems       SiteIssueItem[]
   serviceOrderParts    ServiceOrderPart[]
 
   @@unique([companyId, productId, serialNumber])
@@ -3423,7 +3441,7 @@ model Expense {
   // Редовете на документа (една фактура = един разход с N реда, всеки със
   // своя категория и ДДС). amount/vatAmount/totalAmount на хедъра са
   // сборове от редовете във валутата на компанията; category = на първия ред.
-  items ExpenseItem[]
+  items          ExpenseItem[]
 
   // Обект (ферма/площадка), към който е причислен разходът. Опционално.
   siteId String?
@@ -3460,23 +3478,23 @@ model Expense {
 // Ред на разход. Разходът към доставка е ЕДИН документ с N реда (създава се
 // само от доставката); ръчният разход от Разходи е същият модел без връзка.
 model ExpenseItem {
-  id          String          @id @default(cuid())
-  description String
-  category    ExpenseCategory
+  id                  String              @id @default(cuid())
+  description         String
+  category            ExpenseCategory
   // Количество × единична цена = нетна сума (както ред на фактура); ДДС във
   // валутата на реда; exchangeRate → валутата на компанията
-  quantity     Decimal  @default(1) @db.Decimal(10, 3)
-  unitPrice    Decimal? @db.Decimal(12, 4)
-  amount       Decimal  @db.Decimal(12, 2)
-  vatRate      Decimal  @default(0) @db.Decimal(5, 2)
-  vatAmount    Decimal  @default(0) @db.Decimal(12, 2)
-  currencyId   String?
-  exchangeRate Decimal  @default(1) @db.Decimal(10, 6)
+  quantity            Decimal             @default(1) @db.Decimal(10, 3)
+  unitPrice           Decimal?            @db.Decimal(12, 4)
+  amount              Decimal             @db.Decimal(12, 2)
+  vatRate             Decimal             @default(0) @db.Decimal(5, 2)
+  vatAmount           Decimal             @default(0) @db.Decimal(12, 2)
+  currencyId          String?
+  exchangeRate        Decimal             @default(1) @db.Decimal(10, 6)
   // Само за разход към доставка: влиза ли в доставната стойност на стоката
   // (landed cost) и как се разпределя по редовете на доставката
   includeInStockCost  Boolean             @default(false)
   stockCostAllocation StockCostAllocation @default(VALUE)
-  sortOrder Int @default(0)
+  sortOrder           Int                 @default(0)
 
   expenseId String
   expense   Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
@@ -3665,7 +3683,7 @@ model AcceptanceProtocol {
   serviceOrder   ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
   // Само за сервизни заявки: приемен (intake) или предавателен (handover)
   // протокол — иконите в списъка на заявките светят по това поле.
-  serviceKind String?
+  serviceKind    String?
 
   notes String? @db.Text
 
@@ -4085,11 +4103,11 @@ model ShippingAutomation {
   id String @id @default(cuid())
 
   // На час (cron) + при отваряне на ERP > Пратки: статусите от куриера
-  syncStatuses Boolean @default(false)
+  syncStatuses        Boolean @default(false)
   // Приета от куриера → продажбата „Изпратена"; доставена → „Доставена"
   markOrdersDelivered Boolean @default(false)
   // Изплатен наложен платеж от куриера → плащане по продажбата (метод COD)
-  recordCodPayments Boolean @default(false)
+  recordCodPayments   Boolean @default(false)
 
   lastSyncAt DateTime?
 
@@ -4628,21 +4646,21 @@ model ServiceAsset {
 
 // Сервизна заявка
 model ServiceOrder {
-  id              String               @id @default(cuid())
-  orderNumber     String // SRV-2026-00001
-  status          ServiceOrderStatus   @default(NEW)
-  priority        ServiceOrderPriority @default(NORMAL)
+  id          String               @id @default(cuid())
+  orderNumber String // SRV-2026-00001
+  status      ServiceOrderStatus   @default(NEW)
+  priority    ServiceOrderPriority @default(NORMAL)
 
   // Времеви линии
-  receivedAt  DateTime  @default(now()) // Дата на приемане
-  promisedAt  DateTime? // Обещан срок (SLA)
+  receivedAt    DateTime  @default(now()) // Дата на приемане
+  promisedAt    DateTime? // Обещан срок (SLA)
   // Снимка на гаранцията при приемане: до кога е валидна гаранцията на
   // артикула към момента на заявката (null = без гаранция). Пази се, за да
   // се вижда колко е оставало дори ако гаранцията после се анулира/смени.
   warrantyEndAt DateTime?
-  diagnosedAt DateTime?
-  completedAt DateTime?
-  deliveredAt DateTime?
+  diagnosedAt   DateTime?
+  completedAt   DateTime?
+  deliveredAt   DateTime?
 
   // Описания
   customerComplaint String  @db.Text // Какво казва клиентът
@@ -4698,8 +4716,8 @@ model ServiceOrderPart {
   productId String
   product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
 
-  source     ServicePartSource @default(STOCK)
-  quantity   Decimal           @db.Decimal(10, 3)
+  source   ServicePartSource @default(STOCK)
+  quantity Decimal           @db.Decimal(10, 3)
 
   // Свързване със склад (когато source = STOCK)
   inventoryBatchId  String?
@@ -5561,7 +5579,7 @@ model SupportTicketMessage {
   // true = от екипа на Кортана (support); false = от фирмата-клиент
   isFromSupport Boolean @default(false)
 
-  body String @db.Text
+  body     String    @db.Text
   // Кога авторът за последно е редактирал текста (null = не е редактиран)
   editedAt DateTime?
 
@@ -5757,12 +5775,12 @@ model CustomerCategoryLink {
 // управител на база, счетоводител, снабдител… — всеки със своя длъжност,
 // имейл и телефон. Не заменят полетата email/phone на самия клиент.
 model CustomerContact {
-  id       String  @id @default(cuid())
-  name     String
-  position String? // Длъжност
-  email    String?
-  phone    String?
-  note     String?
+  id        String  @id @default(cuid())
+  name      String
+  position  String? // Длъжност
+  email     String?
+  phone     String?
+  note      String?
   isPrimary Boolean @default(false)
 
   customerId String
@@ -5808,4 +5826,102 @@ model EmployeeAdvance {
 
   @@index([companyId, userId, date])
   @@map("employee_advances")
+}
+
+// ─── Изписване към обект ────────────────────────────────────────────────
+// Стока, която излиза от склада към обект (Site) БЕЗ продажба — материали за
+// монтаж/строеж. Наличността намалява при „Изписано", не при продажбата.
+// Опционално през правото warehouse.siteIssues.
+enum SiteIssueStatus {
+  DRAFT // Чернова — складът не е пипнат
+  ISSUED // Изписано — стоката е на обекта
+  CANCELLED // Анулирано — всичко невърнато е върнато в склада
+}
+
+model SiteIssue {
+  id          String          @id @default(cuid())
+  issueNumber String // SI-2026-00001
+  issueDate   DateTime        @default(now())
+  status      SiteIssueStatus @default(DRAFT)
+  notes       String?         @db.Text
+  issuedAt    DateTime? // Кога реално е изписано от склада
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  siteId String
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Restrict)
+
+  // Складът, от който се товари
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  createdById String?
+  createdBy   User?   @relation("SiteIssueCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Кой е изписал стоката — избираем (по подразбиране създателят). createdBy
+  // остава одитният запис кой реално е въвел документа.
+  issuedById String?
+  issuedBy   User?   @relation("SiteIssueIssuer", fields: [issuedById], references: [id], onDelete: SetNull)
+
+  items SiteIssueItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, issueNumber])
+  @@index([companyId, siteId])
+  @@index([companyId, status])
+  @@map("site_issues")
+}
+
+// Ред от изписване. Сериен продукт = един ред на номер (quantity 1).
+// unitCost е snapshot (среднопретеглена цена на придобиване) към изписването.
+model SiteIssueItem {
+  id          String  @id @default(cuid())
+  quantity    Decimal @db.Decimal(10, 3)
+  returnedQty Decimal @default(0) @db.Decimal(10, 3) // Върнато обратно в склада
+  unitCost    Decimal @default(0) @db.Decimal(12, 4)
+
+  siteIssueId String
+  siteIssue   SiteIssue @relation(fields: [siteIssueId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  // Изрично избрана партида (иначе FEFO/FIFO през склада на документа)
+  inventoryBatchId String?
+  inventoryBatch   InventoryBatch? @relation(fields: [inventoryBatchId], references: [id], onDelete: SetNull)
+
+  inventorySerialId String?
+  inventorySerial   InventorySerial? @relation(fields: [inventorySerialId], references: [id], onDelete: SetNull)
+
+  // От кои складови редове точно е взето — по тях се връща обратно
+  allocations SiteIssueAllocation[]
+
+  // Редове от продажби, в които е влязло това изписано количество
+  orderItems OrderItem[]
+
+  @@index([siteIssueId])
+  @@index([productId])
+  @@index([inventorySerialId])
+  @@map("site_issue_items")
+}
+
+model SiteIssueAllocation {
+  id          String  @id @default(cuid())
+  quantity    Decimal @db.Decimal(10, 3)
+  returnedQty Decimal @default(0) @db.Decimal(10, 3)
+  unitCost    Decimal @default(0) @db.Decimal(12, 4)
+  batchNumber String // snapshot
+
+  siteIssueItemId String
+  siteIssueItem   SiteIssueItem @relation(fields: [siteIssueItemId], references: [id], onDelete: Cascade)
+
+  inventoryBatchId String?
+  inventoryBatch   InventoryBatch? @relation(fields: [inventoryBatchId], references: [id], onDelete: SetNull)
+
+  @@index([siteIssueItemId])
+  @@index([inventoryBatchId])
+  @@map("site_issue_allocations")
 }

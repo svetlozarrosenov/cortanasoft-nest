@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { HrSettingsService } from '../hr-settings/hr-settings.service';
 import {
@@ -9,12 +13,15 @@ import {
 } from './dto';
 import { Prisma } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
+import { issueItemCost } from '../site-issues/site-issues.service';
 
 // Статус на бюджета на обект (тикет #34): сумите са на базата по vatRegistered
 export interface SiteBudgetStatus {
   amount: number;
   expenses: number;
   labor: number;
+  /** Материали, изписани от склада към обекта (0 без изписвания) */
+  materials: number;
   spent: number;
   remaining: number;
   /** 0–100+, закръглен; над 100 = надвишен */
@@ -23,14 +30,16 @@ export interface SiteBudgetStatus {
 
 export function budgetStatus(
   amount: number,
-  spent: { expenses: number; labor: number },
+  spent: { expenses: number; labor: number; materials?: number },
 ): SiteBudgetStatus {
   const round2 = (n: number) => Math.round(n * 100) / 100;
-  const total = round2(spent.expenses + spent.labor);
+  const materials = spent.materials ?? 0;
+  const total = round2(spent.expenses + spent.labor + materials);
   return {
     amount,
     expenses: spent.expenses,
     labor: spent.labor,
+    materials,
     spent: total,
     remaining: round2(amount - total),
     percent:
@@ -271,17 +280,18 @@ export class SitesService {
       `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     const monthlyMap = new Map<
       string,
-      { revenue: number; expenses: number; labor: number }
+      { revenue: number; expenses: number; labor: number; materials: number }
     >();
     const bump = (
       key: string,
-      field: 'revenue' | 'expenses' | 'labor',
+      field: 'revenue' | 'expenses' | 'labor' | 'materials',
       amount: number,
     ) => {
       const entry = monthlyMap.get(key) || {
         revenue: 0,
         expenses: 0,
         labor: 0,
+        materials: 0,
       };
       entry[field] += amount;
       monthlyMap.set(key, entry);
@@ -298,6 +308,24 @@ export class SitesService {
     const { attendance, labor, laborUnrated, workDayHours, siteShare } =
       await this.laborForSite(companyId, id, dateFrom, dateTo);
 
+    // Материали, изписани от склада към обекта (Склад > Изписване към обект),
+    // по себестойност и по датата на изписването. Без изписвания = 0.
+    const materialItems = await this.materialItems(
+      companyId,
+      id,
+      dateFrom,
+      dateTo,
+    );
+    const materials = round2(
+      materialItems.reduce((sum, m) => sum + issueItemCost(m), 0),
+    );
+    // Бройка за таба „Материали": различните продукти, изписани към обекта —
+    // колкото са редовете в таблицата му (за целия обект, не за периода)
+    const materialProducts = await this.prisma.siteIssueItem.groupBy({
+      by: ['productId'],
+      where: { siteIssue: { companyId, siteId: id, status: 'ISSUED' } },
+    });
+
     // Бюджет (тикет #34): следи се за целия живот на обекта, не за периода —
     // при филтър по дати изразходваното се смята отделно, без филтър е същото.
     const budgetAmount = site.budget != null ? Number(site.budget) : null;
@@ -306,8 +334,15 @@ export class SitesService {
       const spent =
         dateFrom || dateTo
           ? await this.budgetSpent(companyId, id, vatRegistered)
-          : { expenses: expensesTotal, labor };
+          : { expenses: expensesTotal, labor, materials };
       budget = budgetStatus(budgetAmount, spent);
+    }
+    for (const m of materialItems) {
+      bump(
+        monthKey(new Date(m.siteIssue.issueDate)),
+        'materials',
+        issueItemCost(m),
+      );
     }
 
     // Трудът влиза и в месечната графика: разпределен по дните на присъствие
@@ -329,6 +364,7 @@ export class SitesService {
       monthly,
       attendance,
       workDayHours,
+      materialsCount: materialProducts.length,
       totals: {
         revenue,
         revenueGross,
@@ -336,7 +372,8 @@ export class SitesService {
         expenses: expensesTotal,
         labor,
         laborUnrated,
-        result: round2(revenue - expensesTotal - labor),
+        materials,
+        result: round2(revenue - expensesTotal - labor - materials),
       },
       budget,
     };
@@ -448,28 +485,64 @@ export class SitesService {
     return { attendance, labor, laborUnrated, workDayHours, siteShare };
   }
 
+  // Редовете от изписани (не чернови/анулирани) документи към обекта.
+  private materialItems(
+    companyId: string,
+    id: string,
+    dateFrom?: Date,
+    dateTo?: Date,
+  ) {
+    return this.prisma.siteIssueItem.findMany({
+      where: {
+        siteIssue: {
+          companyId,
+          siteId: id,
+          status: 'ISSUED',
+          ...(dateFrom || dateTo
+            ? {
+                issueDate: {
+                  ...(dateFrom && { gte: dateFrom }),
+                  ...(dateTo && { lte: dateTo }),
+                },
+              }
+            : {}),
+        },
+      },
+      select: {
+        quantity: true,
+        returnedQty: true,
+        unitCost: true,
+        siteIssue: { select: { issueDate: true } },
+      },
+    });
+  }
+
   // Изразходвано от бюджета за целия живот на обекта: разходи (без анулираните,
-  // на базата по vatRegistered) + труд по присъствията.
+  // на базата по vatRegistered) + труд по присъствията + изписани материали.
   private async budgetSpent(
     companyId: string,
     id: string,
     vatRegistered: boolean,
   ) {
     const round2 = (n: number) => Math.round(n * 100) / 100;
-    const [expenses, { labor }] = await Promise.all([
+    const [expenses, { labor }, materialItems] = await Promise.all([
       this.prisma.expense.findMany({
         where: { companyId, siteId: id, status: { not: 'CANCELLED' } },
         select: { amount: true, totalAmount: true },
       }),
       this.laborForSite(companyId, id),
+      this.materialItems(companyId, id),
     ]);
+    const materials = round2(
+      materialItems.reduce((sum, m) => sum + issueItemCost(m), 0),
+    );
     const expensesTotal = round2(
       expenses.reduce(
         (sum, e) => sum + Number(vatRegistered ? e.amount : e.totalAmount),
         0,
       ),
     );
-    return { expenses: expensesTotal, labor };
+    return { expenses: expensesTotal, labor, materials };
   }
 
   async update(companyId: string, id: string, dto: UpdateSiteDto) {
@@ -492,6 +565,16 @@ export class SitesService {
   // просто остават без обект.
   async remove(companyId: string, id: string) {
     await this.findOne(companyId, id);
+
+    // Изписванията към обекта са складови документи — не се губят с обекта
+    const issues = await this.prisma.siteIssue.count({
+      where: { companyId, siteId: id },
+    });
+    if (issues > 0) {
+      throw new BadRequestException(
+        'Обектът има изписвания от склада и не може да бъде изтрит. Направете го неактивен.',
+      );
+    }
 
     await this.prisma.site.delete({ where: { id } });
 

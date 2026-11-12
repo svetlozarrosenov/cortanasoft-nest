@@ -211,10 +211,145 @@ export class OrdersService {
     return `${prefix}${nextNumber.toString().padStart(5, '0')}`;
   }
 
+  /**
+   * Проверява редовете, взети от „Изписване към обект", и връща за всеки
+   * цената на придобиване и серийния номер от изписването. Редът трябва да е
+   * от изписан документ към СЪЩИЯ обект на тази фирма, за същия продукт, и
+   * количеството да не надвишава непродаденото: изписано − върнато − вече
+   * включено в други активни продажби.
+   */
+  private async resolveSiteIssueLines(
+    companyId: string,
+    siteId: string | null | undefined,
+    items: CreateOrderDto['items'],
+    excludeOrderId?: string,
+  ) {
+    const lines = new Map<
+      string,
+      {
+        unitCost: number;
+        inventorySerialId: string | null;
+        locationId: string;
+      }
+    >();
+    const wanted = new Map<string, { productId: string; quantity: number }>();
+    for (const item of items) {
+      if (!item.siteIssueItemId) continue;
+      if (item.directDelivery) {
+        throw new BadRequestException(
+          'Ред от изписване към обект не може да е директна доставка',
+        );
+      }
+      const prev = wanted.get(item.siteIssueItemId);
+      if (prev && prev.productId !== item.productId) {
+        throw new BadRequestException(ErrorMessages.orders.productsNotFound);
+      }
+      wanted.set(item.siteIssueItemId, {
+        productId: item.productId,
+        quantity: (prev?.quantity ?? 0) + item.quantity,
+      });
+    }
+    if (wanted.size === 0) return lines;
+    if (!siteId) {
+      throw new BadRequestException(
+        'Продажба с материали от обект трябва да е към същия обект',
+      );
+    }
+
+    const issueItems = await this.prisma.siteIssueItem.findMany({
+      where: {
+        id: { in: [...wanted.keys()] },
+        siteIssue: { companyId, siteId, status: 'ISSUED' },
+      },
+      include: {
+        product: { select: { name: true } },
+        siteIssue: { select: { locationId: true } },
+        orderItems: {
+          where: {
+            order: { status: { notIn: CLOSED_STATUSES } },
+            ...(excludeOrderId && { orderId: { not: excludeOrderId } }),
+          },
+          select: { quantity: true },
+        },
+      },
+    });
+    if (issueItems.length !== wanted.size) {
+      throw new NotFoundException(
+        'Изписаният към обекта материал не е намерен',
+      );
+    }
+    for (const issueItem of issueItems) {
+      const want = wanted.get(issueItem.id)!;
+      if (issueItem.productId !== want.productId) {
+        throw new BadRequestException(ErrorMessages.orders.productsNotFound);
+      }
+      const sold = issueItem.orderItems.reduce(
+        (sum, oi) => sum + Number(oi.quantity),
+        0,
+      );
+      const unsold =
+        Math.round(
+          (Number(issueItem.quantity) - Number(issueItem.returnedQty) - sold) *
+            1000,
+        ) / 1000;
+      if (want.quantity > unsold) {
+        throw new BadRequestException(
+          `„${issueItem.product.name}": на обекта има непродадени ${unsold}, а в продажбата са ${want.quantity}`,
+        );
+      }
+      lines.set(issueItem.id, {
+        unitCost: Number(issueItem.unitCost),
+        inventorySerialId: issueItem.inventorySerialId,
+        // Складът, от който е изписано — проследимостта остава в продажбата
+        locationId: issueItem.siteIssue.locationId,
+      });
+    }
+    return lines;
+  }
+
+  // Затворена продажба (анулирана/върната) освобождава материалите от обекта.
+  // Преди да се отвори наново, те трябва още да са непродадени и невърнати.
+  private async assertSiteLinesStillUnsold(
+    companyId: string,
+    order: {
+      id: string;
+      siteId: string | null;
+      items: {
+        siteIssueItemId: string | null;
+        productId: string;
+        quantity: Prisma.Decimal;
+      }[];
+    },
+  ) {
+    const items = order.items
+      .filter((it) => it.siteIssueItemId)
+      .map((it) => ({
+        siteIssueItemId: it.siteIssueItemId!,
+        productId: it.productId,
+        quantity: Number(it.quantity),
+      }));
+    if (items.length === 0) return;
+    await this.resolveSiteIssueLines(
+      companyId,
+      order.siteId,
+      items as CreateOrderDto['items'],
+      order.id,
+    );
+  }
+
   private calculateItemTotals(
     items: CreateOrderDto['items'],
     products: { id: string; name: string; vatRate: any }[],
     defaultVatRate: number,
+    // Редове от „Изписване към обект" (вече проверени): id → цена и сериен №
+    siteIssueLines: Map<
+      string,
+      {
+        unitCost: number;
+        inventorySerialId: string | null;
+        locationId: string;
+      }
+    > = new Map(),
   ) {
     let subtotal = 0;
 
@@ -241,6 +376,30 @@ export class OrdersService {
       // stockDeducted=false от самото начало, за да няма какво да се
       // „възстановява" при cancel()/подмяна на редове.
       const directDelivery = item.directDelivery === true;
+
+      // Ред от изписване към обект: стоката вече е излязла от склада, затова
+      // няма партида/склад и stockDeducted=false (нищо за връщане). Серийният
+      // номер и себестойността идват от изписването, не от клиента.
+      const siteLine = item.siteIssueItemId
+        ? siteIssueLines.get(item.siteIssueItemId)
+        : undefined;
+      if (siteLine) {
+        return {
+          productId: item.productId,
+          description: item.description?.trim() || product?.name || '',
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          vatRate: itemVatRate,
+          discount: itemDiscount,
+          subtotal: itemSubtotal,
+          inventorySerialId: siteLine.inventorySerialId ?? undefined,
+          locationId: siteLine.locationId,
+          siteIssueItemId: item.siteIssueItemId,
+          unitCost: siteLine.unitCost,
+          directDelivery: false,
+          stockDeducted: false,
+        };
+      }
 
       return {
         productId: item.productId,
@@ -271,7 +430,12 @@ export class OrdersService {
   // общата сума се преизчисляват от съществуващите редове, за да не се
   // разминат с тях.
   private async recalculatedHeaderTotals(
-    order: { id: string; discount: any; discountPercent: any; shippingCost: any },
+    order: {
+      id: string;
+      discount: any;
+      discountPercent: any;
+      shippingCost: any;
+    },
     dto: UpdateOrderDto,
   ) {
     if (
@@ -296,10 +460,17 @@ export class OrdersService {
         ? {
             discount: Number(order.discount),
             discountPercent:
-              order.discountPercent == null ? null : Number(order.discountPercent),
+              order.discountPercent == null
+                ? null
+                : Number(order.discountPercent),
           }
         : dto;
-    const totals = calculateDocumentTotals(itemsData, subtotal, discountInput, shippingCost);
+    const totals = calculateDocumentTotals(
+      itemsData,
+      subtotal,
+      discountInput,
+      shippingCost,
+    );
     return {
       shippingCost,
       discount: totals.discount,
@@ -397,11 +568,18 @@ export class OrdersService {
     // Use company currency as default
     const currencyId = dto.currencyId || company.currencyId;
 
+    const siteIssueLines = await this.resolveSiteIssueLines(
+      companyId,
+      dto.siteId,
+      dto.items,
+    );
+
     // Calculate totals with proper rounding
     const { itemsData, subtotal } = this.calculateItemTotals(
       dto.items,
       products,
       defaultVatRate,
+      siteIssueLines,
     );
 
     const shippingCost = dto.shippingCost ?? 0;
@@ -804,6 +982,7 @@ export class OrdersService {
       // null) — иначе вече изписани редове излизат като „готови".
       batchAllocations: { none: {} },
       directDelivery: false, // директните редове не чакат наличност
+      siteIssueItemId: null, // изписаното към обект вече е излязло от склада
       product: { type: { not: 'SERVICE' } },
     };
     const orders = await this.prisma.order.findMany({
@@ -949,10 +1128,7 @@ export class OrdersService {
             : stockMap.get(it.product.id)) || 0;
 
         let readiness:
-          | 'ready'
-          | 'awaiting-stock'
-          | 'allocated'
-          | 'no-stock-tracked';
+          'ready' | 'awaiting-stock' | 'allocated' | 'no-stock-tracked';
         if (hasAllocation) {
           readiness = 'allocated';
         } else if (stockAvailable >= Number(it.quantity)) {
@@ -1064,10 +1240,37 @@ export class OrdersService {
     // false = ролята няма erp.directDelivery: може да запази вече съществуващи
     // директни редове (редовете се пресъздават при всяка редакция), но не и
     // да добави директен ред към поръчка, която досега не е имала такива.
-    opts: { canDirectDelivery?: boolean } = {},
+    opts: { canDirectDelivery?: boolean; canSiteIssues?: boolean } = {},
   ) {
     const order = await this.findOne(companyId, id);
     this.assertNotManualRefund(dto.paymentStatus);
+
+    // Същото правило за редовете от „Изписване към обект": без правото се
+    // пазят съществуващите, но не се добавят нови.
+    if (
+      opts.canSiteIssues === false &&
+      dto.items?.some(
+        (it) =>
+          it.siteIssueItemId &&
+          !order.items.some((o) => o.siteIssueItemId === it.siteIssueItemId),
+      )
+    ) {
+      throw new ForbiddenException(
+        'Нямате право да добавяте материали от изписване към обект',
+      );
+    }
+    // Смяна на обекта без нови редове: материалите от стария обект не могат
+    // да останат в продажба за друг обект.
+    if (
+      !dto.items &&
+      dto.siteId !== undefined &&
+      (dto.siteId || null) !== order.siteId &&
+      order.items.some((it) => it.siteIssueItemId)
+    ) {
+      throw new BadRequestException(
+        'Продажбата съдържа материали, изписани към текущия обект. Махнете ги, преди да смените обекта.',
+      );
+    }
 
     if (
       opts.canDirectDelivery === false &&
@@ -1138,6 +1341,9 @@ export class OrdersService {
       if (dto.status === 'CANCELLED' || dto.status === 'RETURNED') {
         return this.cancel(companyId, id, dto.status);
       }
+      if (order.status === 'RETURNED') {
+        await this.assertSiteLinesStillUnsold(companyId, order);
+      }
 
       const fromHeld = STOCK_HELD_STATUSES.includes(order.status);
       const toHeld = STOCK_HELD_STATUSES.includes(dto.status);
@@ -1148,13 +1354,19 @@ export class OrdersService {
             for (const item of order.items) {
               const product =
                 item.product ??
-                (await tx.product.findUnique({ where: { id: item.productId } }));
+                (await tx.product.findUnique({
+                  where: { id: item.productId },
+                }));
               if (!product) continue;
               await this.deductItemStock(tx, companyId, order, item, product);
             }
           } else if (fromHeld && !toHeld) {
             await this.restoreHeldStock(tx, companyId, order);
-            await this.warrantiesService.voidWarrantiesForOrder(companyId, id, tx);
+            await this.warrantiesService.voidWarrantiesForOrder(
+              companyId,
+              id,
+              tx,
+            );
           }
 
           // „Изпратена/Доставена" означава, че стоката физически излиза → всички
@@ -1172,6 +1384,7 @@ export class OrdersService {
               (it) =>
                 it.product &&
                 !it.directDelivery &&
+                !it.siteIssueItemId &&
                 it.product.type !== 'SERVICE' &&
                 (it.product.type === 'SERIAL'
                   ? !it.inventorySerialId
@@ -1213,7 +1426,11 @@ export class OrdersService {
       // доставчика със същата дата (не блокира прехода при грешка — логва се).
       if (dto.status === 'DELIVERED' && updated.deliveredAt) {
         try {
-          await this.directDeliveries.markDeliveredForOrder(companyId, id, updated.deliveredAt);
+          await this.directDeliveries.markDeliveredForOrder(
+            companyId,
+            id,
+            updated.deliveredAt,
+          );
         } catch (err) {
           this.logger.warn(
             `Drop-ship receipts of order ${id} not marked delivered: ${(err as Error)?.message}`,
@@ -1309,10 +1526,18 @@ export class OrdersService {
         );
       }
 
+      const siteIssueLines = await this.resolveSiteIssueLines(
+        companyId,
+        dto.siteId !== undefined ? dto.siteId : order.siteId,
+        dto.items,
+        id,
+      );
+
       const { itemsData, subtotal } = this.calculateItemTotals(
         dto.items,
         products,
         defaultVatRate,
+        siteIssueLines,
       );
 
       const shippingCost = dto.shippingCost ?? Number(order.shippingCost);
@@ -1322,7 +1547,9 @@ export class OrdersService {
           ? {
               discount: Number(order.discount),
               discountPercent:
-                order.discountPercent == null ? null : Number(order.discountPercent),
+                order.discountPercent == null
+                  ? null
+                  : Number(order.discountPercent),
             }
           : dto;
       const {
@@ -1330,7 +1557,12 @@ export class OrdersService {
         discountPercent,
         vatAmount,
         total,
-      } = calculateDocumentTotals(itemsData, subtotal, discountInput, shippingCost);
+      } = calculateDocumentTotals(
+        itemsData,
+        subtotal,
+        discountInput,
+        shippingCost,
+      );
 
       // Build a quick lookup so the apply step below knows each new item's
       // product type without an extra DB round-trip.
@@ -1352,12 +1584,15 @@ export class OrdersService {
         //    Without this, replacing an item silently leaves the old serial as
         //    SOLD or the old batch decremented forever.
         for (const oldItem of stockHeld ? order.items : []) {
+          if (oldItem.siteIssueItemId) {
+            // Ред от изписване към обект: складът не се пипа; серийният
+            // номер се връща „на обект", докато новите редове го вземат пак
+            await this.releaseSiteSerial(tx, companyId, oldItem);
+            continue;
+          }
           if (!oldItem.stockDeducted || oldItem.directDelivery) continue;
           const oldProduct = oldItem.product;
-          if (
-            !oldProduct ||
-            oldProduct.type === 'SERVICE'
-          ) {
+          if (!oldProduct || oldProduct.type === 'SERVICE') {
             continue;
           }
 
@@ -1498,7 +1733,13 @@ export class OrdersService {
         for (const newItem of stockHeld ? updatedOrder.items : []) {
           const newProduct = productById.get(newItem.productId);
           if (!newProduct) continue;
-          await this.deductItemStock(tx, companyId, updatedOrder, newItem, newProduct);
+          await this.deductItemStock(
+            tx,
+            companyId,
+            updatedOrder,
+            newItem,
+            newProduct,
+          );
         }
         // Re-fetch so stockDeducted updates land in the returned payload.
         return tx.order.findFirst({
@@ -1559,11 +1800,21 @@ export class OrdersService {
         ...(dto.econtOfficeName !== undefined && {
           econtOfficeName: dto.econtOfficeName,
         }),
-        ...(dto.speedySiteId !== undefined && { speedySiteId: dto.speedySiteId }),
-        ...(dto.speedyOfficeId !== undefined && { speedyOfficeId: dto.speedyOfficeId }),
-        ...(dto.speedyOfficeName !== undefined && { speedyOfficeName: dto.speedyOfficeName }),
-        ...(dto.shipmentWeight !== undefined && { shipmentWeight: dto.shipmentWeight }),
-        ...(dto.shipmentPackCount !== undefined && { shipmentPackCount: dto.shipmentPackCount }),
+        ...(dto.speedySiteId !== undefined && {
+          speedySiteId: dto.speedySiteId,
+        }),
+        ...(dto.speedyOfficeId !== undefined && {
+          speedyOfficeId: dto.speedyOfficeId,
+        }),
+        ...(dto.speedyOfficeName !== undefined && {
+          speedyOfficeName: dto.speedyOfficeName,
+        }),
+        ...(dto.shipmentWeight !== undefined && {
+          shipmentWeight: dto.shipmentWeight,
+        }),
+        ...(dto.shipmentPackCount !== undefined && {
+          shipmentPackCount: dto.shipmentPackCount,
+        }),
         ...(dto.paymentMethod && { paymentMethod: dto.paymentMethod }),
         // paymentStatus НЕ се пише директно — минава през PaymentsService
         ...(dto.locationId && { locationId: dto.locationId }),
@@ -1675,6 +1926,7 @@ export class OrdersService {
       if (
         !product ||
         item.directDelivery ||
+        item.siteIssueItemId ||
         product.type === 'SERVICE'
       ) {
         continue;
@@ -1794,6 +2046,7 @@ export class OrdersService {
         if (
           !product ||
           item.directDelivery ||
+          item.siteIssueItemId ||
           product.type === 'SERVICE'
         ) {
           continue;
@@ -1955,6 +2208,22 @@ export class OrdersService {
       return;
     }
 
+    // Изписано към обект: стоката вече е извън склада — нищо за изписване и
+    // не е backorder. Серийният номер минава от „на обект" към „продаден".
+    if (item.siteIssueItemId) {
+      if (item.inventorySerialId) {
+        await tx.inventorySerial.updateMany({
+          where: { id: item.inventorySerialId, companyId, status: 'ON_SITE' },
+          data: { status: 'SOLD' },
+        });
+      }
+      await tx.orderItem.update({
+        where: { id: item.id },
+        data: { stockDeducted: false },
+      });
+      return;
+    }
+
     // Handle SERIAL products
     if (product.type === 'SERIAL') {
       if (!item.inventorySerialId) {
@@ -1976,9 +2245,7 @@ export class OrdersService {
       });
 
       if (!serial) {
-        throw new BadRequestException(
-          ErrorMessages.inventory.serialNotFound,
-        );
+        throw new BadRequestException(ErrorMessages.inventory.serialNotFound);
       }
 
       if (serial.status !== 'IN_STOCK') {
@@ -2243,6 +2510,19 @@ export class OrdersService {
    * няма разпределения) и stockDeducted пада на false. Общ код за cancel() и
    * за връщане на потвърдена поръчка в чернова — за да няма две версии.
    */
+  // Сериен номер от ред „изписано към обект": продаден → обратно на обекта
+  private async releaseSiteSerial(
+    tx: Prisma.TransactionClient,
+    companyId: string,
+    item: { inventorySerialId: string | null },
+  ) {
+    if (!item.inventorySerialId) return;
+    await tx.inventorySerial.updateMany({
+      where: { id: item.inventorySerialId, companyId, status: 'SOLD' },
+      data: { status: 'ON_SITE' },
+    });
+  }
+
   private async restoreHeldStock(
     tx: Prisma.TransactionClient,
     companyId: string,
@@ -2255,6 +2535,13 @@ export class OrdersService {
 
       // Skip for services or non-tracked products
       if (!product || product.type === 'SERVICE') {
+        continue;
+      }
+
+      // Ред от изписване към обект: стоката не се връща в склада — остава на
+      // обекта (серийният номер пак е „на обект" и може да влезе в нова продажба).
+      if (item.siteIssueItemId) {
+        await this.releaseSiteSerial(tx, companyId, item);
         continue;
       }
 
@@ -2326,6 +2613,7 @@ export class OrdersService {
         ErrorMessages.orders.canOnlyReopenCancelled,
       );
     }
+    await this.assertSiteLinesStillUnsold(companyId, order);
 
     const result = await this.prisma.order.update({
       where: { id },

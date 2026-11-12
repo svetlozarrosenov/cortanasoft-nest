@@ -61,6 +61,12 @@ export class CreateOrderItemDto {
   @IsBoolean()
   @IsOptional()
   directDelivery?: boolean;
+
+  // Ред, взет от „Изписване към обект" — стоката вече е на обекта, продажбата
+  // не я изписва втори път. Изисква право warehouse.siteIssues (контролерът).
+  @IsString()
+  @IsOptional()
+  siteIssueItemId?: string;
 }
 
 /**
