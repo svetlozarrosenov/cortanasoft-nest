@@ -202,6 +202,12 @@ export class ExpensesController {
     return this.expensesService.cancel(companyId, id);
   }
 
+  @Post(':id/restore')
+  @RequireEdit('erp', 'expenses')
+  restore(@Param('companyId') companyId: string, @Param('id') id: string) {
+    return this.expensesService.restore(companyId, id);
+  }
+
   @Delete(':id')
   @RequireDelete('erp', 'expenses')
   remove(@Param('companyId') companyId: string, @Param('id') id: string) {

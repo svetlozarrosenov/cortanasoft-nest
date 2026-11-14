@@ -16,6 +16,7 @@ import {
 import { Prisma, ExpenseCategory } from '@prisma/client';
 import { ErrorMessages } from '../common/constants/error-messages';
 import { alignLineVat } from '../common/utils/vat-rounding';
+import { isExpenseEditLocked, withEditLock } from './expense-edit-lock';
 
 @Injectable()
 export class ExpensesService {
@@ -275,6 +276,9 @@ export class ExpensesService {
         { description: { contains: query.search, mode: 'insensitive' } },
         { invoiceNumber: { contains: query.search, mode: 'insensitive' } },
         { receiptNumber: { contains: query.search, mode: 'insensitive' } },
+        {
+          supplier: { name: { contains: query.search, mode: 'insensitive' } },
+        },
       ];
     }
 
@@ -389,7 +393,7 @@ export class ExpensesService {
     ]);
 
     return {
-      data,
+      data: data.map(withEditLock),
       meta: {
         total,
         page,
@@ -433,7 +437,7 @@ export class ExpensesService {
       throw new NotFoundException('Разходът не е намерен');
     }
 
-    return expense;
+    return withEditLock(expense);
   }
 
   async update(companyId: string, id: string, dto: UpdateExpenseDto) {
@@ -445,6 +449,18 @@ export class ExpensesService {
     if (current.goodsReceiptId) {
       throw new BadRequestException(
         'Разходът е част от доставка и се редактира от нея',
+      );
+    }
+
+    if (current.status === 'CANCELLED') {
+      throw new BadRequestException('Анулиран разход не се редактира');
+    }
+
+    // Платен разход след края на месеца не се редактира; поправката е
+    // анулиране и ново въвеждане.
+    if (current.editLocked) {
+      throw new BadRequestException(
+        'Разходът е платен и месецът му е приключил — не може да се редактира',
       );
     }
 
@@ -590,7 +606,11 @@ export class ExpensesService {
   }
 
   async approve(companyId: string, id: string, userId: string) {
-    await this.findOne(companyId, id);
+    const current = await this.findOne(companyId, id);
+    // Само чакащ: одобряване на платен би го върнал назад и отключил
+    if (current.status !== 'PENDING') {
+      throw new BadRequestException('Само чакащ разход може да се одобри');
+    }
 
     return this.prisma.expense.update({
       where: { id },
@@ -623,7 +643,13 @@ export class ExpensesService {
   }
 
   async markAsPaid(companyId: string, id: string, dto?: MarkExpensePaidDto) {
-    await this.findOne(companyId, id);
+    const current = await this.findOne(companyId, id);
+    // Повторно „платен" би сменило датата на плащане и отключило разхода
+    if (current.status !== 'PENDING' && current.status !== 'APPROVED') {
+      throw new BadRequestException(
+        'Разходът вече е платен или е анулиран',
+      );
+    }
 
     return this.prisma.expense.update({
       where: { id },
@@ -656,14 +682,75 @@ export class ExpensesService {
     });
   }
 
+  // Анулирането е позволено винаги — то е поправката за заключен разход и
+  // оставя следа в таба с анулираните.
   async cancel(companyId: string, id: string) {
-    await this.findOne(companyId, id);
+    const current = await this.findOne(companyId, id);
+    if (current.status === 'CANCELLED') {
+      throw new BadRequestException('Разходът вече е анулиран');
+    }
 
     return this.prisma.expense.update({
       where: { id },
       data: {
         status: 'CANCELLED',
+        cancelledAt: new Date(),
       },
+      include: {
+        items: { orderBy: { sortOrder: 'asc' as const } },
+        supplier: true,
+        createdBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        approvedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Връща анулиран разход. Анулирането пипа само статуса, затова предишният
+   * се познава по следите: платен (paidAt) → одобрен (approvedAt) → чакащ.
+   * Разходът към доставка следва доставката и не се възстановява оттук.
+   * Възможно е само до края на месеца на анулирането.
+   */
+  async restore(companyId: string, id: string) {
+    const current = await this.findOne(companyId, id);
+
+    if (current.status !== 'CANCELLED') {
+      throw new BadRequestException('Разходът не е анулиран');
+    }
+    if (current.goodsReceiptId) {
+      throw new BadRequestException(
+        'Разходът е част от доставка и се управлява от нея',
+      );
+    }
+    if (isExpenseEditLocked(current)) {
+      throw new BadRequestException(
+        'Месецът на анулирането е приключил — разходът не може да се възстанови',
+      );
+    }
+
+    const status = current.paidAt
+      ? 'PAID'
+      : current.approvedAt
+        ? 'APPROVED'
+        : 'PENDING';
+
+    return this.prisma.expense.update({
+      where: { id },
+      data: { status, cancelledAt: null },
       include: {
         items: { orderBy: { sortOrder: 'asc' as const } },
         supplier: true,
