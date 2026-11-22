@@ -74,6 +74,8 @@ import { ContractsModule } from './contracts/contracts.module';
 import { SupportModule } from './support/support.module';
 import { CasesModule } from './cases/cases.module';
 import { CompanyLookupModule } from './company-lookup/company-lookup.module';
+import { FiscalDevicesModule } from './fiscal-devices/fiscal-devices.module';
+import { PosModule } from './pos/pos.module';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -168,6 +170,8 @@ import { HealthModule } from './health/health.module';
     SupportModule,
     CasesModule,
     CompanyLookupModule,
+    FiscalDevicesModule,
+    PosModule,
   ],
   controllers: [],
   providers: [],

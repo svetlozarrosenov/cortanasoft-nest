@@ -252,6 +252,9 @@ model Company {
   apiKeys                      ApiKey[]
   stockTransfers               StockTransfer[]
   siteIssues                   SiteIssue[]
+  fiscalDevices                FiscalDevice[]
+  fiscalPairingCodes           FiscalPairingCode[]
+  fiscalJobs                   FiscalJob[]
   econtConfig                  EcontConfig?
   aiSettings                   AiSettings?
   aiJobs                       AiJob[]
@@ -631,6 +634,7 @@ model User {
   createdStockTransfers     StockTransfer[] @relation("StockTransferCreator")
   createdSiteIssues         SiteIssue[]     @relation("SiteIssueCreator")
   issuedSiteIssues          SiteIssue[]     @relation("SiteIssueIssuer")
+  pairedFiscalDevices       FiscalDevice[]
 
   // Гаранции
   createdWarrantyTemplates WarrantyTemplate[] @relation("WarrantyTemplateCreator")
@@ -1384,6 +1388,8 @@ model Location {
   stockTransfersFrom  StockTransfer[]              @relation("StockTransferFrom")
   stockTransfersTo    StockTransfer[]              @relation("StockTransferTo")
   siteIssues          SiteIssue[]
+  fiscalDevices       FiscalDevice[]
+  fiscalPairingCodes  FiscalPairingCode[]
 
   @@unique([companyId, code])
   @@map("locations")
@@ -2072,6 +2078,7 @@ model Order {
   payments            Payment[]
   creditApplication   CreditApplication?
   goodsReceipts       GoodsReceipt[] // директни доставки от доставчик за тази продажба
+  fiscalJobs          FiscalJob[]
 
   @@unique([companyId, orderNumber])
   @@unique([companyId, externalId])
@@ -5925,4 +5932,143 @@ model SiteIssueAllocation {
   @@index([siteIssueItemId])
   @@index([inventoryBatchId])
   @@map("site_issue_allocations")
+}
+
+// ==================== FISCAL DEVICES ====================
+
+enum FiscalDeviceStatus {
+  ACTIVE
+  REVOKED
+}
+
+// A cash register (Datecs BlueCash running the Cortana Fiscal app) that the
+// company has allowed to work with it. The device holds a private key that
+// never leaves its secure hardware; we keep only the public half.
+model FiscalDevice {
+  id   String @id @default(cuid())
+  name String
+
+  // Serial number of the fiscal module ("DA075232"). Every sign-in must
+  // present the same one the device was paired with.
+  serialNumber       String
+  fiscalMemoryNumber String?
+  model              String?
+  appVersion         String?
+
+  // EC P-256 public key, base64 of the DER SubjectPublicKeyInfo
+  publicKey String @db.Text
+
+  status     FiscalDeviceStatus @default(ACTIVE)
+  pairedAt   DateTime           @default(now())
+  lastSeenAt DateTime?
+  revokedAt  DateTime?
+
+  // The store the register stands in (optional)
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  // Who paired it — shown in the list, pairing is a security-relevant action
+  pairedById String?
+  pairedBy   User?   @relation(fields: [pairedById], references: [id], onDelete: SetNull)
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  jobs FiscalJob[]
+
+  @@index([companyId, status])
+  @@map("fiscal_devices")
+}
+
+// One-time code typed on the register to pair it. Only the hash is stored.
+model FiscalPairingCode {
+  id        String    @id @default(cuid())
+  codeHash  String    @unique
+  // Name and store the new device gets once the code is used
+  name      String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  createdById String?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@map("fiscal_pairing_codes")
+}
+
+enum FiscalJobStatus {
+  PENDING // waiting for the register to pick it up
+  SENT // the register has it: charging the card / printing
+  SUCCEEDED // the fiscal receipt was printed
+  FAILED // nothing was printed (declined card, no paper…)
+  CANCELLED // withdrawn by the cashier before the register took it
+  EXPIRED // the register never picked it up
+  UNCLEAR // the outcome is unknown and must be checked by a person
+}
+
+// A sale rung up in Cortana's point of sale and sent to a cash register to
+// be paid and printed. The sale becomes an Order — and the stock leaves the
+// warehouse — only after the register reports a printed fiscal receipt.
+model FiscalJob {
+  id     String          @id @default(cuid())
+  status FiscalJobStatus @default(PENDING)
+
+  paymentMethod PaymentMethod
+  total         Decimal       @db.Decimal(12, 2)
+
+  // Snapshot of what was sold: [{ productId, name, quantity, unitPrice, vatRate }]
+  // (unitPrice without VAT, as on an order line)
+  items        Json
+  // The same sale as the register prints it:
+  // [{ name, vatGroup, unitPrice, quantity, unit }] (unitPrice with VAT)
+  receiptLines Json
+
+  // What the register is doing right now ("CARD_WAITING", "PRINTING"…)
+  stage String?
+
+  // Outcome reported by the register
+  receiptNumber      Int?
+  receiptDateTime    String?
+  fiscalMemoryNumber String?
+  card               Json?
+  // The receipt as the fiscal module keeps it in its electronic journal
+  // (КЛЕН), lines joined by "\n": the electronic copy of the paper receipt
+  receiptText        String? @db.Text
+  errorCode          String?
+  errorMessage       String? @db.Text
+
+  // The sale created after a successful receipt. orderError is set when the
+  // receipt was printed but the sale could not be recorded.
+  orderId    String?
+  order      Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  orderError String? @db.Text
+
+  deviceId String
+  device   FiscalDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  // The cashier; becomes the creator of the sale. Empty for sales rung up on
+  // the register itself, where nobody is signed in.
+  createdById String?
+
+  // Set for a sale rung up on the register and reported afterwards: the id
+  // the register gave it, so a repeated report is recognised.
+  deviceSaleId String?
+
+  createdAt  DateTime  @default(now())
+  sentAt     DateTime?
+  finishedAt DateTime?
+
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, deviceSaleId])
+  @@index([deviceId, status])
+  @@index([companyId, createdAt])
+  @@map("fiscal_jobs")
 }

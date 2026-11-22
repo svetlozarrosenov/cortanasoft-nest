@@ -1000,6 +1000,20 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
     ],
   },
   {
+    // Point of sale: ring up a sale and send it to a paired cash register.
+    // A new module, so no existing role gets it automatically.
+    key: 'pos',
+    labelKey: 'modules.pos.title',
+    icon: 'Store',
+    pages: [
+      {
+        key: 'register',
+        labelKey: 'modules.pos.register',
+        actions: ['view', 'create'],
+      },
+    ],
+  },
+  {
     key: 'settings',
     labelKey: 'modules.settings.title',
     icon: 'Settings',
@@ -1045,6 +1059,13 @@ export const PERMISSIONS_CONFIG: ModulePermission[] = [
         key: 'ai',
         labelKey: 'modules.settings.ai',
         actions: ['view', 'edit'],
+      },
+      {
+        // Settings > Fiscal devices: pairing a cash register gives it access
+        // to the company, so only explicitly chosen roles get this page.
+        key: 'fiscalDevices',
+        labelKey: 'modules.settings.fiscalDevices',
+        actions: ['view', 'create', 'delete'],
       },
     ],
   },
