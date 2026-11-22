@@ -81,7 +81,7 @@ export class MetaPixelPublicController {
     return {
       httpOnly: true,
       secure: isProduction,
-      sameSite: isProduction ? ('none' as const) : ('lax' as const),
+      sameSite: 'lax' as const,
       maxAge: 365 * 24 * 60 * 60 * 1000,
       path: '/',
       ...(isProduction && { domain: '.cortanasoft.com' }),

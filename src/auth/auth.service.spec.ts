@@ -499,14 +499,14 @@ describe('AuthService', () => {
   });
 
   describe('getCookieOptions', () => {
-    it('should return production options with secure=true and sameSite=none', () => {
+    it('should return production options with secure=true and sameSite=lax', () => {
       mockConfigService.get.mockReturnValue('production');
       const opts = service.getCookieOptions(false);
 
       expect(opts.httpOnly).toBe(true);
       expect(opts.secure).toBe(true);
-      // Cross-site cookie за .cortanasoft.com субдомейните (secure=true го изисква)
-      expect(opts.sameSite).toBe('none');
+      // 'lax': не тръгва с POST от чужд сайт, но тръгва при отваряне на линк отвън
+      expect(opts.sameSite).toBe('lax');
       expect(opts.domain).toBe('.cortanasoft.com');
     });
 

@@ -408,10 +408,14 @@ export class AuthService {
     const maxAge = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
 
     if (isProduction) {
+      // 'lax': бисквитката не тръгва с POST/PUT/DELETE от чужд сайт (CSRF), но
+      // тръгва при отваряне на линк отвън — нужно е за връщането от Евротръст
+      // и за линковете в имейлите; 'strict' би ги пратил на екрана за вход.
+      // Сайтът, API-то и чатът са под cortanasoft.com, т.е. един и същ site.
       return {
         httpOnly: true,
         secure: true,
-        sameSite: 'none' as const,
+        sameSite: 'lax' as const,
         maxAge,
         path: '/',
         domain: '.cortanasoft.com',
