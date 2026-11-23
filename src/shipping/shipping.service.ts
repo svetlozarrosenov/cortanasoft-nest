@@ -108,17 +108,27 @@ export class ShippingService {
           description: it.product.name,
           count: Number(it.quantity) || 1,
           price: Number(it.unitPrice) || undefined,
-          weight: it.product.weight != null ? Number(it.product.weight) || undefined : undefined,
+          weight:
+            it.product.weight != null
+              ? Number(it.product.weight) || undefined
+              : undefined,
         }));
     }
     const invoice = await this.prisma.invoice.findFirst({
-      where: { companyId, orderId: order.id, status: { not: 'CANCELLED' }, type: { in: ['REGULAR', 'FINAL'] } },
+      where: {
+        companyId,
+        orderId: order.id,
+        status: { not: 'CANCELLED' },
+        type: { in: ['REGULAR', 'FINAL'] },
+      },
       orderBy: { invoiceDate: 'desc' },
       select: { invoiceNumber: true, invoiceDate: true },
     });
     const dtoWithInvoice = {
       ...dto,
-      invoiceNum: invoice ? econtInvoiceRef(invoice.invoiceNumber, invoice.invoiceDate) : undefined,
+      invoiceNum: invoice
+        ? econtInvoiceRef(invoice.invoiceNumber, invoice.invoiceDate)
+        : undefined,
     };
 
     const shipment = await this.getProvider(dto.provider).createShipment(
@@ -132,13 +142,17 @@ export class ShippingService {
     // Наложен платеж = част от етикета: с НП > 0 продажбата става COD, а
     // етикет без НП върху COD продажба я връща на банков превод (чака се
     // плащане). Платена продажба не се пипа.
-    const codOnLabel = Number(dto.codAmount) > 0;
+    // An amount left in the form with cash on delivery switched off is not
+    // on the label.
+    const codOnLabel = dto.codEnabled !== false && Number(dto.codAmount) > 0;
     const paymentMethod =
-      codOnLabel && order.paymentMethod !== 'COD'
-        ? 'COD'
-        : !codOnLabel && order.paymentMethod === 'COD' && order.paymentStatus !== 'PAID'
-          ? 'BANK_TRANSFER'
-          : undefined;
+      order.paymentStatus === 'PAID'
+        ? undefined
+        : codOnLabel && order.paymentMethod !== 'COD'
+          ? 'COD'
+          : !codOnLabel && order.paymentMethod === 'COD'
+            ? 'BANK_TRANSFER'
+            : undefined;
     if (order.deliveryMethod !== dto.provider || paymentMethod) {
       await this.prisma.order.update({
         where: { id: order.id },
@@ -292,7 +306,10 @@ export class ShippingService {
  * Еконт: „номер на фактура (до 11 цифри) и дата (31.12.21)". Нашите номера
  * са вида 0000000010 → взимаме само цифрите (до 11) + датата във формат дд.мм.гг.
  */
-function econtInvoiceRef(invoiceNumber: string, invoiceDate: Date): string | undefined {
+function econtInvoiceRef(
+  invoiceNumber: string,
+  invoiceDate: Date,
+): string | undefined {
   const digits = invoiceNumber.replace(/\D/g, '').slice(-11);
   if (!digits) return undefined;
   const d = invoiceDate;
