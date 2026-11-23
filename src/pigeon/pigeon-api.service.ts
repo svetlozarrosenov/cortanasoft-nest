@@ -15,11 +15,14 @@ const BASE_URLS: Record<PigeonCredentials['mode'], string> = {
   live: 'https://api.pigeonexpress.com/v1',
 };
 
+/** Offices are read page by page; this many pages is far more than Pigeon has. */
+const MAX_OFFICE_PAGES = 20;
+
 /**
  * Кодове на допълнителните услуги (service_codes в заявката е обект, не
- * масив). Списъкът при Pigeon е динамичен (GET /additional-services); тези
- * три са от примерите в спецификацията им.
- * TODO(pigeon-codes): сверка с GET /additional-services при първите ключове.
+ * масив). Списъкът при Pigeon е динамичен (GET /additional-services).
+ * Checked against the sandbox on 2026-11-23: all three are accepted by
+ * calculate and create, although the SMS one is not in the listed services.
  */
 export const PIGEON_SERVICE = {
   cod: 'cod_amount',
@@ -176,16 +179,24 @@ export class PigeonApiService {
       postalCode?: string;
     } = {},
   ) {
-    const res = await this.request(creds, 'GET', '/offices', {
-      query: {
-        type: opts.type,
-        name: opts.name,
-        city_id: opts.cityId,
-        postal_code: opts.postalCode,
-        per_page: 100,
-      },
-    });
-    return (res.data || []) as any[];
+    // A page holds at most 100 and a big city has more offices and lockers
+    // than that, so the following pages are read too.
+    const all: any[] = [];
+    for (let page = 1; page <= MAX_OFFICE_PAGES; page++) {
+      const res = await this.request(creds, 'GET', '/offices', {
+        query: {
+          type: opts.type,
+          name: opts.name,
+          city_id: opts.cityId,
+          postal_code: opts.postalCode,
+          per_page: 100,
+          page,
+        },
+      });
+      all.push(...((res.data || []) as any[]));
+      if (page >= (Number(res.meta?.last_page) || 1)) break;
+    }
+    return all;
   }
 
   async getOffice(creds: PigeonCredentials, officeId: number) {
@@ -219,12 +230,18 @@ export class PigeonApiService {
 
   // ==================== Пратки ====================
 
+  /**
+   * [pickupAddress] is where the courier collects from when the sender hands
+   * over at an address: the calculation takes the address itself, it does not
+   * know the sender's saved addresses by id.
+   */
   async calculate(
     creds: PigeonCredentials,
     settings: PigeonSettings,
     params: PigeonShipmentParams,
+    pickupAddress?: PigeonAddressParams,
   ) {
-    const body = this.buildCalculateBody(settings, params);
+    const body = this.buildCalculateBody(settings, params, pickupAddress);
     const res = await this.request(creds, 'POST', '/shipments/calculate', {
       body,
     });
@@ -241,6 +258,16 @@ export class PigeonApiService {
     return res.data ?? {};
   }
 
+  /** The whole shipment, with what it costs (pricing.total and the fees). */
+  async getShipment(creds: PigeonCredentials, referenceNumber: string) {
+    const res = await this.request(
+      creds,
+      'GET',
+      `/shipments/${encodeURIComponent(referenceNumber)}`,
+    );
+    return res.data ?? null;
+  }
+
   async track(creds: PigeonCredentials, referenceNumber: string) {
     const res = await this.request(
       creds,
@@ -251,8 +278,8 @@ export class PigeonApiService {
   }
 
   /**
-   * До 100 номера на заявка. Отговорът е обект по номер (или масив) — всяка
-   * стойност е TrackingResponse или { error }. Нормализираме към Map.
+   * До 100 номера на заявка. Отговорът е обект по номер; всяка стойност е
+   * { found: true, …статус и история } или { found: false, error }.
    */
   async trackBulk(
     creds: PigeonCredentials,
@@ -366,12 +393,17 @@ export class PigeonApiService {
   private buildRouteAndServices(
     settings: PigeonSettings,
     params: PigeonShipmentParams,
+    pickupAddress?: PigeonAddressParams,
   ) {
     const pickup: Record<string, unknown> = {
       pickup_type: settings.pickupType,
     };
     if (settings.pickupType === 'address') {
-      if (settings.senderAddressId)
+      // Creating takes the saved address by id (none = the profile's default);
+      // calculating takes the address itself
+      if (pickupAddress)
+        pickup.pickup_address = this.buildAddress(pickupAddress);
+      else if (settings.senderAddressId)
         pickup.sender_address_id = settings.senderAddressId;
     } else if (settings.pickupOfficeId) {
       pickup.pickup_office_id = settings.pickupOfficeId;
@@ -417,9 +449,13 @@ export class PigeonApiService {
     };
   }
 
-  buildCalculateBody(settings: PigeonSettings, params: PigeonShipmentParams) {
+  buildCalculateBody(
+    settings: PigeonSettings,
+    params: PigeonShipmentParams,
+    pickupAddress?: PigeonAddressParams,
+  ) {
     // Изчислението ползва само city_id/street_id/street_number/postal_code от адреса
-    return this.buildRouteAndServices(settings, params);
+    return this.buildRouteAndServices(settings, params, pickupAddress);
   }
 
   buildShipmentBody(settings: PigeonSettings, params: PigeonShipmentParams) {
@@ -431,7 +467,7 @@ export class PigeonApiService {
       ...(params.inventoryItems?.length
         ? {
             inventory_items: params.inventoryItems.map((it) => ({
-              description: it.description.slice(0, 255),
+              description: it.description.slice(0, 200),
               quantity: it.quantity,
               ...(it.unitPrice != null
                 ? { unit_price: round2(it.unitPrice) }

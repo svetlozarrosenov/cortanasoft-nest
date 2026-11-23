@@ -381,6 +381,10 @@ export const ErrorMessages = {
     pigeonNotConfigured:
       'Pigeon Express не е конфигуриран. Въведете API ключ и секрет в Настройки > Куриери > Pigeon.',
     pigeonCancelFailed: 'Pigeon не позволи анулиране на пратката',
+    pigeonDimensionsRequired:
+      'Pigeon изисква дължина, ширина и височина на пратката',
+    pigeonNoSenderAddress:
+      'В профила ви в Pigeon няма запазен адрес на подател. Добавете адрес там или изберете предаване в офис.',
     activeShipmentExists: (shipmentNumber: string) =>
       `Продажбата вече има активна товарителница ${shipmentNumber}. Анулирайте я, за да издадете нова.`,
   },

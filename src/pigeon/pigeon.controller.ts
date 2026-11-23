@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Post,
@@ -77,7 +78,7 @@ export class PigeonController {
     @Param('cityId') cityId: string,
     @Query('name') name?: string,
   ) {
-    return this.pigeonService.getStreets(companyId, Number(cityId), name);
+    return this.pigeonService.getStreets(companyId, toId(cityId), name);
   }
 
   @Get('offices')
@@ -92,7 +93,7 @@ export class PigeonController {
     return this.pigeonService.getOffices(companyId, {
       type: type === 'office' || type === 'locker' ? type : undefined,
       name,
-      cityId: cityId ? Number(cityId) : undefined,
+      cityId: cityId ? toId(cityId) : undefined,
       postalCode,
     });
   }
@@ -103,7 +104,7 @@ export class PigeonController {
     @Param('companyId') companyId: string,
     @Param('officeId') officeId: string,
   ) {
-    return this.pigeonService.getOffice(companyId, Number(officeId));
+    return this.pigeonService.getOffice(companyId, toId(officeId));
   }
 
   @Get('lockers/:code/availability')
@@ -154,4 +155,13 @@ export class PigeonController {
     });
     return new StreamableFile(pdf);
   }
+}
+
+/** Pigeon's ids are whole numbers; anything else never reaches it. */
+function toId(value: string): number {
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new BadRequestException('Невалиден идентификатор');
+  }
+  return id;
 }

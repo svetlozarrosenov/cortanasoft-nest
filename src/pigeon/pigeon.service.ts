@@ -16,6 +16,8 @@ import {
 import {
   PigeonCredentials,
   PigeonSettings,
+  PigeonAddressParams,
+  PigeonInventoryItemParams,
   PigeonShipmentParams,
 } from './interfaces';
 import {
@@ -37,15 +39,50 @@ const PROVIDER = 'pigeon';
 const MASK = '••••••••';
 
 /**
- * Статуси на Pigeon → наши. Двата кода са от примерите в спецификацията;
- * останалите идват от GET /shipment-statuses и се допълват тук при първия
- * достъп до sandbox (TODO(pigeon-codes)). Непознат код се превежда по
- * текста (доставена/анулирана/върната), иначе остава „в транзит".
+ * Pigeon's statuses → ours: every code GET /shipment-statuses returned on
+ * 2026-11-23. Only "taken by the recipient" is delivered and only "returned"
+ * is returned; everything on the way, waiting in an office or locker, or in
+ * trouble stays "in transit" with Pigeon's own text shown next to it. A code
+ * Pigeon adds later is read from its text (see statusFromText).
  */
 export const PIGEON_STATUS_MAP: Record<string, ShipmentStatus> = {
   shipment_registered: 'CREATED',
+  shipment_awaiting_courier_pickup: 'CREATED',
   shipment_courier_assigned: 'IN_TRANSIT',
+  shipment_accepted_by_courier: 'IN_TRANSIT',
+  shipment_accepted_in_office: 'IN_TRANSIT',
+  shipment_left_in_locker: 'IN_TRANSIT',
+  shipment_in_sorting_center: 'IN_TRANSIT',
+  shipment_in_delivery: 'IN_TRANSIT',
+  shipment_delivery_attempt_failed: 'IN_TRANSIT',
+  shipment_delivery_problem: 'IN_TRANSIT',
+  shipment_delivered_to_office: 'IN_TRANSIT',
+  shipment_held_by_sender: 'IN_TRANSIT',
+  shipment_untracked: 'IN_TRANSIT',
+  shipment_locker_time_expired: 'IN_TRANSIT',
+  shipment_storage_expired: 'IN_TRANSIT',
+  shipment_abandoned: 'IN_TRANSIT',
+  shipment_awaiting_documents: 'IN_TRANSIT',
+  shipment_redirection_requested: 'IN_TRANSIT',
+  shipment_redirection_rejected: 'IN_TRANSIT',
+  shipment_redirected: 'IN_TRANSIT',
+  shipment_returning_to_sender: 'IN_TRANSIT',
+  shipment_lost: 'IN_TRANSIT',
+  shipment_found: 'IN_TRANSIT',
+  shipment_written_off: 'IN_TRANSIT',
+  complaint: 'IN_TRANSIT',
+  shipment_delivered_to_recipient: 'DELIVERED',
+  shipment_returned: 'RETURNED',
+  shipment_cancelled: 'CANCELLED',
 };
+
+/** The courier, an office or a locker has the parcel: it has left the sender. */
+const PIGEON_HANDED_OVER = new Set([
+  'shipment_courier_assigned',
+  'shipment_accepted_by_courier',
+  'shipment_accepted_in_office',
+  'shipment_left_in_locker',
+]);
 
 @Injectable()
 @ShippingCarrier()
@@ -108,8 +145,13 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
       receiverPhone: '0000000000',
     });
 
-    const data = await this.call(() =>
-      this.api.calculate(creds, settings, params),
+    const data = await this.call(async () =>
+      this.api.calculate(
+        creds,
+        settings,
+        params,
+        await this.pickupAddressOf(creds, settings),
+      ),
     );
     return this.toPriceResult(data, settings);
   }
@@ -124,17 +166,11 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
       receiverPhone: dto.receiverPhone,
     });
 
-    // Създаването не връща цена — питаме преди това (неуспехът не спира етикета)
-    let price: ReturnType<PigeonService['toPriceResult']> | null = null;
-    try {
-      price = this.toPriceResult(
-        await this.api.calculate(creds, settings, params),
-        settings,
-      );
-    } catch (err) {
-      this.logger.warn(
-        `Pigeon calculate before create failed: ${err instanceof Error ? err.message : err}`,
-      );
+    // The same address the price was calculated from, named by its id
+    if (settings.pickupType === 'address' && !settings.senderAddressId) {
+      settings.senderAddressId = (
+        await this.call(() => this.senderAddressOf(creds, settings))
+      ).id;
     }
 
     const result = await this.call(() =>
@@ -145,6 +181,31 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
       : null;
     if (!reference) {
       throw new BadRequestException('Pigeon не върна номер на пратка');
+    }
+
+    // Creating does not return the price; the shipment itself does, with the
+    // fees one by one. The label exists either way, so a failure here only
+    // leaves the cost empty.
+    let price: ReturnType<PigeonService['toPriceResult']> | null = null;
+    try {
+      const created = await this.api.getShipment(creds, reference);
+      price = this.toPriceResult(
+        {
+          shipping_price: created?.pricing?.courier_service,
+          total_price: created?.pricing?.total,
+          total_service_fees:
+            (Number(created?.pricing?.total) || 0) -
+            (Number(created?.pricing?.courier_service) || 0),
+          fees: created?.pricing?.fees,
+          currency: created?.cod?.currency,
+          service_type: created?.service_type,
+        },
+        settings,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Pigeon price of ${reference} not read: ${err instanceof Error ? err.message : err}`,
+      );
     }
     // Етикетът идва base64 в отговора, но не го пазим в базата — сервира се
     // през нашия endpoint (виж PigeonController.getLabel) при поискване.
@@ -187,7 +248,7 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
         shippingCost: price?.totalPrice ?? null,
         // Относителен път към нашия бекенд; фронтендът го разгъва с базовия URL
         pdfUrl: `/companies/${companyId}/shipping/pigeon/labels/${encodeURIComponent(reference)}`,
-        expectedDeliveryDate: null,
+        expectedDeliveryDate: await this.expectedDeliveryOf(creds, reference),
         trackingData: JSON.parse(
           JSON.stringify({
             carrier,
@@ -289,16 +350,19 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
     const text = String(tr?.status || last?.status || '');
     const deliveredAt = toDate(tr?.delivery_date);
 
-    const status: ShipmentStatus = deliveredAt
-      ? 'DELIVERED'
-      : (PIGEON_STATUS_MAP[code] ??
-        statusFromText(code, text) ??
-        (sorted.length > 1 ? 'IN_TRANSIT' : 'CREATED'));
+    // A known code decides. The delivery date and the text are only for a
+    // code Pigeon has added since.
+    const status: ShipmentStatus =
+      PIGEON_STATUS_MAP[code] ??
+      (deliveredAt
+        ? 'DELIVERED'
+        : (statusFromText(code, text) ??
+          (sorted.length > 1 ? 'IN_TRANSIT' : 'CREATED')));
 
-    const first = sorted[sorted.length - 1];
-    const courierTook = sorted.find(
-      (e) => String(e?.status_code) === 'shipment_courier_assigned',
-    );
+    // Oldest first: the moment the parcel first left the sender
+    const handedOver = [...sorted]
+      .reverse()
+      .find((e) => PIGEON_HANDED_OVER.has(String(e?.status_code)));
     const td = shipment.trackingData as any;
 
     return {
@@ -308,12 +372,8 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
         time: toDate(e?.created_at)?.toISOString() ?? null,
         description: [e?.status, e?.note].filter(Boolean).join(' — '),
       })),
-      sentAt: courierTook
-        ? toDate(courierTook.created_at)
-        : first
-          ? toDate(first.created_at)
-          : null,
-      deliveredAt,
+      sentAt: handedOver ? toDate(handedOver.created_at) : null,
+      deliveredAt: status === 'DELIVERED' ? deliveredAt : null,
       cod: payout
         ? {
             collectedAmount: payout.amount,
@@ -342,6 +402,10 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
         );
         return;
       }
+      // Pigeon refuses to cancel twice; a shipment it already has as
+      // cancelled is what we wanted
+      if (await this.isCancelledAtPigeon(creds, shipment.shipmentNumber))
+        return;
       throw new BadRequestException(
         `${ErrorMessages.shipping.pigeonCancelFailed}: ${err instanceof Error ? err.message : err}`,
       );
@@ -352,7 +416,10 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
 
   async getCities(companyId: string, name?: string, postalCode?: string) {
     const creds = await this.getCredentials(companyId);
-    return this.call(() => this.api.listCities(creds, { name, postalCode }));
+    const cities = await this.call(() =>
+      this.api.listCities(creds, { name, postalCode }),
+    );
+    return name ? bestCitiesFirst(cities, name) : cities;
   }
 
   async getStreets(companyId: string, cityId: number, name?: string) {
@@ -370,7 +437,32 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
     },
   ) {
     const creds = await this.getCredentials(companyId);
-    return this.call(() => this.api.listOffices(creds, opts));
+    const query = opts.name?.trim();
+    if (!query || query.length < 2 || opts.cityId) {
+      return this.call(() => this.api.listOffices(creds, opts));
+    }
+    // People look an office up by its town, and Pigeon's own search is by the
+    // office's name only: the offices of the towns the text matches are added
+    return this.call(async () => {
+      const [byName, cities] = await Promise.all([
+        this.api.listOffices(creds, opts),
+        this.api.listCities(creds, { name: query }),
+      ]);
+      const towns = bestCitiesFirst(cities, query)
+        .filter((c) => startsWithText(c?.name, query))
+        .slice(0, OFFICE_SEARCH_TOWNS);
+      const byTown = await Promise.all(
+        towns.map((c) =>
+          this.api.listOffices(creds, { type: opts.type, cityId: c.id }),
+        ),
+      );
+      const seen = new Set<number>();
+      return [...byTown.flat(), ...byName].filter((o) => {
+        if (seen.has(o?.id)) return false;
+        seen.add(o?.id);
+        return true;
+      });
+    });
   }
 
   async getOffice(companyId: string, officeId: number) {
@@ -419,13 +511,29 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
       where: { companyId },
     });
     if (!config) return null;
-    return { ...config, apiSecret: config.apiSecret ? MASK : null };
+    return this.maskConfig(config);
+  }
+
+  /**
+   * The form for a shipment reads the config too, so neither the secret nor
+   * the whole key leaves the server.
+   */
+  private maskConfig<
+    T extends { apiKey: string | null; apiSecret: string | null },
+  >(config: T): T {
+    return {
+      ...config,
+      apiKey: config.apiKey ? maskKey(config.apiKey) : null,
+      apiSecret: config.apiSecret ? MASK : null,
+    };
   }
 
   async updateConfig(companyId: string, dto: UpdatePigeonConfigDto) {
     const data: Record<string, unknown> = {};
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
-    if (dto.apiKey !== undefined) data.apiKey = dto.apiKey.trim();
+    // The masked key shown in the form comes back unchanged: keep the stored one
+    if (dto.apiKey !== undefined && !dto.apiKey.includes('•'))
+      data.apiKey = dto.apiKey.trim();
     if (
       dto.apiSecret !== undefined &&
       dto.apiSecret !== MASK &&
@@ -455,7 +563,7 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
       update: data,
       create: { ...(data as any), companyId },
     });
-    return { ...result, apiSecret: result.apiSecret ? MASK : null };
+    return this.maskConfig(result);
   }
 
   // ==================== Helpers ====================
@@ -567,6 +675,12 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
         : undefined;
     const description = 'description' in dto ? dto.description : undefined;
     const items = 'items' in dto ? dto.items : undefined;
+    // Pigeon prices by volume too: it refuses a package without all three
+    if (!dto.dimensionsL || !dto.dimensionsW || !dto.dimensionsH) {
+      throw new BadRequestException(
+        ErrorMessages.shipping.pigeonDimensionsRequired,
+      );
+    }
 
     return {
       orderNumber: who.orderNumber,
@@ -598,14 +712,11 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
         height: dto.dimensionsH || undefined,
         description: description || undefined,
       })),
+      // Pigeon requires a list of what is inside; without the sale's lines
+      // the description of the parcel stands for it
       inventoryItems: items?.length
-        ? items.map((it) => ({
-            description: it.description,
-            quantity: it.count,
-            unitPrice: it.price,
-            unitWeight: it.weight,
-          }))
-        : undefined,
+        ? items.map(toInventoryItem)
+        : [{ description: description || who.orderNumber, quantity: 1 }],
       codAmount,
       declaredValueAmount: declared,
       note: dto.note || undefined,
@@ -614,19 +725,20 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
 
   /** ShipmentCalculation → { totalPrice, разбивка } в един и същ формат за модала. */
   private toPriceResult(data: any, settings: PigeonSettings) {
-    const fees: Array<{ name: string; amount: number }> = Array.isArray(
-      data?.service_fees,
-    )
-      ? data.service_fees
-      : Array.isArray(data?.fees)
-        ? data.fees
-        : [];
+    const fees: Array<{ code?: string; name: string; amount: number }> =
+      Array.isArray(data?.service_fees)
+        ? data.service_fees
+        : Array.isArray(data?.fees)
+          ? data.fees
+          : [];
     const shipping = Number(data?.shipping_price) || 0;
     const total =
       Number(data?.total_price) ||
       shipping + (Number(data?.total_service_fees) || 0);
-    const declaredFee = fees.find((f) =>
-      /обявена|застрах|declared|insur/i.test(String(f?.name || '')),
+    const declaredFee = fees.find(
+      (f) =>
+        f?.code === 'insurance_required' ||
+        /обявена|застрах|declared|insur/i.test(String(f?.name || '')),
     );
     return {
       totalPrice: Math.round(total * 100) / 100,
@@ -645,9 +757,85 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
           description: String(f?.name || ''),
           price: Number(f?.amount) || 0,
         })),
+        // A calculation gives the fees as one sum; the shipment, once
+        // created, lists them one by one
+        ...(fees.length === 0 && Math.round((total - shipping) * 100) > 0
+          ? [
+              {
+                type: 'FEE',
+                description: 'Такси и допълнителни услуги',
+                price: Math.round((total - shipping) * 100) / 100,
+              },
+            ]
+          : []),
       ],
       raw: data,
     };
+  }
+
+  /**
+   * The sender's address for a price calculation, when the courier collects
+   * from an address: the saved address chosen in the settings, or the
+   * profile's default one.
+   */
+  private async pickupAddressOf(
+    creds: PigeonCredentials,
+    settings: PigeonSettings,
+  ): Promise<PigeonAddressParams | undefined> {
+    if (settings.pickupType !== 'address') return undefined;
+    const address = (await this.senderAddressOf(creds, settings)).address;
+    return {
+      cityId: Number(address.city_id),
+      streetId: address.street_id ?? undefined,
+      streetNumber: address.street_number ?? undefined,
+      postalCode: address.postal_code ?? undefined,
+    };
+  }
+
+  /**
+   * The saved address the courier collects from: the one chosen in the
+   * settings, otherwise the profile's default, otherwise its only one. Pigeon
+   * itself falls back only to a default, and a profile need not have one.
+   */
+  private async senderAddressOf(
+    creds: PigeonCredentials,
+    settings: PigeonSettings,
+  ): Promise<{ id: number; address: Record<string, any> }> {
+    const addresses = await this.api.listAddresses(creds);
+    const chosen = settings.senderAddressId
+      ? addresses.find((a) => a?.id === settings.senderAddressId)
+      : (addresses.find((a) => a?.is_default) ?? addresses[0]);
+    if (!chosen?.address?.city_id) {
+      throw new BadRequestException(
+        ErrorMessages.shipping.pigeonNoSenderAddress,
+      );
+    }
+    return chosen;
+  }
+
+  /** When Pigeon expects to deliver; known only from the tracking. */
+  private async expectedDeliveryOf(
+    creds: PigeonCredentials,
+    reference: string,
+  ): Promise<Date | null> {
+    try {
+      const tracked = await this.api.track(creds, reference);
+      return toDate(tracked?.expected_delivery_date);
+    } catch {
+      return null;
+    }
+  }
+
+  private async isCancelledAtPigeon(
+    creds: PigeonCredentials,
+    reference: string,
+  ): Promise<boolean> {
+    try {
+      const tracked = await this.api.track(creds, reference);
+      return tracked?.status_code === 'shipment_cancelled';
+    } catch {
+      return false;
+    }
   }
 
   /** Откъде тръгва пратката: офис/автомат на Pigeon или запазен адрес на подателя. */
@@ -721,6 +909,64 @@ export class PigeonService implements ShippingProvider, OnModuleInit {
     }
     return map;
   }
+}
+
+/** How many matching towns an office search looks into. */
+const OFFICE_SEARCH_TOWNS = 3;
+
+function startsWithText(value: unknown, text: string): boolean {
+  return String(value ?? '')
+    .toLowerCase()
+    .startsWith(text.trim().toLowerCase());
+}
+
+/** The exact name first, then names starting with the text, towns before villages. */
+function bestCitiesFirst<T extends { name?: string; type?: string }>(
+  cities: T[],
+  text: string,
+): T[] {
+  const query = text.trim().toLowerCase();
+  const rank = (c: T) => {
+    const name = String(c?.name ?? '').toLowerCase();
+    const town = c?.type === 'град' ? 0 : 1;
+    return (name === query ? 0 : name.startsWith(query) ? 2 : 4) + town;
+  };
+  return [...cities].sort((a, b) => rank(a) - rank(b));
+}
+
+/**
+ * A line of the sale as Pigeon lists it. Pigeon counts whole pieces only, so
+ * 1.5 m of cable goes as one item with the amount in its name and the price
+ * and weight of the whole line.
+ */
+function toInventoryItem(it: {
+  description: string;
+  count: number;
+  price?: number;
+  weight?: number;
+}): PigeonInventoryItemParams {
+  const count = Number(it.count) || 1;
+  if (Number.isInteger(count) && count >= 1) {
+    return {
+      description: it.description,
+      quantity: count,
+      unitPrice: it.price,
+      unitWeight: it.weight,
+    };
+  }
+  return {
+    description: `${it.description} (${count})`,
+    quantity: 1,
+    unitPrice: it.price != null ? it.price * count : undefined,
+    unitWeight:
+      it.weight != null
+        ? Math.round(it.weight * count * 1000) / 1000
+        : undefined,
+  };
+}
+
+function maskKey(key: string): string {
+  return key.length > 12 ? `${key.slice(0, 8)}••••${key.slice(-4)}` : MASK;
 }
 
 function statusFromText(code: string, text: string): ShipmentStatus | null {
