@@ -7,6 +7,7 @@ import { CompanyAccessGuard } from '../common/guards/company-access.guard';
 import { PermissionsGuard, RequireCreate, RequireEdit } from '../common/guards/permissions.guard';
 import { ExportService } from '../common/export/export.service';
 import type { ExportFormat } from '../common/export/export.service';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @Controller('companies/:companyId/employees')
 @UseGuards(JwtAuthGuard, CompanyAccessGuard)
@@ -71,8 +72,9 @@ export class CompanyEmployeesController {
     @Param('companyId') companyId: string,
     @Param('id') id: string,
     @Body() body: LeaveEmployeeDto,
+    @CurrentUser() user: { id: string },
   ) {
-    return this.employeesService.leave(companyId, id, body);
+    return this.employeesService.leave(companyId, id, body, user.id);
   }
 
   @Post(':id/return')

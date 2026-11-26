@@ -285,7 +285,14 @@ export class EmployeesService {
    * единствено в тази фирма — isActive е глобален и тенант не бива да гаси
    * достъпа му до друга фирма.
    */
-  async leave(companyId: string, userId: string, dto: LeaveEmployeeDto) {
+  async leave(companyId: string, userId: string, dto: LeaveEmployeeDto, actorId: string) {
+    // Marking yourself as left turns off your own login on the spot, and a
+    // company with a single administrator would be locked out for good.
+    if (userId === actorId) {
+      throw new BadRequestException(
+        'Не можете да отбележите себе си като напуснал. Това трябва да го направи друг администратор.',
+      );
+    }
     const userCompany = await this.requireSoleMembership(companyId, userId);
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.user.update({ where: { id: userId }, data: { isActive: false } });
